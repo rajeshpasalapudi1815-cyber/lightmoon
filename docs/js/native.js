@@ -16,6 +16,9 @@ export const deviceUnlock = isNativeApp ? plugins.DeviceUnlock ?? null : null;
 // Listens for "LightMoon" while the app is closed and opens it ready to talk (android/.../WakeWordPlugin.java).
 export const wakeWord = isNativeApp ? plugins.WakeWord ?? null : null;
 
+// Saves a file through Android's "Save to" screen; the app's web view can't download (FileSaverPlugin.java).
+export const fileSaver = isNativeApp ? plugins.FileSaver ?? null : null;
+
 // ---------- Talking: a speechSynthesis stand-in on Android text-to-speech ----------
 
 class NativeUtterance {

@@ -1,6 +1,6 @@
 // LightMoon app: runs entirely on this device. Chat, voice, memory, tasks, goals and reminders are all
 // handled here; the only thing sent over the internet is the conversation, to the AI service.
-import { isNativeApp, nativeAlarms, wakeWord } from './js/native.js'; // first: sets up voice in the Android app
+import { isNativeApp, nativeAlarms, wakeWord, fileSaver } from './js/native.js'; // first: sets up voice in the Android app
 import * as store from './js/store.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
@@ -657,6 +657,9 @@ async function pollReminders() {
     }
     if (!visible) return;
   }
+  // Never talk over the user: the microphone would take the reminder for part of their request.
+  // It is announced at the next check, a few seconds after they finish.
+  if (listener.capturing) return;
   const due = store.tasks.takeDueReminders();
   if (!due.length) return;
   const notified = await cloud.notifiedReminders(); // already shown as a phone notification while closed
@@ -1150,10 +1153,21 @@ function saveSettings(event) {
   }
 }
 
-function downloadBackup() {
+async function downloadBackup() {
+  const name = `lightmoon-backup-${today()}.json`;
+  if (fileSaver) {
+    // The Android app: Android's own "Save to" screen (its web view can't download files).
+    try {
+      const { saved } = await fileSaver.save({ name, mimeType: 'application/json', text: store.exportData() });
+      if (saved) note('Backup saved.');
+    } catch (err) {
+      $('#settingsError').textContent = err.message;
+    }
+    return;
+  }
   const link = el('a');
   link.href = URL.createObjectURL(new Blob([store.exportData()], { type: 'application/json' }));
-  link.download = `lightmoon-backup-${today()}.json`;
+  link.download = name;
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
 }
