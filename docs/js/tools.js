@@ -1,4 +1,4 @@
-// Tools the model can call to change Vega's memory, tasks and goals.
+// Tools the model can call to change LightMoon's memory, tasks and goals.
 import { memories, tasks, goals, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
 import { normalizeTime, localStamp, prettyTime } from './time.js';
 

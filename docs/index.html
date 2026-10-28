@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
-  <title>Vega</title>
+  <title>LightMoon</title>
   <meta name="description" content="Your personal AI assistant">
   <meta name="theme-color" content="#04070d">
   <link rel="manifest" href="manifest.webmanifest">
@@ -20,8 +20,8 @@
   <!-- Boot screen: first-run setup, then a tap to start (browsers need a tap before sound and the microphone). -->
   <div id="boot" class="boot">
     <div class="reactor reactor-lg" aria-hidden="true"><i></i><i></i><i></i><b></b></div>
-    <h1 class="boot-title">V.E.G.A.</h1>
-    <p class="boot-sub">Voice-Enabled Growth Assistant</p>
+    <h1 class="boot-title">LIGHTMOON</h1>
+    <p class="boot-sub">Your light in every phase</p>
 
     <form id="setupForm" class="setup" hidden>
       <p class="setup-intro">A few details first. Everything stays on this device.</p>
@@ -49,10 +49,10 @@
 
   <div id="app" class="app" hidden>
     <header class="topbar">
-      <div class="brand"><span class="brand-dot"></span><span id="brandName">VEGA</span></div>
+      <div class="brand"><span class="brand-dot"></span><span id="brandName">LIGHTMOON</span></div>
       <div class="topbar-right">
         <span id="clock" class="clock"></span>
-        <button id="handsFreeBtn" class="chip-btn" aria-pressed="false" title="Listen for the wake word">Wake word: off</button>
+        <button id="handsFreeBtn" class="chip-btn" aria-pressed="false" title="Listen for the wake word">Wake<span class="wide-only"> word</span>: off</button>
         <button id="panelsBtn" class="icon-btn only-mobile" aria-label="Tasks, goals and memory">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
         </button>

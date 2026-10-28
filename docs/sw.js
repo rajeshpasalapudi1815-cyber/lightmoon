@@ -1,5 +1,5 @@
-// Service worker: lets Vega install like an app, open without internet, and show reminder notifications.
-const CACHE = 'vega-v1';
+// Service worker: lets LightMoon install like an app, open without internet, and show reminder notifications.
+const CACHE = 'lightmoon-v1';
 const APP_FILES = [
   './',
   './index.html',

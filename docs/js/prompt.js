@@ -1,4 +1,4 @@
-// Builds the system prompt: Vega's personality plus a fresh snapshot of everything it knows.
+// Builds the system prompt: LightMoon's personality plus a fresh snapshot of everything it knows.
 import { profile, memories, tasks, goals } from './store.js';
 import { isPast, describeAgo } from './time.js';
 

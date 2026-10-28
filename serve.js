@@ -1,4 +1,4 @@
-// Optional: serves the Vega app from this computer at http://localhost:3000.
+// Optional: serves the LightMoon app from this computer at http://localhost:3000.
 // Not needed on your phone, which uses the published link instead.
 import http from 'node:http';
 import fs from 'node:fs';
@@ -42,12 +42,12 @@ const openBrowser = () => {
 
 server.on('error', err => {
   if (err.code !== 'EADDRINUSE') throw err;
-  console.error(`Port ${PORT} is already in use; Vega may already be running at ${url}.`);
+  console.error(`Port ${PORT} is already in use; LightMoon may already be running at ${url}.`);
   if (process.argv.includes('--open')) openBrowser();
   process.exit(1);
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`\n  Vega is running at ${url}\n  Press Ctrl+C to stop.\n`);
+  console.log(`\n  LightMoon is running at ${url}\n  Press Ctrl+C to stop.\n`);
   if (process.argv.includes('--open')) openBrowser();
 });

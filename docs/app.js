@@ -1,4 +1,4 @@
-// Vega app: runs entirely on this device. Chat, voice, memory, tasks, goals and reminders are all
+// LightMoon app: runs entirely on this device. Chat, voice, memory, tasks, goals and reminders are all
 // handled here; the only thing sent over the internet is the conversation, to the AI service.
 import * as store from './js/store.js';
 import { chat, briefing } from './js/brain.js';
@@ -22,7 +22,7 @@ const LANGUAGES = [
 ];
 // Most natural-sounding voices first: Edge's natural British voices, then Chrome's and Apple's.
 const PREFERRED_VOICES = ['Microsoft Ryan Online', 'Microsoft Thomas Online', 'Google UK English Male', 'Microsoft George', 'Daniel'];
-const PREFS_KEY = 'vega.prefs';
+const PREFS_KEY = 'assistant.prefs';
 const REMINDER_POLL_MS = 15_000;
 const LATE_REMINDER_MINUTES = 5;
 
@@ -38,8 +38,13 @@ function loadPrefs() {
   const lang = LANGUAGES.find(([code]) => code === navigator.language)?.[0] ?? 'en-US';
   const defaults = { voice: '', rate: 1, speak: true, lang, handsFree: false };
   try {
-    const saved = localStorage.getItem(PREFS_KEY) || localStorage.getItem('jarvis.prefs'); // carried over from the old name
-    return { ...defaults, ...JSON.parse(saved || '{}') };
+    // Move preferences saved under the app's earlier names.
+    for (const oldKey of ['vega.prefs', 'jarvis.prefs']) {
+      const old = localStorage.getItem(oldKey);
+      if (old !== null && localStorage.getItem(PREFS_KEY) === null) localStorage.setItem(PREFS_KEY, old);
+      localStorage.removeItem(oldKey);
+    }
+    return { ...defaults, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') };
   } catch {
     return defaults;
   }
@@ -60,7 +65,7 @@ function el(tag, className, text) {
   return node;
 }
 
-const assistantName = () => state?.profile.assistantName || 'Vega';
+const assistantName = () => state?.profile.assistantName || 'LightMoon';
 
 function addressWord() {
   const p = state?.profile;
@@ -85,14 +90,14 @@ function formatWhen(stamp) {
   return stamp.length === 10 ? day : `${day} ${date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
 }
 
-// A Google Calendar link for a reminder, so the phone can alert you even when Vega is closed.
+// A Google Calendar link for a reminder, so the phone can alert you even when LightMoon is closed.
 function calendarUrl(title, at) {
   const compact = stamp => `${stamp.replace(/[-:]/g, '')}00`;
   const end = localStamp(new Date(toDate(at).getTime() + 15 * 60_000));
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return 'https://calendar.google.com/calendar/render?action=TEMPLATE'
     + `&text=${encodeURIComponent(title)}&dates=${compact(at)}/${compact(end)}`
-    + `&details=${encodeURIComponent('Reminder from Vega')}&ctz=${encodeURIComponent(timeZone)}`;
+    + `&details=${encodeURIComponent('Reminder from LightMoon')}&ctz=${encodeURIComponent(timeZone)}`;
 }
 
 function calendarLink(className, label, title, at) {
@@ -109,7 +114,7 @@ async function notify(title, body) {
   try {
     // Android only allows notifications through the service worker.
     const registration = await navigator.serviceWorker?.getRegistration();
-    if (registration) await registration.showNotification(title, { body, icon: 'icons/icon-192.png', tag: 'vega-reminder' });
+    if (registration) await registration.showNotification(title, { body, icon: 'icons/icon-192.png', tag: 'lightmoon-reminder' });
     else new Notification(title, { body, icon: 'icons/icon-192.png' });
   } catch {
     // Notifications are a bonus; the spoken reminder still happens.
@@ -254,10 +259,13 @@ if ('speechSynthesis' in window) {
 
 // ---------- Listening (speech recognition) ----------
 
+// Speech recognition may write "LightMoon" as "light moon", "lightmoon" or "light-moon", so accept all of them.
 function wakeWords() {
-  const name = assistantName().toLowerCase();
-  // Speech recognition sometimes hears "Vega" as one of these.
-  return name === 'vega' ? ['vega', 'vegas', 'veega', 'vaega'] : [name];
+  const name = assistantName();
+  const spaced = name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  const words = new Set([name.toLowerCase(), spaced, spaced.replaceAll(' ', '-')]);
+  if (spaced === 'light moon') words.add('lite moon');
+  return [...words];
 }
 
 const listener = {
@@ -330,7 +338,7 @@ const listener = {
     if (final.trim()) this.heard(final.trim());
   },
 
-  // Wake-word mode: "Vega, what's on today?" runs straight away; "Vega." alone waits for the next phrase.
+  // Wake-word mode: "LightMoon, what's on today?" runs straight away; "LightMoon." alone waits for the next phrase.
   heard(text) {
     if (this.capturing) {
       this.capturing = false;
@@ -357,7 +365,7 @@ const listener = {
 
   onError(event) {
     const problems = {
-      'not-allowed': 'Microphone access is blocked. Allow the microphone for Vega in your browser or app settings, then try again.',
+      'not-allowed': 'Microphone access is blocked. Allow the microphone for LightMoon in your browser or app settings, then try again.',
       'service-not-allowed': 'Speech recognition is not available in this browser. Try Chrome or Edge.',
       'audio-capture': 'No microphone was found.',
       network: 'Speech recognition needs an internet connection.',
@@ -626,7 +634,7 @@ function saveSettings(event) {
 function downloadBackup() {
   const link = el('a');
   link.href = URL.createObjectURL(new Blob([store.exportData()], { type: 'application/json' }));
-  link.download = `vega-backup-${today()}.json`;
+  link.download = `lightmoon-backup-${today()}.json`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
 }
@@ -634,7 +642,7 @@ function downloadBackup() {
 async function restoreBackup(event) {
   const file = event.target.files[0];
   event.target.value = '';
-  if (!file || !confirm('Replace everything Vega knows on this device with this backup?')) return;
+  if (!file || !confirm('Replace everything LightMoon knows on this device with this backup?')) return;
   try {
     store.importData(await file.text());
   } catch (err) {
@@ -650,7 +658,7 @@ async function restoreBackup(event) {
 function paintHandsFree() {
   const button = $('#handsFreeBtn');
   button.setAttribute('aria-pressed', String(prefs.handsFree));
-  button.textContent = `Wake word: ${prefs.handsFree ? 'on' : 'off'}`;
+  button.replaceChildren('Wake', el('span', 'wide-only', ' word'), `: ${prefs.handsFree ? 'on' : 'off'}`);
 }
 
 function toggleHandsFree() {
@@ -718,7 +726,7 @@ function wireUp() {
     }
   });
 
-  // Phones pause background apps, so catch up on reminders when Vega comes back to the front.
+  // Phones pause background apps, so catch up on reminders when LightMoon comes back to the front.
   document.addEventListener('visibilitychange', () => {
     if (!started) return;
     if (!document.hidden) pollReminders();

@@ -1,4 +1,4 @@
-// Everything Vega knows is stored on this device, in the browser's local storage.
+// Everything LightMoon knows is stored on this device, in the browser's local storage.
 // Nothing here leaves the device except the conversation sent to the AI service.
 import { localStamp, today } from './time.js';
 
@@ -11,8 +11,9 @@ export const DEFAULT_AI = {
   fallbackModel: 'llama-3.1-8b-instant',
 };
 
-const DATA_KEY = 'vega.data.v1';
-const AI_KEY = 'vega.ai'; // kept apart from the data so backups never contain the API key
+// Storage keys don't use the app's name, so renaming the assistant never strands data.
+const DATA_KEY = 'assistant.data.v1';
+const AI_KEY = 'assistant.ai'; // kept apart from the data so backups never contain the API key
 const MAX_MESSAGES = 400;
 
 const blank = () => ({
@@ -37,7 +38,7 @@ function writeJson(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (err) {
-    console.error('Vega could not save to this device:', err);
+    console.error('LightMoon could not save to this device:', err);
   }
 }
 
@@ -56,22 +57,28 @@ function normalize(saved) {
   };
 }
 
-// Carry over anything saved before the app was renamed from Jarvis to Vega.
-function migrateOldName() {
+// Earlier versions (named Vega, and before that Jarvis) stored data under their own names.
+// Carry it over once, dropping the old default name so the current one applies.
+const OLD_PREFIXES = ['vega', 'jarvis'];
+const OLD_DEFAULT_NAMES = ['Vega', 'Jarvis'];
+
+function migrateOldKeys() {
   try {
-    for (const [oldKey, newKey] of [['jarvis.data.v1', DATA_KEY], ['jarvis.ai', AI_KEY]]) {
-      const old = readJson(oldKey);
-      if (old === null) continue;
-      if (old.settings?.assistant_name === 'Jarvis') delete old.settings.assistant_name; // adopt the new default name
-      if (localStorage.getItem(newKey) === null) writeJson(newKey, old);
-      localStorage.removeItem(oldKey);
+    for (const prefix of OLD_PREFIXES) {
+      for (const [oldKey, newKey] of [[`${prefix}.data.v1`, DATA_KEY], [`${prefix}.ai`, AI_KEY]]) {
+        const old = readJson(oldKey);
+        if (old === null) continue;
+        if (OLD_DEFAULT_NAMES.includes(old.settings?.assistant_name)) delete old.settings.assistant_name;
+        if (localStorage.getItem(newKey) === null) writeJson(newKey, old);
+        localStorage.removeItem(oldKey);
+      }
     }
   } catch {
     // Storage unavailable: nothing to migrate.
   }
 }
 
-migrateOldName();
+migrateOldKeys();
 let data = normalize(readJson(DATA_KEY));
 
 function save() {
@@ -112,7 +119,7 @@ export function profile() {
   return {
     userName: settings.get('user_name'),
     address: settings.get('address', 'sir'),
-    assistantName: settings.get('assistant_name', 'Vega'),
+    assistantName: settings.get('assistant_name', 'LightMoon'),
   };
 }
 
@@ -239,7 +246,7 @@ export function snapshot() {
 }
 
 export function exportData() {
-  return JSON.stringify({ app: 'vega', version: 1, exportedAt: new Date().toISOString(), ...data }, null, 2);
+  return JSON.stringify({ app: 'lightmoon', version: 1, exportedAt: new Date().toISOString(), ...data }, null, 2);
 }
 
 export function importData(text) {
@@ -249,7 +256,7 @@ export function importData(text) {
   } catch {
     parsed = null;
   }
-  if (!['vega', 'jarvis'].includes(parsed?.app)) throw new Error("That file isn't a Vega backup.");
+  if (!['lightmoon', ...OLD_PREFIXES].includes(parsed?.app)) throw new Error("That file isn't a LightMoon backup.");
   data = normalize(parsed);
   save();
 }

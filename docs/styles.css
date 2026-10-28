@@ -359,3 +359,7 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
 @media (max-width: 860px) {
   .panels { top: calc(59px + env(safe-area-inset-top)); }
 }
+
+@media (max-width: 420px) {
+  .wide-only { display: none; }
+}

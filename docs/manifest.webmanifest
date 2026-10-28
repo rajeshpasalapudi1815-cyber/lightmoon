@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "Vega",
-  "short_name": "Vega",
+  "name": "LightMoon",
+  "short_name": "LightMoon",
   "description": "Your personal AI assistant",
   "start_url": "./",
   "scope": "./",

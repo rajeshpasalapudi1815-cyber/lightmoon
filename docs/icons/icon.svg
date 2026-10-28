@@ -1,7 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#3fd8ff" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#3fd8ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="lit" x1="0" x2="1">
+      <stop offset="0" stop-color="#effcff"/>
+      <stop offset="1" stop-color="#7fe4ff"/>
+    </linearGradient>
+    <clipPath id="moon"><circle cx="256" cy="256" r="113"/></clipPath>
+    <mask id="crescent">
+      <rect width="512" height="512" fill="#fff"/>
+      <circle cx="307" cy="220" r="97" fill="#000"/>
+    </mask>
+  </defs>
   <rect width="512" height="512" rx="112" fill="#04070d"/>
-  <circle cx="256" cy="256" r="170" fill="none" stroke="#3fd8ff" stroke-width="14" stroke-dasharray="120 40" opacity=".9"/>
-  <circle cx="256" cy="256" r="122" fill="none" stroke="#3fd8ff" stroke-width="6" opacity=".5"/>
-  <circle cx="256" cy="256" r="64" fill="#3fd8ff"/>
-  <circle cx="256" cy="256" r="34" fill="#effcff"/>
+  <circle cx="256" cy="256" r="200" fill="url(#glow)"/>
+  <circle cx="256" cy="256" r="184" fill="none" stroke="#3fd8ff" stroke-width="11" stroke-dasharray="70 26" opacity=".7"/>
+  <circle cx="307" cy="220" r="97" fill="#3fd8ff" opacity=".1" clip-path="url(#moon)"/>
+  <circle cx="256" cy="256" r="113" fill="url(#lit)" mask="url(#crescent)"/>
+  <circle cx="358" cy="143" r="6" fill="#effcff"/>
+  <circle cx="399" cy="205" r="4" fill="#effcff"/>
 </svg>

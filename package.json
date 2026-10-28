@@ -1,8 +1,8 @@
 {
-  "name": "vega",
+  "name": "lightmoon",
   "version": "0.2.0",
   "private": true,
-  "description": "Vega, a personal AI assistant that runs entirely on your phone or computer: voice, memory, coaching, tasks and reminders.",
+  "description": "LightMoon, a personal AI assistant that runs entirely on your phone or computer: voice, memory, coaching, tasks and reminders.",
   "type": "module",
   "scripts": {
     "start": "node serve.js",
