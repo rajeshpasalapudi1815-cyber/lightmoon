@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Vega</title>
+  <meta name="description" content="Your personal AI assistant">
+  <meta name="theme-color" content="#04070d">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-state="idle">
+
+  <!-- Boot screen: first-run setup, then a tap to start (browsers need a tap before sound and the microphone). -->
+  <div id="boot" class="boot">
+    <div class="reactor reactor-lg" aria-hidden="true"><i></i><i></i><i></i><b></b></div>
+    <h1 class="boot-title">V.E.G.A.</h1>
+    <p class="boot-sub">Voice-Enabled Growth Assistant</p>
+
+    <form id="setupForm" class="setup" hidden>
+      <p class="setup-intro">A few details first. Everything stays on this device.</p>
+      <label>Your name
+        <input name="userName" required maxlength="60" autocomplete="given-name">
+      </label>
+      <label>How should I address you?
+        <select name="address">
+          <option value="sir">Sir</option>
+          <option value="ma'am">Ma'am</option>
+          <option value="boss">Boss</option>
+          <option value="name">By my name</option>
+        </select>
+      </label>
+      <label id="keyField">Groq API key
+        <input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_...">
+        <small>Free at <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>. Stored only on this device.</small>
+      </label>
+      <button class="btn-primary" type="submit">Save and start</button>
+      <p class="form-error" id="setupError" role="alert"></p>
+    </form>
+
+    <button id="bootBtn" class="btn-primary" hidden>Initialize</button>
+  </div>
+
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="brand"><span class="brand-dot"></span><span id="brandName">VEGA</span></div>
+      <div class="topbar-right">
+        <span id="clock" class="clock"></span>
+        <button id="handsFreeBtn" class="chip-btn" aria-pressed="false" title="Listen for the wake word">Wake word: off</button>
+        <button id="panelsBtn" class="icon-btn only-mobile" aria-label="Tasks, goals and memory">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+        </button>
+        <button id="settingsBtn" class="icon-btn" aria-label="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="stage">
+        <div class="core-wrap">
+          <button id="core" class="reactor" aria-label="Tap to talk"><i></i><i></i><i></i><b></b></button>
+          <p id="status" class="status" aria-live="polite">Standing by</p>
+        </div>
+        <div id="transcript" class="transcript" aria-live="polite"></div>
+        <form id="composer" class="composer">
+          <input id="input" autocomplete="off" placeholder="Type a message, or tap the core to talk">
+          <button type="button" id="micBtn" class="icon-btn mic" aria-label="Talk">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          </button>
+          <button type="submit" class="icon-btn send" aria-label="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </form>
+      </section>
+
+      <aside id="panels" class="panels">
+        <div class="tabs" role="tablist">
+          <button role="tab" data-tab="tasks" aria-selected="true">Tasks <span id="taskCount" class="count" hidden></span></button>
+          <button role="tab" data-tab="goals" aria-selected="false">Goals</button>
+          <button role="tab" data-tab="memory" aria-selected="false">Memory</button>
+        </div>
+        <div class="tab-body" data-panel="tasks">
+          <ul id="taskList" class="list"></ul>
+          <div id="doneList"></div>
+        </div>
+        <div class="tab-body" data-panel="goals" hidden><ul id="goalList" class="list"></ul></div>
+        <div class="tab-body" data-panel="memory" hidden><ul id="memoryList" class="list"></ul></div>
+      </aside>
+    </main>
+  </div>
+
+  <dialog id="settings" class="settings">
+    <form id="settingsForm">
+      <h2>Settings</h2>
+      <label>Your name <input name="userName" maxlength="60"></label>
+      <label>Address me as
+        <select name="address">
+          <option value="sir">Sir</option>
+          <option value="ma'am">Ma'am</option>
+          <option value="boss">Boss</option>
+          <option value="name">By my name</option>
+        </select>
+      </label>
+      <label>Assistant name (also the wake word) <input name="assistantName" maxlength="30"></label>
+      <label>Voice
+        <span class="row">
+          <select name="voice" id="voiceSelect"></select>
+          <button type="button" id="testVoice" class="btn-ghost">Test</button>
+        </span>
+      </label>
+      <label>Speaking speed <input type="range" name="rate" min="0.8" max="1.4" step="0.05"></label>
+      <label class="check"><input type="checkbox" name="speak"> Speak replies out loud</label>
+      <label>Listening language <select name="lang" id="langSelect"></select></label>
+      <label>API key <input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Leave blank to keep the current key"></label>
+
+      <details class="advanced">
+        <summary>AI brain (advanced)</summary>
+        <label>API address <input name="baseUrl" spellcheck="false" inputmode="url"></label>
+        <label>Model <input name="model" spellcheck="false"></label>
+        <label>Backup model (used when the free limit is hit) <input name="fallbackModel" spellcheck="false"></label>
+        <button type="button" id="resetAi" class="btn-ghost">Reset to Groq defaults</button>
+      </details>
+
+      <div class="data-box">
+        <span class="field-label">Your data</span>
+        <span class="row">
+          <button type="button" id="exportBtn" class="btn-ghost">Download backup</button>
+          <button type="button" id="importBtn" class="btn-ghost">Restore backup</button>
+          <input type="file" id="importFile" accept=".json,application/json" hidden>
+        </span>
+        <small>Everything is stored only on this device. Backups don't include your API key.</small>
+      </div>
+
+      <p id="modelInfo" class="muted"></p>
+      <p id="settingsError" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="cancelSettings" class="btn-ghost">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

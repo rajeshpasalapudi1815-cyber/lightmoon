@@ -1,0 +1,57 @@
+// Service worker: lets Vega install like an app, open without internet, and show reminder notifications.
+const CACHE = 'vega-v1';
+const APP_FILES = [
+  './',
+  './index.html',
+  './styles.css',
+  './app.js',
+  './js/store.js',
+  './js/brain.js',
+  './js/tools.js',
+  './js/prompt.js',
+  './js/time.js',
+  './manifest.webmanifest',
+  './icons/icon.svg',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+];
+const NETWORK_TIMEOUT_MS = 3000;
+
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_FILES)).then(() => self.skipWaiting()));
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))
+      .then(() => self.clients.claim()),
+  );
+});
+
+// Network first, so updates arrive straight away; the cached copy keeps the app working offline.
+self.addEventListener('fetch', event => {
+  const { request } = event;
+  if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+  event.respondWith(
+    (async () => {
+      const cache = await caches.open(CACHE);
+      try {
+        const response = await fetch(request, { signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS) });
+        if (response.ok) cache.put(request, response.clone());
+        return response;
+      } catch {
+        return (await cache.match(request, { ignoreSearch: true })) || (await cache.match('./index.html')) || Response.error();
+      }
+    })(),
+  );
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windows =>
+      windows.length ? windows[0].focus() : self.clients.openWindow('./'),
+    ),
+  );
+});

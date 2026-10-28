@@ -1,0 +1,165 @@
+// Tools the model can call to change Vega's memory, tasks and goals.
+import { memories, tasks, goals, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
+import { normalizeTime, localStamp, prettyTime } from './time.js';
+
+function tool(name, description, properties, required = []) {
+  return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
+}
+
+const ID = { type: 'integer', description: 'The id shown as [#id] in your context.' };
+
+export const TOOLS = [
+  tool(
+    'remember',
+    'Save a lasting fact about the user: a preference, a person in their life, a routine, an ambition or an important detail. Skip small talk and facts you already have.',
+    {
+      content: { type: 'string', description: 'The fact as a short third-person sentence, e.g. "Prefers to work out in the morning."' },
+      category: { type: 'string', enum: MEMORY_CATEGORIES },
+    },
+    ['content', 'category'],
+  ),
+  tool('forget', 'Delete a saved fact that is wrong or that the user asks you to forget.', { id: ID }, ['id']),
+  tool(
+    'add_task',
+    'Add a to-do. Set remind_at when the user wants to be reminded at a particular time.',
+    {
+      title: { type: 'string', description: 'Short task title, e.g. "Call Mom".' },
+      due_at: { type: 'string', description: 'Optional due date (YYYY-MM-DD) or time (YYYY-MM-DDTHH:MM), local time.' },
+      remind_at: { type: 'string', description: 'Optional reminder time, local, format YYYY-MM-DDTHH:MM.' },
+    },
+    ['title'],
+  ),
+  tool('complete_task', 'Mark a task as done.', { id: ID }, ['id']),
+  tool('delete_task', 'Delete a task the user no longer wants.', { id: ID }, ['id']),
+  tool(
+    'add_goal',
+    'Start tracking a goal the user wants to achieve.',
+    {
+      title: { type: 'string', description: 'The goal, e.g. "Run 5 km without stopping".' },
+      why: { type: 'string', description: 'Why it matters to them, if they said.' },
+      target_date: { type: 'string', description: 'Optional target date, YYYY-MM-DD.' },
+    },
+    ['title'],
+  ),
+  tool(
+    'log_goal_progress',
+    'Record a check-in when the user reports progress, effort or a setback on one of their goals.',
+    {
+      goal_id: ID,
+      note: { type: 'string', description: 'What happened, briefly.' },
+      rating: { type: 'integer', minimum: 1, maximum: 5, description: 'Optional: how it went, from 1 (badly) to 5 (great).' },
+    },
+    ['goal_id', 'note'],
+  ),
+  tool(
+    'set_goal_status',
+    'Mark a goal achieved or dropped, or make it active again.',
+    { goal_id: ID, status: { type: 'string', enum: GOAL_STATUSES } },
+    ['goal_id', 'status'],
+  ),
+];
+
+function toId(value) {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) throw new Error(`"${value}" is not a valid id.`);
+  return id;
+}
+
+function toText(value, field, max) {
+  const text = String(value ?? '').trim();
+  if (!text) throw new Error(`${field} is required.`);
+  return text.slice(0, max);
+}
+
+function toTime(value, field, options) {
+  if (value == null || value === '') return null;
+  const stamp = normalizeTime(value, options);
+  if (!stamp) throw new Error(`Could not read ${field} "${value}". Use YYYY-MM-DDTHH:MM.`);
+  return stamp;
+}
+
+function findTask(id) {
+  const task = tasks.get(toId(id));
+  if (!task) throw new Error(`There is no task #${id}.`);
+  return task;
+}
+
+function findGoal(id) {
+  const goal = goals.get(toId(id));
+  if (!goal) throw new Error(`There is no goal #${id}.`);
+  return goal;
+}
+
+// Each handler returns a short summary (shown as a chip under the reply), or an object with extras.
+const handlers = {
+  remember({ content, category }) {
+    const fact = toText(content, 'content', 300);
+    memories.add(fact, MEMORY_CATEGORIES.includes(category) ? category : 'other');
+    return `Remembered: ${fact}`;
+  },
+
+  forget({ id }) {
+    if (!memories.remove(toId(id))) throw new Error(`There is no saved fact #${id}.`);
+    return 'Forgot a saved fact';
+  },
+
+  add_task({ title, due_at, remind_at }) {
+    const name = toText(title, 'title', 200);
+    const remindAt = toTime(remind_at, 'remind_at', { requireTime: true });
+    if (remindAt && remindAt < localStamp()) {
+      throw new Error(`remind_at ${remindAt} is in the past; it is now ${localStamp()}.`);
+    }
+    tasks.add({ title: name, dueAt: toTime(due_at, 'due_at'), remindAt });
+    if (!remindAt) return `Task added: ${name}`;
+    return { text: `Reminder set: ${name}, ${prettyTime(remindAt)}`, calendar: { title: name, at: remindAt } };
+  },
+
+  complete_task({ id }) {
+    const task = findTask(id);
+    tasks.complete(task.id);
+    return `Done: ${task.title}`;
+  },
+
+  delete_task({ id }) {
+    const task = findTask(id);
+    tasks.remove(task.id);
+    return `Deleted: ${task.title}`;
+  },
+
+  add_goal({ title, why, target_date }) {
+    const name = toText(title, 'title', 200);
+    goals.add({
+      title: name,
+      why: why ? String(why).trim().slice(0, 300) : null,
+      targetDate: toTime(target_date, 'target_date')?.slice(0, 10) ?? null,
+    });
+    return `New goal: ${name}`;
+  },
+
+  log_goal_progress({ goal_id, note, rating }) {
+    const goal = findGoal(goal_id);
+    const score = Number(rating);
+    goals.logProgress(goal.id, toText(note, 'note', 300), Number.isInteger(score) && score >= 1 && score <= 5 ? score : null);
+    return `Progress logged: ${goal.title}`;
+  },
+
+  set_goal_status({ goal_id, status }) {
+    if (!GOAL_STATUSES.includes(status)) throw new Error(`status must be one of: ${GOAL_STATUSES.join(', ')}.`);
+    const goal = findGoal(goal_id);
+    goals.setStatus(goal.id, status);
+    const verb = { achieved: 'Goal achieved', dropped: 'Goal dropped', active: 'Goal reactivated' }[status];
+    return `${verb}: ${goal.title}`;
+  },
+};
+
+export function runTool(name, rawArgs) {
+  if (!Object.hasOwn(handlers, name)) return { ok: false, error: `Unknown tool "${name}".` };
+  try {
+    const args = typeof rawArgs === 'string' ? JSON.parse(rawArgs || '{}') : (rawArgs ?? {});
+    const out = handlers[name](args);
+    const action = typeof out === 'string' ? { text: out } : out;
+    return { ok: true, result: action.text, action };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
