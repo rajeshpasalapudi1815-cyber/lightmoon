@@ -4,6 +4,7 @@ import * as store from './js/store.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
 import * as cloud from './js/cloud.js';
+import { reminderLine } from './js/announce.js';
 import { chat, briefing } from './js/brain.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 
@@ -70,7 +71,11 @@ function readLaunchParams() {
   // Apps often repeat the title as the text, or the link inside the text; keep each piece once.
   const shared = [title !== text && title, text, !text.includes(url) && url].filter(Boolean);
   if (location.search) history.replaceState(null, '', location.pathname);
-  return { action: params.get('action'), shared: shared.join('\n').slice(0, MAX_SHARED_CHARS) };
+  return {
+    action: params.get('action'),
+    reminder: params.get('reminder'), // opened by tapping a reminder notification
+    shared: shared.join('\n').slice(0, MAX_SHARED_CHARS),
+  };
 }
 
 function savePrefs() {
@@ -600,16 +605,32 @@ async function pollReminders() {
   const notified = await cloud.notifiedReminders(); // already shown as a phone notification while closed
   for (const reminder of due.filter(r => !notified[r.id])) {
     const minutesLate = (Date.now() - toDate(reminder.remind_at).getTime()) / 60_000;
-    const late = minutesLate > LATE_REMINDER_MINUTES;
-    addMessage('reminder', late ? `Missed reminder (${formatWhen(reminder.remind_at)}): ${reminder.title}` : `Reminder: ${reminder.title}`);
-    speaker.speak(
-      late
-        ? `${addressWord()}, you had a reminder earlier: ${reminder.title}.`
-        : `Pardon the interruption, ${addressWord()}. A reminder: ${reminder.title}.`,
-      { force: true },
-    );
-    if (document.hidden) notify(`${assistantName()} reminder`, reminder.title);
+    const line = sayReminder(reminder);
+    if (minutesLate > LATE_REMINDER_MINUTES) {
+      addMessage('reminder', `Missed reminder (${formatWhen(reminder.remind_at)}): ${reminder.title}`);
+      speaker.speak(`${addressWord()}, you missed a reminder from ${formatWhen(reminder.remind_at)}. ${line}`, { force: true });
+    } else {
+      addMessage('reminder', line);
+      speaker.speak(line, { force: true });
+    }
+    if (document.hidden) notify(`${assistantName()} reminder`, line);
   }
+  applyState();
+}
+
+const sayReminder = task => reminderLine(task, { address: state.profile.address, user_name: state.profile.userName });
+
+// Opened from a reminder notification: say the reminder out loud.
+async function announceReminder(id) {
+  let task = store.tasks.get(id);
+  if (!task) {
+    await cloud.syncNow(); // it may have been set on another device
+    task = store.tasks.get(id);
+  }
+  const line = task ? sayReminder(task) : `${addressWord()}, you have a reminder.`;
+  if (task) store.tasks.markReminded(task.id);
+  addMessage('reminder', line);
+  speaker.speak(line, { force: true });
   applyState();
 }
 
@@ -853,6 +874,7 @@ async function saveNewPin() {
   error.textContent = '';
   await paintLockSettings();
   note(`App lock is on. ${assistantName()} will ask for your PIN when it opens and after a few minutes away.`);
+  cloud.refreshNotificationPrivacy();
 }
 
 async function addFingerprint() {
@@ -869,6 +891,7 @@ function turnLockOff() {
   if (!confirm(`Turn off the app lock? Anyone using this phone could open ${assistantName()}.`)) return;
   lock.disable();
   paintLockSettings();
+  cloud.refreshNotificationPrivacy();
 }
 
 function showLock() {
@@ -1179,7 +1202,10 @@ function start({ auto = false } = {}) {
   // Opened from a home-screen shortcut or the share sheet: do that instead of the usual briefing.
   // Otherwise brief (or greet), then start listening if that setting is on.
   listener.autoStarted = auto;
-  if (launch.shared) {
+  if (launch.reminder) {
+    listenWhenFree = prefs.listenOnOpen; // say the reminder, then listen in case there's a reply
+    announceReminder(launch.reminder);
+  } else if (launch.shared) {
     offerShared(launch.shared);
   } else if (launch.action === 'task') {
     input.value = 'Add a task: ';
@@ -1215,6 +1241,8 @@ function boot() {
     // A cloud reminder arrived while the app is open: announce it here instead of as a notification.
     navigator.serviceWorker.addEventListener('message', event => {
       if (event.data?.type === 'reminders-due' && started) pollReminders();
+      // A reminder notification was tapped while the app was already running in the background.
+      if (event.data?.type === 'speak-reminder' && started && !locked) announceReminder(event.data.id);
     });
   }
   navigator.storage?.persist?.().catch(() => {});
@@ -1232,6 +1260,7 @@ function boot() {
   } else if (soundAllowedWithoutTap()) {
     start({ auto: true });
   } else {
+    if (launch.reminder) $('#bootBtn').textContent = 'Hear reminder';
     $('#bootBtn').hidden = false;
     $('#bootBtn').focus();
   }

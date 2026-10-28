@@ -25,11 +25,16 @@ export const TOOLS = [
   tool('forget', 'Delete a saved fact that is wrong or that the user asks you to forget.', { id: ID }, ['id']),
   tool(
     'add_task',
-    'Add a to-do. Set remind_at when the user wants to be reminded at a particular time.',
+    'Add a to-do. Set remind_at when the user wants to be reminded at a particular time, and then also write announcement.',
     {
       title: { type: 'string', description: 'Short task title, e.g. "Call Mom".' },
       due_at: { type: 'string', description: 'Optional due date (YYYY-MM-DD) or time (YYYY-MM-DDTHH:MM), local time.' },
       remind_at: { type: 'string', description: 'Optional reminder time, local, format YYYY-MM-DDTHH:MM.' },
+      announcement: {
+        type: 'string',
+        description: 'With remind_at: the one short sentence you will say out loud when the reminder goes off, addressing the user as they like, '
+          + 'e.g. "Boss, you have a meeting at 5 o\'clock." or "Sir, time to call your mom." Speak as at that moment, not as now.',
+      },
     },
     ['title'],
   ),
@@ -119,13 +124,14 @@ const handlers = {
     return 'Forgot a saved fact';
   },
 
-  add_task({ title, due_at, remind_at }) {
+  add_task({ title, due_at, remind_at, announcement }) {
     const name = toText(title, 'title', 200);
     const remindAt = toTime(remind_at, 'remind_at', { requireTime: true });
     if (remindAt && remindAt < localStamp()) {
       throw new Error(`remind_at ${remindAt} is in the past; it is now ${localStamp()}.`);
     }
-    tasks.add({ title: name, dueAt: toTime(due_at, 'due_at'), remindAt });
+    const announce = remindAt && announcement ? String(announcement).trim().slice(0, 200) || null : null;
+    tasks.add({ title: name, dueAt: toTime(due_at, 'due_at'), remindAt, announce });
     if (!remindAt) return `Task added: ${name}`;
     return { text: `Reminder set: ${name}, ${prettyTime(remindAt)}`, calendar: { title: name, at: remindAt } };
   },

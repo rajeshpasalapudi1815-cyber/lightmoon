@@ -2,6 +2,8 @@
 // between your devices. The cloud only ever stores reminder times and data encrypted with the sync code;
 // reminder titles and the code itself never leave the device.
 import * as store from './store.js';
+import * as lock from './lock.js';
+import { reminderLine } from './announce.js';
 import { idbGet, idbSet } from './idb.js';
 import { newSyncCode, normalizeCode, spaceIdFor, keyFor, encryptJson, decryptJson } from './vault.js';
 
@@ -83,10 +85,17 @@ async function api(method, path, body) {
 
 // The service worker shows notifications while the app is closed, so it needs the reminder titles
 // (kept on this device) and, with sync, the means to read reminders made on other devices.
+// With the app lock on, notifications keep the reminder's words off the lock screen.
 async function shareWithWorker() {
-  await idbSet('cloud', { url: cloudUrl(), spaceId: config.spaceId, key: await getSyncKey() });
-  await idbSet('reminders', store.tasks.remindersSince(Date.now() - KEEP_RECENT_REMINDERS_MS));
+  await idbSet('cloud', { url: cloudUrl(), spaceId: config.spaceId, key: await getSyncKey(), private: lock.isEnabled() });
+  const { address, userName } = store.profile();
+  const reminders = store.tasks.remindersSince(Date.now() - KEEP_RECENT_REMINDERS_MS)
+    .map(r => ({ ...r, say: reminderLine(r, { address, user_name: userName }) }));
+  await idbSet('reminders', reminders);
 }
+
+// The lock was turned on or off: update what notifications may show.
+export const refreshNotificationPrivacy = () => shareWithWorker().catch(() => {});
 
 // Tells the cloud when reminders are due: ids and times only. Recently due ones stay on the list until
 // the cloud has pushed them, even if an open device already announced them.

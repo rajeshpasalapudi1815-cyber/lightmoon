@@ -237,11 +237,19 @@ export const tasks = {
   doneToday: () =>
     live('tasks').filter(t => t.done && t.done_at?.startsWith(today())).sort((a, b) => b.done_at.localeCompare(a.done_at)),
   get: id => find('tasks', id),
-  add({ title, dueAt = null, remindAt = null }) {
+  // `announce` is what to say out loud when the reminder goes off.
+  add({ title, dueAt = null, remindAt = null, announce = null }) {
     data.tasks.push({
-      id: newId(), title, due_at: dueAt, remind_at: remindAt,
+      id: newId(), title, due_at: dueAt, remind_at: remindAt, announce,
       done: false, reminded: false, done_at: null, created_at: localStamp(), updated_at: Date.now(),
     });
+    save();
+  },
+  markReminded(id) {
+    const task = tasks.get(id);
+    if (!task || task.reminded) return;
+    task.reminded = true;
+    touch(task);
     save();
   },
   complete(id) {
@@ -260,7 +268,7 @@ export const tasks = {
   remindersSince: since =>
     tasks.open()
       .filter(t => t.remind_at)
-      .map(t => ({ id: t.id, title: t.title, at: Date.parse(t.remind_at) }))
+      .map(t => ({ id: t.id, title: t.title, announce: t.announce ?? null, at: Date.parse(t.remind_at) }))
       .filter(r => Number.isFinite(r.at) && r.at >= since),
 
   // Returns reminders that are due and marks them delivered, so each one fires once.
@@ -272,7 +280,7 @@ export const tasks = {
       touch(task);
     }
     if (due.length) save();
-    return due.map(({ id, title, remind_at }) => ({ id, title, remind_at }));
+    return due.map(({ id, title, remind_at, announce }) => ({ id, title, remind_at, announce }));
   },
 };
 

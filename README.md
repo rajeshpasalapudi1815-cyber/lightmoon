@@ -48,6 +48,10 @@ Things to try:
   time, even when LightMoon is closed. The LightMoon cloud only learns *when* each reminder is due; the text stays
   on your devices. (Without notifications, reminders go off while the app is open, and missed ones are announced
   the next time you open it.)
+- **Spoken reminders:** when you set one ("remind me at 4:55 that I have a meeting at 5"), LightMoon writes what it
+  will say: "Boss, you have a meeting at 5 o'clock." If the app is open it says it at that moment; if it's closed,
+  the notification shows it and tapping it (or **Hear it**) opens LightMoon to say it. Phones don't let a closed web
+  app speak by itself. With the app lock on, notifications just say "You have a reminder".
 - **Sync between devices:** **Settings → Start syncing** on one device shows a sync code. On the other, choose
   **I have a code** and type it in. Memories, tasks, goals and chats are then combined and kept in step.
   Everything is encrypted on the device with that code before upload, so keep the code private. Your API key, PIN

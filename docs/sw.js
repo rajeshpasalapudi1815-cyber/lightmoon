@@ -1,8 +1,8 @@
 // Service worker: lets LightMoon install like an app, open without internet, and show reminder
 // notifications, including when the cloud wakes it at a reminder's time while the app is closed.
-import { showDueReminders } from './js/notifier.js';
+import { showDueReminders, openReminder } from './js/notifier.js';
 
-const CACHE = 'lightmoon-v4';
+const CACHE = 'lightmoon-v5';
 const APP_FILES = [
   './',
   './index.html',
@@ -19,6 +19,7 @@ const APP_FILES = [
   './js/vault.js',
   './js/cloud.js',
   './js/notifier.js',
+  './js/announce.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',
@@ -61,11 +62,8 @@ self.addEventListener('fetch', event => {
 // The cloud's push means "a reminder is due now" (see notifier.js).
 self.addEventListener('push', event => event.waitUntil(showDueReminders({ registration: self.registration, clients: self.clients })));
 
+// Tapping a reminder (or its "Hear it" button) opens LightMoon, which then says the reminder out loud.
 self.addEventListener('notificationclick', event => {
   event.notification.close();
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windows =>
-      windows.length ? windows[0].focus() : self.clients.openWindow('./'),
-    ),
-  );
+  event.waitUntil(openReminder({ clients: self.clients, id: event.notification.data?.id }));
 });
