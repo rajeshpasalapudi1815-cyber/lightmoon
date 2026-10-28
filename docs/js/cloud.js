@@ -237,6 +237,28 @@ async function runSync({ required = false } = {}) {
   }
 }
 
+// ---------- Connected apps (Life Levelling, see lifelevelling.js) ----------
+// They share the sync space: their summary is a "feed", LightMoon's requests go to their "inbox",
+// both encrypted with the sync code.
+
+export async function readFeed(name) {
+  if (!config.syncCode) return null;
+  const feed = await api('GET', `/spaces/${config.spaceId}/feeds/${name}`);
+  if (!feed) return null;
+  try {
+    return await decryptJson(await getSyncKey(), feed.blob);
+  } catch {
+    return null; // written with another code
+  }
+}
+
+export async function sendRequest(name, request) {
+  if (!config.syncCode) throw new Error('Sync is off on this device, so Life Levelling cannot be reached.');
+  const id = randomHex(12);
+  await api('POST', `/spaces/${config.spaceId}/inbox/${name}`, { id, blob: await encryptJson(await getSyncKey(), request) });
+  return id;
+}
+
 // ---------- Start-up ----------
 
 export function init(callbacks) {

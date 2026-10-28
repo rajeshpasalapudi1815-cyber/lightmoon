@@ -23,6 +23,23 @@ the phone's own alarms and voice.
 The app keeps its own data, separate from the Chrome version. To bring your memories and tasks across, use
 **Settings → Sync between devices** with the same code.
 
+Only in the Android app:
+- **Wake word:** Settings → *Wake word* → *Turn on* (downloads a 41 MB offline voice model once), then
+  *Allow LightMoon to open itself*. With the app closed, say "LightMoon", wait for the chime, and speak. It listens
+  only for its name, on the phone. On a locked phone it asks for your fingerprint first. After a restart, open
+  LightMoon once to switch it back on (Android doesn't let it start listening by itself).
+- **Fingerprint unlock:** Settings → *App lock* → *Add fingerprint* uses Android's own fingerprint or face prompt.
+
+## Life Levelling
+
+LightMoon can connect to [Life Levelling](https://github.com/rajeshpasalapudi1815-cyber/life-levelling), the
+game-style growth app. In LightMoon turn on **Sync between devices** and copy the code; in Life Levelling open
+**Settings → LightMoon assistant** and paste it. From then on LightMoon knows your level, quests, today's plan,
+readiness, health, money and the Mirror's patterns, coaches from them, and can log water, sleep, mood, exercise,
+spending, tasks and your morning intention there ("I drank two glasses", "I finished the report").
+Life Levelling sends its summary through LightMoon's cloud every few minutes, encrypted with the sync code,
+and applies LightMoon's requests within a minute, while its computer is on.
+
 ## Or install it from Chrome
 
 1. Open the LightMoon link in **Chrome** on your phone.
@@ -100,6 +117,7 @@ docs/                 the app (GitHub Pages publishes this folder)
   js/vault.js         sync codes and encryption
   js/notifier.js      what the service worker shows when a reminder is due
   js/native.js        in the Android app: the phone's voice, listening and alarms
+  js/lifelevelling.js the Life Levelling link: its summary for the AI, and requests back to it
   sw.js               lets it install, work offline and show notifications
 cloud/                the small cloud service (Cloudflare Worker + D1 database, free plan)
   src/worker.js       stores encrypted sync data and reminder times; sends the reminder pushes
@@ -111,6 +129,10 @@ android/              the Android app (Capacitor), which opens the live web app
     SpeakService.java           says a reminder out loud when its alarm goes off
     SyncWorker.java             every 15 minutes, picks up reminders set on other devices
     CloudCrypto.java            reads the encrypted sync copy, exactly as js/vault.js writes it
+    WakeWordService.java        listens for "LightMoon" on the phone (Vosk) and opens the app
+    WakeWordPlugin.java         turns the wake word on and off, downloads its voice model
+    UnlockActivity.java         on a locked phone, asks for the fingerprint before opening
+    DeviceUnlockPlugin.java     Android's fingerprint / face prompt for the app lock
 scripts/android.mjs   `node scripts/android.mjs setup` once, then `node scripts/android.mjs build` for dist/LightMoon.apk
 serve.js              optional: run it on this computer at http://localhost:3000
 Start LightMoon.cmd   double-click to run serve.js and open the browser

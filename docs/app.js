@@ -1,10 +1,11 @@
 // LightMoon app: runs entirely on this device. Chat, voice, memory, tasks, goals and reminders are all
 // handled here; the only thing sent over the internet is the conversation, to the AI service.
-import { isNativeApp, nativeAlarms } from './js/native.js'; // first: sets up voice in the Android app
+import { isNativeApp, nativeAlarms, wakeWord } from './js/native.js'; // first: sets up voice in the Android app
 import * as store from './js/store.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
 import * as cloud from './js/cloud.js';
+import * as lifeLevelling from './js/lifelevelling.js';
 import { reminderLine } from './js/announce.js';
 import { chat, briefing } from './js/brain.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
@@ -800,6 +801,7 @@ function openSettings() {
   paintLockSettings();
   paintCloudSettings();
   paintPhoneSettings();
+  paintWakeSettings();
   $('#settings').showModal();
 }
 
@@ -848,6 +850,61 @@ async function testSpokenReminder() {
   paintPhoneSettings();
 }
 
+// ---------- Wake word (Android app): "LightMoon" opens the app ready to listen ----------
+
+async function paintWakeSettings(message) {
+  $('#wakeBox').hidden = !wakeWord;
+  if (!wakeWord) return;
+  const status = await wakeWord.status().catch(() => null);
+  if (!status) return void ($('#wakeStatus').textContent = 'Not available');
+  $('#wakeStatus').textContent = message ?? (status.enabled ? 'On' : 'Off');
+  $('#wakeOn').hidden = status.enabled;
+  $('#wakeOff').hidden = !status.enabled;
+  $('#wakeOpenSelf').hidden = !status.enabled || status.canOpenItself;
+}
+
+async function turnOnWakeWord() {
+  $('#settingsError').textContent = '';
+  $('#wakeOn').disabled = true;
+  try {
+    let status = await wakeWord.status();
+    if (!status.modelReady) {
+      paintWakeSettings('Downloading the voice model...');
+      const progress = await wakeWord.addListener('modelProgress', ({ percent }) => {
+        $('#wakeStatus').textContent = `Downloading the voice model... ${percent}%`;
+      });
+      try {
+        await wakeWord.prepare();
+      } finally {
+        progress.remove();
+      }
+    }
+    status = await wakeWord.start();
+    note('Wake word on. Leave the app, say "LightMoon", wait for the chime, then speak.');
+    if (!status.canOpenItself) {
+      note('One more step: in Settings, tap "Allow LightMoon to open itself" so it can open when it hears you. Until then it shows a notification to tap.');
+    }
+  } catch (err) {
+    $('#settingsError').textContent = err.message;
+  } finally {
+    $('#wakeOn').disabled = false;
+    paintWakeSettings();
+  }
+}
+
+// True when the app was opened (or brought back) because the phone heard "LightMoon".
+const takeWake = async () => Boolean(wakeWord && (await wakeWord.takeWake().catch(() => null))?.wake);
+
+function listenAfterWake() {
+  takeWake().then(woke => {
+    if (!woke || !started || locked) return;
+    speaker.stop();
+    listener.autoStarted = true;
+    listenWhenFree = true;
+    refresh();
+  });
+}
+
 // Android 13 and later ask before an app may show notifications. Ask once, on first start;
 // after that it's a button in Settings.
 async function askForNotificationsOnce() {
@@ -875,6 +932,8 @@ function paintCloudSettings() {
   $('#syncCodeShow').textContent = code ?? '';
   $('#syncCopy').textContent = 'Copy code';
   paintSyncStatus();
+  $('#lifeStatus').textContent = lifeLevelling.describe();
+  lifeLevelling.refresh({ force: true }).then(() => { $('#lifeStatus').textContent = lifeLevelling.describe(); });
 }
 
 // Runs a cloud step from a Settings button, showing progress and any problem in the dialog.
@@ -974,6 +1033,7 @@ function showLock() {
   $('#lockError').textContent = '';
   $('#bioUnlock').hidden = !lock.hasBiometric();
   if (!lock.hasBiometric()) $('#lockForm').elements.pin.focus();
+  else if (isNativeApp) unlockWithFingerprint(); // the Android app asks for the fingerprint straight away
 }
 
 function unlocked() {
@@ -982,6 +1042,7 @@ function unlocked() {
   if (!started) return start();
   $('#boot').classList.add('leaving');
   setTimeout(() => { $('#boot').hidden = true; }, 600);
+  listenAfterWake();
   pollReminders();
   refresh();
 }
@@ -1167,6 +1228,9 @@ function wireUp() {
   $('#phoneNotify').addEventListener('click', allowPhoneNotifications);
   $('#phoneBattery').addEventListener('click', () => nativeAlarms.openBatterySettings().catch(() => {}));
   $('#phoneTest').addEventListener('click', testSpokenReminder);
+  $('#wakeOn').addEventListener('click', turnOnWakeWord);
+  $('#wakeOff').addEventListener('click', () => wakeWord.stop().finally(() => paintWakeSettings()));
+  $('#wakeOpenSelf').addEventListener('click', () => wakeWord.openOverlaySettings().catch(() => {}));
 
   for (const tab of document.querySelectorAll('[role="tab"]')) {
     tab.addEventListener('click', () => {
@@ -1200,7 +1264,12 @@ function wireUp() {
   // Phones pause background apps, so catch up on reminders when LightMoon comes back to the front,
   // and ask for the PIN or fingerprint again after a while away.
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && $('#settings').open) paintPhoneSettings(); // back from the phone's battery settings
+    if (!document.hidden && $('#settings').open) {
+      // back from the phone's battery or "display over other apps" settings
+      paintPhoneSettings();
+      paintWakeSettings();
+    }
+    if (!document.hidden) listenAfterWake();
     if (!started) return;
     if (document.hidden) {
       hiddenAt = Date.now();
@@ -1271,7 +1340,11 @@ function start({ auto = false } = {}) {
 
   if (nativeAlarms) {
     nativeAlarms.addListener('reminderDue', onReminderAlarm);
-    askForNotificationsOnce().finally(() => greet(auto)); // the microphone question comes after this one
+    (async () => {
+      await askForNotificationsOnce(); // the microphone question comes after this one
+      if (await takeWake()) launch.action = 'talk'; // opened by "LightMoon": skip the briefing and listen
+      greet(auto);
+    })();
   } else {
     greet(auto);
   }

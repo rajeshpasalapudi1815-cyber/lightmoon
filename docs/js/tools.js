@@ -2,6 +2,7 @@
 import { memories, tasks, goals, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
 import { normalizeTime, localStamp, prettyTime } from './time.js';
 import { findPlace, placeFromDevice, savedPlace, savePlace, weatherSummary } from './weather.js';
+import { LIFE_TOOLS, lifeHandlers, isConnected as lifeConnected } from './lifelevelling.js';
 
 // What the model sends when the user means "where I am" rather than naming a city.
 const MEANS_HERE = /^(here|local|nearby)$|\b(my|current|this|our)\s+(location|city|place|area|town)\b|where i am/i;
@@ -78,6 +79,9 @@ export const TOOLS = [
     ['city'],
   ),
 ];
+
+// The Life Levelling tools are offered only while Life Levelling is connected.
+export const currentTools = () => (lifeConnected() ? [...TOOLS, ...LIFE_TOOLS] : TOOLS);
 
 function toId(value) {
   const id = String(value ?? '').trim().replace(/^\[?#/, '').replace(/\]$/, '');
@@ -193,6 +197,8 @@ const handlers = {
     savePlace(place);
     return `Weather place: ${place.name}`;
   },
+
+  ...lifeHandlers,
 };
 
 export async function runTool(name, rawArgs) {

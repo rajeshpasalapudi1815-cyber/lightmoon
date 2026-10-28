@@ -1,5 +1,8 @@
 // App lock: a PIN (stored only as a salted hash) plus, optionally, the phone's own fingerprint or face unlock.
 // It keeps other people out of the app; it does not encrypt what is stored on the device.
+// In a browser the fingerprint goes through WebAuthn; in the Android app, through Android's own prompt.
+import { deviceUnlock } from './native.js';
+
 const LOCK_KEY = 'assistant.lock'; // kept apart from the data so backups never carry the lock
 const PBKDF2_ITERATIONS = 210_000;
 const MAX_TRIES = 5;
@@ -19,10 +22,11 @@ const toBase64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const fromBase64 = text => Uint8Array.from(atob(text), c => c.charCodeAt(0));
 
 export const isEnabled = () => Boolean(read()?.pinHash);
-export const hasBiometric = () => Boolean(read()?.credentialId);
+export const hasBiometric = () => Boolean(read()?.credentialId || (deviceUnlock && read()?.deviceUnlock));
 
 export async function biometricAvailable() {
   try {
+    if (deviceUnlock) return (await deviceUnlock.available()).available;
     return Boolean(await window.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable?.());
   } catch {
     return false;
@@ -56,6 +60,11 @@ export async function checkPin(pin) {
 
 // Registers the phone's screen lock (fingerprint, face or pattern) as a way to open the app.
 export async function enrollBiometric(userName) {
+  if (deviceUnlock) {
+    await deviceUnlock.verify({ reason: 'Use your fingerprint to unlock LightMoon' });
+    write({ ...read(), deviceUnlock: true });
+    return;
+  }
   const name = userName || 'LightMoon';
   const credential = await navigator.credentials.create({
     publicKey: {
@@ -73,6 +82,7 @@ export async function enrollBiometric(userName) {
 
 // Resolves only after the phone has verified the owner.
 export async function unlockWithBiometric() {
+  if (deviceUnlock && read()?.deviceUnlock) return deviceUnlock.verify({ reason: 'Unlock LightMoon' });
   const credentialId = read()?.credentialId;
   if (!credentialId) throw new Error('Fingerprint unlock is not set up.');
   await navigator.credentials.get({

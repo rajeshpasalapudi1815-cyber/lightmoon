@@ -10,6 +10,12 @@ const plugins = capacitor?.Plugins ?? {};
 // Speaks reminders at their time even when the app is closed (android/.../ReminderAlarmsPlugin.java).
 export const nativeAlarms = isNativeApp ? plugins.ReminderAlarms ?? null : null;
 
+// The phone's fingerprint, face or screen-lock check for the app lock (android/.../DeviceUnlockPlugin.java).
+export const deviceUnlock = isNativeApp ? plugins.DeviceUnlock ?? null : null;
+
+// Listens for "LightMoon" while the app is closed and opens it ready to talk (android/.../WakeWordPlugin.java).
+export const wakeWord = isNativeApp ? plugins.WakeWord ?? null : null;
+
 // ---------- Talking: a speechSynthesis stand-in on Android text-to-speech ----------
 
 class NativeUtterance {

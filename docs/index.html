@@ -182,6 +182,16 @@
         <small>The phone says each reminder out loud at its time, even when LightMoon is closed or the screen is off, at alarm volume. With sync on, it also picks up reminders set on your other devices (it checks about every 15 minutes).</small>
       </div>
 
+      <div class="data-box" id="wakeBox" hidden>
+        <span class="field-label">Wake word: <span id="wakeStatus" class="status-value"></span></span>
+        <span class="row">
+          <button type="button" id="wakeOn" class="btn-ghost">Turn on</button>
+          <button type="button" id="wakeOpenSelf" class="btn-ghost" hidden>Allow LightMoon to open itself</button>
+          <button type="button" id="wakeOff" class="btn-ghost" hidden>Turn off</button>
+        </span>
+        <small>With the app closed, say "LightMoon", wait for the chime, then speak. It opens ready to listen; on a locked phone it asks for your fingerprint first. It listens only for its name, entirely on this phone (the first time, it downloads a 41 MB offline voice model). It uses some battery, and Android shows a microphone dot while it listens.</small>
+      </div>
+
       <div class="data-box cloud-box">
         <span class="field-label">Sync between devices: <span id="syncStatus" class="status-value"></span></span>
         <div id="syncOffBox" class="sync-box">
@@ -203,6 +213,7 @@
           </span>
         </div>
         <small>On your other device, open Settings → <em>I have a code</em> and enter this code: both devices' memories, tasks, goals and chats are combined. Everything is encrypted with the code before it leaves the device, so keep the code private. Your API key, PIN and voice settings stay on each device.</small>
+        <small><strong>Life Levelling:</strong> <span id="lifeStatus"></span></small>
       </div>
 
       <div class="data-box">

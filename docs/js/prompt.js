@@ -2,6 +2,7 @@
 import { profile, memories, tasks, goals } from './store.js';
 import { isPast, describeAgo } from './time.js';
 import { savedPlace } from './weather.js';
+import { promptSection as lifeLevellingSection } from './lifelevelling.js';
 
 const MAX_MEMORIES = 80;
 const MAX_TASKS = 40;
@@ -27,6 +28,11 @@ export function buildSystemPrompt() {
   });
 
   const doneToday = tasks.doneToday().map(t => t.title);
+  const lifeLevelling = lifeLevellingSection();
+  const lifeGuidance = lifeLevelling ? `
+- Life Levelling is connected (see below). Coach from its numbers: match how hard you push to their readiness, point them at the top of today's plan, their weakest area, an unfinished quest or the boss, and bring up the Mirror's patterns when they are relevant. When a pattern looks lasting and useful, remember it.
+- When they report water, sleep, mood, exercise or spending, log it in Life Levelling with the life_* tools. New to-dos go to Life Levelling with life_add_task (finishing them earns XP); use your own add_task only for reminders at a set time, which you can speak aloud. When they finish a Life Levelling task, tick it off with life_complete_task.
+- Life Levelling applies what you send within a minute, while their computer is on; say "done" or "logged", not "it will take a minute", unless they ask.` : '';
 
   const goalLines = goals.active().map(g => {
     const parts = [`- [#${g.id}] ${g.title}`];
@@ -55,7 +61,7 @@ WHAT YOU DO
 - For any question about weather, temperature or rain, call get_weather. It knows where the user is, so "my location" needs no city.
 - You cannot browse the internet and have no tools other than the ones provided. If you don't know something current, say so.
 - After using a tool, confirm in a few words, e.g. "Done. I'll remind you at six."
-- Never invent tasks, memories or facts. If a request is ambiguous, ask.
+- Never invent tasks, memories or facts. If a request is ambiguous, ask.${lifeGuidance}
 
 CURRENT TIME: ${clock} (${timeZone}). Tool times use local time in the format YYYY-MM-DDTHH:MM.
 WEATHER PLACE: ${savedPlace()?.name ?? 'not set (if they mention their city, save it with set_weather_place)'}.
@@ -68,5 +74,5 @@ ${taskLines.join('\n') || '- None.'}
 ${doneToday.length ? `Completed today: ${doneToday.join('; ')}` : ''}
 
 GOALS
-${goalLines.join('\n') || '- None set yet.'}`;
+${goalLines.join('\n') || '- None set yet.'}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}`;
 }

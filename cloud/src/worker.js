@@ -1,6 +1,8 @@
 // LightMoon cloud: keeps encrypted sync data, knows when reminders are due, and wakes devices with
 // push notifications at that moment. It never sees what anyone wrote: sync data arrives already
 // encrypted with the user's sync code, and reminders are only an id and a time.
+// Connected apps (Life Levelling) use the same space: a "feed" is their encrypted summary for LightMoon,
+// and an "inbox" holds LightMoon's encrypted requests for them. Both are encrypted with the sync code too.
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS spaces (
@@ -21,15 +23,34 @@ const SCHEMA = [
      sent        INTEGER NOT NULL DEFAULT 0,
      PRIMARY KEY (space_id, reminder_id))`,
   'CREATE INDEX IF NOT EXISTS reminders_due ON reminders (sent, due_at)',
+  `CREATE TABLE IF NOT EXISTS feeds (
+     space_id   TEXT NOT NULL,
+     name       TEXT NOT NULL,
+     blob       TEXT NOT NULL,
+     updated_at INTEGER NOT NULL,
+     PRIMARY KEY (space_id, name))`,
+  `CREATE TABLE IF NOT EXISTS inbox (
+     space_id   TEXT NOT NULL,
+     box        TEXT NOT NULL,
+     item_id    TEXT NOT NULL,
+     blob       TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (space_id, box, item_id))`,
 ];
 
 const SPACE_ID = /^[0-9a-f]{64}$/; // a SHA-256 of the sync code, or a random id for a device on its own
 const DEVICE_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const REMINDER_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const APP_NAME = /^[a-z0-9-]{1,32}$/; // a connected app, e.g. "lifelevelling"
+const ITEM_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const MAX_BODY_BYTES = 2_000_000;
 const MAX_BLOB_CHARS = 1_500_000;
+const MAX_FEED_CHARS = 300_000;
+const MAX_REQUEST_CHARS = 20_000;
+const MAX_INBOX_ITEMS = 100;
 const MAX_REMINDERS = 500;
 const KEEP_SENT_REMINDERS_MS = 7 * 86_400_000;
+const KEEP_INBOX_MS = 7 * 86_400_000;
 const RETRY_PUSH_FOR_MS = 60 * 60_000;
 const FORGET_DEVICES_AFTER_MS = 120 * 86_400_000;
 // Only real browser push services, so this service can't be used to send requests anywhere else.
@@ -76,7 +97,7 @@ function corsHeaders(request, env) {
   if (!origin || !allowed.includes(origin)) return {};
   return {
     'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'GET, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
@@ -102,19 +123,67 @@ async function route(request, env) {
   const method = request.method;
   if (method === 'GET' && pathname === '/vapid-public-key') return json({ key: env.VAPID_PUBLIC_KEY });
 
-  const [section, space, part, device, ...rest] = pathname.split('/').filter(Boolean);
+  const [section, space, part, name, item, ...rest] = pathname.split('/').filter(Boolean);
   if (section !== 'spaces' || !SPACE_ID.test(space ?? '') || rest.length) throw new HttpError(404, 'Not found');
 
-  if (part === 'data' && !device) {
+  if (part === 'data' && !name) {
     if (method === 'GET') return getData(env, space);
     if (method === 'PUT') return putData(env, space, await readJson(request));
   }
-  if (part === 'reminders' && !device && method === 'PUT') return putReminders(env, space, await readJson(request));
-  if (part === 'devices' && DEVICE_ID.test(device ?? '')) {
-    if (method === 'PUT') return putDevice(env, space, device, await readJson(request));
-    if (method === 'DELETE') return deleteDevice(env, space, device);
+  if (part === 'reminders' && !name && method === 'PUT') return putReminders(env, space, await readJson(request));
+  if (part === 'devices' && DEVICE_ID.test(name ?? '') && !item) {
+    if (method === 'PUT') return putDevice(env, space, name, await readJson(request));
+    if (method === 'DELETE') return deleteDevice(env, space, name);
+  }
+  if (part === 'feeds' && APP_NAME.test(name ?? '') && !item) {
+    if (method === 'GET') return getFeed(env, space, name);
+    if (method === 'PUT') return putFeed(env, space, name, await readJson(request));
+  }
+  if (part === 'inbox' && APP_NAME.test(name ?? '')) {
+    if (!item && method === 'GET') return listInbox(env, space, name);
+    if (!item && method === 'POST') return addToInbox(env, space, name, await readJson(request));
+    if (ITEM_ID.test(item ?? '') && method === 'DELETE') return removeFromInbox(env, space, name, item);
   }
   throw new HttpError(404, 'Not found');
+}
+
+// ---------- Connected apps: their encrypted summary (feed) and LightMoon's requests to them (inbox) ----------
+
+async function getFeed(env, space, name) {
+  const row = await env.DB.prepare('SELECT blob, updated_at FROM feeds WHERE space_id = ? AND name = ?').bind(space, name).first();
+  return row ? json({ blob: row.blob, updatedAt: row.updated_at }) : json({ error: 'Not found' }, 404);
+}
+
+async function putFeed(env, space, name, { blob }) {
+  if (typeof blob !== 'string' || !blob || blob.length > MAX_FEED_CHARS) throw new HttpError(400, 'Bad feed');
+  await env.DB.prepare(
+    `INSERT INTO feeds (space_id, name, blob, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(space_id, name) DO UPDATE SET blob = excluded.blob, updated_at = excluded.updated_at`,
+  ).bind(space, name, blob, Date.now()).run();
+  return noContent();
+}
+
+async function listInbox(env, space, box) {
+  const { results } = await env.DB.prepare(
+    'SELECT item_id, blob, created_at FROM inbox WHERE space_id = ? AND box = ? ORDER BY created_at LIMIT ?',
+  ).bind(space, box, MAX_INBOX_ITEMS).all();
+  return json({ items: results.map(r => ({ id: r.item_id, blob: r.blob, createdAt: r.created_at })) });
+}
+
+async function addToInbox(env, space, box, { id, blob }) {
+  if (!ITEM_ID.test(String(id)) || typeof blob !== 'string' || !blob || blob.length > MAX_REQUEST_CHARS) {
+    throw new HttpError(400, 'Bad request item');
+  }
+  const { count } = await env.DB.prepare('SELECT COUNT(*) AS count FROM inbox WHERE space_id = ? AND box = ?').bind(space, box).first();
+  if (count >= MAX_INBOX_ITEMS) throw new HttpError(429, 'Inbox full');
+  await env.DB.prepare('INSERT INTO inbox (space_id, box, item_id, blob, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
+    .bind(space, box, String(id), blob, Date.now()).run();
+  return noContent();
+}
+
+async function removeFromInbox(env, space, box, item) {
+  await env.DB.prepare('DELETE FROM inbox WHERE space_id = ? AND box = ? AND item_id = ?').bind(space, box, item).run();
+  return noContent();
 }
 
 // ---------- Encrypted sync data: one blob per space, with a version to catch conflicting writes ----------
@@ -215,6 +284,8 @@ async function sendDueReminders(env) {
     ...done.map(r => markSent.bind(r.space_id, r.reminder_id)),
     env.DB.prepare('DELETE FROM reminders WHERE sent = 1 AND due_at < ?').bind(now - KEEP_SENT_REMINDERS_MS),
     env.DB.prepare('DELETE FROM devices WHERE updated_at < ?').bind(now - FORGET_DEVICES_AFTER_MS),
+    env.DB.prepare('DELETE FROM inbox WHERE created_at < ?').bind(now - KEEP_INBOX_MS),
+    env.DB.prepare('DELETE FROM feeds WHERE updated_at < ?').bind(now - FORGET_DEVICES_AFTER_MS),
   ]);
 }
 
