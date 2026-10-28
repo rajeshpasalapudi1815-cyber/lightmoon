@@ -1,6 +1,8 @@
 // LightMoon app: runs entirely on this device. Chat, voice, memory, tasks, goals and reminders are all
 // handled here; the only thing sent over the internet is the conversation, to the AI service.
 import * as store from './js/store.js';
+import * as lock from './js/lock.js';
+import * as weather from './js/weather.js';
 import { chat, briefing } from './js/brain.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 
@@ -25,11 +27,17 @@ const PREFERRED_VOICES = ['Microsoft Ryan Online', 'Microsoft Thomas Online', 'G
 const PREFS_KEY = 'assistant.prefs';
 const REMINDER_POLL_MS = 15_000;
 const LATE_REMINDER_MINUTES = 5;
+const RELOCK_AFTER_MS = 3 * 60_000; // with the app lock on, ask again after this long in the background
+const MAX_SHARED_CHARS = 6000;
 
 const prefs = loadPrefs();
+const launch = readLaunchParams();
 let state = null; // latest snapshot from the store
 let busy = false; // waiting for the AI
 let started = false; // user has tapped Initialize
+let locked = false; // the lock screen is showing
+let hiddenAt = 0; // when the app last went into the background
+let pendingShare = null; // shared content the next question is about
 let audioCtx = null;
 
 // ---------- Small helpers ----------
@@ -48,6 +56,16 @@ function loadPrefs() {
   } catch {
     return defaults;
   }
+}
+
+// What the app was opened for: a home-screen shortcut (?action=...) or something shared from another app.
+function readLaunchParams() {
+  const params = new URLSearchParams(location.search);
+  const [title, text, url] = ['title', 'text', 'url'].map(name => params.get(name)?.trim() ?? '');
+  // Apps often repeat the title as the text, or the link inside the text; keep each piece once.
+  const shared = [title !== text && title, text, !text.includes(url) && url].filter(Boolean);
+  if (location.search) history.replaceState(null, '', location.pathname);
+  return { action: params.get('action'), shared: shared.join('\n').slice(0, MAX_SHARED_CHARS) };
 }
 
 function savePrefs() {
@@ -127,27 +145,101 @@ function addMessage(kind, text, actions = []) {
   const node = el('div', `msg ${kind}`);
   if (kind.startsWith('assistant')) node.dataset.who = assistantName().toUpperCase();
   node.append(el('div', 'msg-text', text));
-  if (actions.length) {
-    const row = el('div', 'actions');
-    for (const action of actions) {
-      row.append(el('span', 'action-chip', action.text));
-      if (action.calendar) row.append(calendarLink('action-chip chip-link', 'Add to Google Calendar', action.calendar.title, action.calendar.at));
-    }
-    node.append(row);
-  }
+  addActions(node, actions);
   transcript.append(node);
   transcript.scrollTop = transcript.scrollHeight;
+  return node;
+}
+
+function addActions(node, actions) {
+  if (!actions.length) return;
+  const row = el('div', 'actions');
+  for (const action of actions) {
+    row.append(el('span', 'action-chip', action.text));
+    if (action.calendar) row.append(calendarLink('action-chip chip-link', 'Add to Google Calendar', action.calendar.title, action.calendar.at));
+  }
+  node.append(row);
 }
 
 const note = text => addMessage('system', text);
+
+// Index just past the last finished sentence (or line), or -1 if there is none yet.
+function lastSentenceEnd(text) {
+  let end = -1;
+  for (const match of text.matchAll(/[.!?]["')\]]*\s+|\n+/g)) end = match.index + match[0].length;
+  return end;
+}
+
+// Shows a reply while it is still arriving and speaks each sentence as soon as it is complete.
+function streamReply() {
+  let node = null;
+  let shown = '';
+  let unspoken = '';
+  const generation = speaker.generation; // if the user stops the speech, stay quiet for the rest of this reply
+  const say = text => {
+    if (speaker.generation === generation) speaker.speak(text);
+  };
+  const bubble = () => (node ??= addMessage('assistant', ''));
+  return {
+    push(delta) {
+      shown += delta;
+      bubble().querySelector('.msg-text').textContent = shown.trimStart();
+      transcript.scrollTop = transcript.scrollHeight;
+      unspoken += delta;
+      const end = lastSentenceEnd(unspoken);
+      if (end > 0) {
+        say(unspoken.slice(0, end));
+        unspoken = unspoken.slice(end);
+      }
+    },
+    done(out) {
+      if (out.error) {
+        addMessage('assistant error', out.reply);
+        say(out.reply);
+        return;
+      }
+      const target = bubble();
+      target.querySelector('.msg-text').textContent = out.reply;
+      addActions(target, out.actions);
+      say(shown.trim() ? unspoken : out.reply);
+      transcript.scrollTop = transcript.scrollHeight;
+    },
+  };
+}
+
+// Something was shared to LightMoon from another app: offer quick things to do with it.
+function offerShared(text) {
+  const preview = text.length > 280 ? `${text.slice(0, 280)}…` : text;
+  const node = addMessage('shared', `Shared with ${assistantName()}:\n${preview}`);
+  const row = el('div', 'actions');
+  const option = (label, onClick) => {
+    const button = el('button', 'action-chip chip-button', label);
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      row.remove();
+      onClick();
+    });
+    row.append(button);
+  };
+  option('Remember this', () => send('Please remember this.', { context: text }));
+  option('Make it a task', () => send('Add this as a task.', { context: text }));
+  if (text.length > 200) option('Summarize', () => send('Summarize this for me in a few sentences.', { context: text }));
+  option('Ask about it', () => {
+    pendingShare = text;
+    input.placeholder = 'What would you like to know about it?';
+    input.focus();
+  });
+  node.append(row);
+  transcript.scrollTop = transcript.scrollHeight;
+}
 
 // Recomputes what the core shows, and starts or stops wake-word listening to match.
 function refresh() {
   listener.sync();
   let mode = 'idle';
   if (listener.capturing) mode = 'listening';
-  else if (busy) mode = 'thinking';
   else if (speaker.active) mode = 'speaking';
+  else if (busy) mode = 'thinking';
   document.body.dataset.state = mode;
   const idle = !state?.ai.ready
     ? 'Offline: add an API key in settings'
@@ -306,8 +398,8 @@ const listener = {
 
   pushToTalk() {
     if (!SpeechRec) return note('Voice input needs Chrome or Edge. You can still type.');
+    if (speaker.active) speaker.stop(); // a tap always silences, even while a reply is still arriving
     if (busy) return;
-    if (speaker.active) speaker.stop();
     if (this.mode === 'ptt') {
       this.stopRec();
       this.capturing = false;
@@ -392,7 +484,7 @@ const listener = {
 
   sync() {
     if (!started || !SpeechRec || this.mode === 'ptt') return;
-    const wanted = prefs.handsFree && !busy && !speaker.active && !document.hidden;
+    const wanted = prefs.handsFree && !busy && !speaker.active && !document.hidden && !locked;
     if (wanted && !this.rec) this.start('wake');
     if (!wanted && this.mode === 'wake') {
       this.stopRec();
@@ -403,38 +495,42 @@ const listener = {
 
 // ---------- Conversation ----------
 
-async function send(text) {
+// `context` is shared content the message is about (from "Share to LightMoon").
+async function send(text, { context = null } = {}) {
   text = text.trim();
   if (!text || busy) return;
+  context ??= pendingShare;
+  pendingShare = null;
+  input.placeholder = 'Type a message, or tap the core to talk';
   if (speaker.active) speaker.stop();
   addMessage('user', text);
   busy = true;
   refresh();
   try {
-    const out = await chat(text);
-    addMessage(out.error ? 'assistant error' : 'assistant', out.reply, out.actions);
+    const live = streamReply();
+    const out = await chat(context ? `${text}\n\nShared content:\n${context}` : text, { onText: live.push });
+    live.done(out);
     applyState();
-    speaker.speak(out.reply);
   } finally {
     busy = false;
     refresh();
   }
 }
 
-// One AI briefing per day; later launches get a short greeting instead.
-async function runBriefing() {
+// One AI briefing per day (unless asked for); later launches get a short greeting instead.
+async function runBriefing(force = false) {
   if (!state.ai.ready) return;
-  if (store.settings.get('last_briefing') === today()) {
+  if (!force && store.settings.get('last_briefing') === today()) {
     speaker.speak(`Welcome back, ${addressWord()}.`);
     return;
   }
   busy = true;
   refresh();
   try {
-    const out = await briefing();
+    const live = streamReply();
+    const out = await briefing({ onText: live.push });
     if (!out.error) store.settings.set('last_briefing', today());
-    addMessage(out.error ? 'assistant error' : 'assistant', out.reply);
-    speaker.speak(out.reply);
+    live.done(out);
   } finally {
     busy = false;
     refresh();
@@ -595,7 +691,128 @@ function openSettings() {
   fillVoices(fields.voice);
   $('#modelInfo').textContent = `Brain: ${state.ai.model} via ${state.ai.provider}${state.ai.hasKey ? '' : ' (no API key yet)'}.`;
   $('#settingsError').textContent = '';
+  paintWeatherSettings();
+  paintLockSettings();
   $('#settings').showModal();
+}
+
+// ---------- Weather settings ----------
+
+function paintWeatherSettings(message) {
+  const place = weather.savedPlace();
+  $('#weatherCity').value = '';
+  $('#weatherClear').hidden = !place;
+  $('#weatherStatus').textContent = message
+    ?? (place ? `Briefings include the weather for ${place.name}.` : 'Add your city to hear the weather in your daily briefing.');
+}
+
+async function setWeatherPlace(locate) {
+  $('#weatherStatus').textContent = 'Looking that up...';
+  try {
+    const place = await locate();
+    weather.savePlace(place);
+    paintWeatherSettings(`Saved. ${await weather.weatherSummary(place)}`);
+  } catch (err) {
+    $('#weatherStatus').textContent = err.message;
+  }
+}
+
+// ---------- App lock ----------
+
+async function paintLockSettings() {
+  const enabled = lock.isEnabled();
+  $('#lockStatus').textContent = enabled ? `On: PIN${lock.hasBiometric() ? ' and fingerprint' : ''}` : 'Off';
+  $('#lockPin').textContent = enabled ? 'Change PIN' : 'Turn on';
+  $('#lockOff').hidden = !enabled;
+  $('#pinSetup').hidden = true;
+  $('#newPin').value = '';
+  $('#newPin2').value = '';
+  $('#lockBio').hidden = !enabled || lock.hasBiometric() || !(await lock.biometricAvailable());
+}
+
+async function saveNewPin() {
+  const pin = $('#newPin').value.trim();
+  const error = $('#settingsError');
+  if (pin !== $('#newPin2').value.trim()) return void (error.textContent = "The two PINs don't match.");
+  try {
+    await lock.setPin(pin);
+  } catch (err) {
+    error.textContent = err.message;
+    return;
+  }
+  error.textContent = '';
+  await paintLockSettings();
+  note(`App lock is on. ${assistantName()} will ask for your PIN when it opens and after a few minutes away.`);
+}
+
+async function addFingerprint() {
+  try {
+    await lock.enrollBiometric(state.profile.userName);
+    $('#settingsError').textContent = '';
+  } catch {
+    $('#settingsError').textContent = "Couldn't set up fingerprint unlock. Your PIN still works.";
+  }
+  paintLockSettings();
+}
+
+function turnLockOff() {
+  if (!confirm(`Turn off the app lock? Anyone using this phone could open ${assistantName()}.`)) return;
+  lock.disable();
+  paintLockSettings();
+}
+
+function showLock() {
+  locked = true;
+  speaker.stop();
+  listener.stopRec();
+  listener.capturing = false;
+  const boot = $('#boot');
+  boot.hidden = false;
+  boot.classList.remove('leaving');
+  $('#bootBtn').hidden = true;
+  $('#lockForm').hidden = false;
+  $('#lockForm').reset();
+  $('#lockError').textContent = '';
+  $('#bioUnlock').hidden = !lock.hasBiometric();
+  if (!lock.hasBiometric()) $('#lockForm').elements.pin.focus();
+}
+
+function unlocked() {
+  locked = false;
+  $('#lockForm').hidden = true;
+  if (!started) return start();
+  $('#boot').classList.add('leaving');
+  setTimeout(() => { $('#boot').hidden = true; }, 600);
+  pollReminders();
+  refresh();
+}
+
+async function unlockWithPin(event) {
+  event.preventDefault();
+  try {
+    if (await lock.checkPin(event.target.elements.pin.value.trim())) return unlocked();
+    $('#lockError').textContent = 'Wrong PIN.';
+  } catch (err) {
+    $('#lockError').textContent = err.message;
+  }
+  event.target.elements.pin.select();
+}
+
+async function unlockWithFingerprint() {
+  try {
+    await lock.unlockWithBiometric();
+    unlocked();
+  } catch {
+    $('#lockError').textContent = "Fingerprint didn't work. Use your PIN.";
+  }
+}
+
+function eraseAfterForgottenPin() {
+  const name = assistantName();
+  if (!confirm(`Forgot your PIN? The only way back in is to erase ${name} on this device: memories, tasks, goals and chats.`)) return;
+  if (!confirm(`Erase everything ${name} knows on this device? This can't be undone. You can restore a backup afterwards.`)) return;
+  store.eraseEverything();
+  location.reload();
 }
 
 function saveSettings(event) {
@@ -699,6 +916,27 @@ function wireUp() {
   });
   $('#setupForm').addEventListener('submit', completeSetup);
   $('#bootBtn').addEventListener('click', start);
+  $('#lockForm').addEventListener('submit', unlockWithPin);
+  $('#bioUnlock').addEventListener('click', unlockWithFingerprint);
+  $('#forgotPin').addEventListener('click', eraseAfterForgottenPin);
+  $('#lockPin').addEventListener('click', () => {
+    $('#pinSetup').hidden = false;
+    $('#newPin').focus();
+  });
+  $('#savePin').addEventListener('click', saveNewPin);
+  $('#lockBio').addEventListener('click', addFingerprint);
+  $('#lockOff').addEventListener('click', turnLockOff);
+  $('#weatherFind').addEventListener('click', () => setWeatherPlace(() => weather.findPlace($('#weatherCity').value)));
+  $('#weatherCity').addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    $('#weatherFind').click();
+  });
+  $('#weatherHere').addEventListener('click', () => setWeatherPlace(weather.placeFromDevice));
+  $('#weatherClear').addEventListener('click', () => {
+    weather.savePlace(null);
+    paintWeatherSettings();
+  });
 
   for (const tab of document.querySelectorAll('[role="tab"]')) {
     tab.addEventListener('click', () => {
@@ -726,10 +964,16 @@ function wireUp() {
     }
   });
 
-  // Phones pause background apps, so catch up on reminders when LightMoon comes back to the front.
+  // Phones pause background apps, so catch up on reminders when LightMoon comes back to the front,
+  // and ask for the PIN or fingerprint again after a while away.
   document.addEventListener('visibilitychange', () => {
     if (!started) return;
-    if (!document.hidden) pollReminders();
+    if (document.hidden) {
+      hiddenAt = Date.now();
+    } else {
+      if (lock.isEnabled() && !locked && hiddenAt && Date.now() - hiddenAt > RELOCK_AFTER_MS) showLock();
+      pollReminders();
+    }
     refresh();
   });
 
@@ -781,7 +1025,18 @@ function start() {
   pollReminders();
   setInterval(pollReminders, REMINDER_POLL_MS);
   setInterval(renderTasks, 60_000); // keeps overdue highlighting current
-  runBriefing();
+
+  // Opened from a home-screen shortcut or the share sheet: do that instead of the usual briefing.
+  if (launch.shared) {
+    offerShared(launch.shared);
+  } else if (launch.action === 'talk') {
+    listener.pushToTalk();
+  } else if (launch.action === 'task') {
+    input.value = 'Add a task: ';
+    input.focus();
+  } else {
+    runBriefing(launch.action === 'briefing');
+  }
 }
 
 function boot() {
@@ -796,6 +1051,8 @@ function boot() {
     form.elements.address.value = state.profile.address;
     $('#keyField').hidden = state.ai.ready;
     form.elements.userName.focus();
+  } else if (lock.isEnabled()) {
+    showLock();
   } else {
     $('#bootBtn').hidden = false;
     $('#bootBtn').focus();

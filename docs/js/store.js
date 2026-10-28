@@ -245,6 +245,14 @@ export function snapshot() {
   };
 }
 
+// Removes everything this app keeps on the device: data, AI settings, preferences and the app lock.
+export function eraseEverything() {
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith('assistant.')) localStorage.removeItem(key);
+  }
+  data = blank();
+}
+
 export function exportData() {
   return JSON.stringify({ app: 'lightmoon', version: 1, exportedAt: new Date().toISOString(), ...data }, null, 2);
 }

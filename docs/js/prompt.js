@@ -1,6 +1,7 @@
 // Builds the system prompt: LightMoon's personality plus a fresh snapshot of everything it knows.
 import { profile, memories, tasks, goals } from './store.js';
 import { isPast, describeAgo } from './time.js';
+import { savedPlace } from './weather.js';
 
 const MAX_MEMORIES = 80;
 const MAX_TASKS = 40;
@@ -53,6 +54,7 @@ WHAT YOU DO
 - Never invent tasks, memories or facts. If a request is ambiguous, ask.
 
 CURRENT TIME: ${clock} (${timeZone}). Tool times use local time in the format YYYY-MM-DDTHH:MM.
+WEATHER PLACE: ${savedPlace()?.name ?? 'not set (if they mention their city, save it with set_weather_place)'}.
 
 WHAT YOU KNOW ABOUT ${name.toUpperCase()}
 ${memoryLines.join('\n') || '- Nothing yet. Learn about them naturally as you talk.'}

@@ -1,5 +1,5 @@
 // Service worker: lets LightMoon install like an app, open without internet, and show reminder notifications.
-const CACHE = 'lightmoon-v1';
+const CACHE = 'lightmoon-v2';
 const APP_FILES = [
   './',
   './index.html',
@@ -10,6 +10,8 @@ const APP_FILES = [
   './js/tools.js',
   './js/prompt.js',
   './js/time.js',
+  './js/weather.js',
+  './js/lock.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',
@@ -33,15 +35,17 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const { request } = event;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+  // Every page load (including shortcut and share links with their ?query) is the same app page.
+  const key = request.mode === 'navigate' ? './index.html' : request;
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);
       try {
         const response = await fetch(request, { signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS) });
-        if (response.ok) cache.put(request, response.clone());
+        if (response.ok) cache.put(key, response.clone());
         return response;
       } catch {
-        return (await cache.match(request, { ignoreSearch: true })) || (await cache.match('./index.html')) || Response.error();
+        return (await cache.match(key, { ignoreSearch: true })) || (await cache.match('./index.html')) || Response.error();
       }
     })(),
   );

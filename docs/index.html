@@ -44,6 +44,17 @@
       <p class="form-error" id="setupError" role="alert"></p>
     </form>
 
+    <form id="lockForm" class="setup" hidden>
+      <p class="setup-intro">Locked. Unlock to continue.</p>
+      <button type="button" id="bioUnlock" class="btn-primary" hidden>Unlock with fingerprint</button>
+      <label>PIN
+        <input name="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" required>
+      </label>
+      <button class="btn-ghost" type="submit">Unlock with PIN</button>
+      <button type="button" id="forgotPin" class="link-btn">Forgot PIN?</button>
+      <p class="form-error" id="lockError" role="alert"></p>
+    </form>
+
     <button id="bootBtn" class="btn-primary" hidden>Initialize</button>
   </div>
 
@@ -127,6 +138,35 @@
         <label>Backup model (used when the free limit is hit) <input name="fallbackModel" spellcheck="false"></label>
         <button type="button" id="resetAi" class="btn-ghost">Reset to Groq defaults</button>
       </details>
+
+      <div class="data-box">
+        <span class="field-label">Weather in briefings</span>
+        <span class="row">
+          <input id="weatherCity" placeholder="Your city, e.g. Hyderabad" autocomplete="address-level2">
+          <button type="button" id="weatherFind" class="btn-ghost">Set</button>
+        </span>
+        <span class="row">
+          <button type="button" id="weatherHere" class="btn-ghost">Use my location</button>
+          <button type="button" id="weatherClear" class="btn-ghost" hidden>Remove</button>
+        </span>
+        <small id="weatherStatus"></small>
+        <small>Forecasts come from Open-Meteo, free. Only your city's rough location is sent.</small>
+      </div>
+
+      <div class="data-box">
+        <span class="field-label">App lock: <span id="lockStatus"></span></span>
+        <span class="row">
+          <button type="button" id="lockPin" class="btn-ghost">Turn on</button>
+          <button type="button" id="lockBio" class="btn-ghost" hidden>Add fingerprint</button>
+          <button type="button" id="lockOff" class="btn-ghost" hidden>Turn off</button>
+        </span>
+        <div id="pinSetup" class="pin-setup" hidden>
+          <label>New PIN (4 to 8 digits) <input id="newPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="new-password"></label>
+          <label>Repeat the PIN <input id="newPin2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="new-password"></label>
+          <button type="button" id="savePin" class="btn-ghost">Save PIN</button>
+        </div>
+        <small>Asks for your PIN or fingerprint when the app opens and after a few minutes away. It keeps others out of the app; it doesn't encrypt your data.</small>
+      </div>
 
       <div class="data-box">
         <span class="field-label">Your data</span>

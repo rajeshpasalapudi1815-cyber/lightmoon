@@ -24,8 +24,17 @@ to the AI service (Groq's free tier by default).
 | Stop it talking | Tap the core (or press Esc) |
 | Type | Use the box at the bottom |
 
+LightMoon starts speaking as soon as the first sentence of its reply arrives, so answers feel quick.
+
+**Shortcuts:** long-press the LightMoon icon for **Talk now**, **Add task** or **Briefing**.
+
+**Share to LightMoon:** in any app (Chrome, WhatsApp, Gmail…) tap **Share → LightMoon**, then choose
+**Remember this**, **Make it a task**, **Summarize** or **Ask about it**. (If the shortcuts or the Share option
+don't appear, remove LightMoon from your home screen and install it again.)
+
 Things to try:
 - "Remind me to call Mom at 6 pm."
+- "Will it rain today?" or "Set my weather city to Hyderabad."
 - "I want to run 5 km by December, because I want more energy."
 - "I ran 2 km this morning." (logs progress on your goal)
 - "Remember that I work best in the mornings."
@@ -42,6 +51,11 @@ Things to try:
 - **Switching the AI:** Settings → *AI brain (advanced)*. Any OpenAI-compatible service works.
   Leave the defaults to use Groq's free tier, with an automatic backup model when the free limit is hit.
 - **Renaming:** Settings → *Assistant name*. The new name also becomes the wake word.
+- **Weather:** Settings → *Weather in briefings*: type your city or tap *Use my location*. Forecasts come from
+  Open-Meteo (free, no key); only the city's rough location is sent.
+- **App lock:** Settings → *App lock* → *Turn on* sets a PIN; on phones you can then *Add fingerprint*.
+  LightMoon asks again after 3 minutes in the background. It keeps other people out of the app, but it doesn't
+  encrypt the data. If you forget the PIN, the only way back in is to erase LightMoon on that device (then restore a backup).
 
 ## What it's made of
 
@@ -53,6 +67,8 @@ docs/                 the app (GitHub Pages publishes this folder)
   js/prompt.js        LightMoon's personality + what it knows about you
   js/tools.js         remember, tasks, reminders, goals, progress
   js/store.js         on-device storage, backup and restore
+  js/weather.js       today's weather from Open-Meteo
+  js/lock.js          PIN and fingerprint app lock
   sw.js               lets it install, work offline and show notifications
 serve.js              optional: run it on this computer at http://localhost:3000
 Start LightMoon.cmd   double-click to run serve.js and open the browser

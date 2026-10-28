@@ -1,14 +1,19 @@
 // The brain: sends the conversation straight from this device to an OpenAI-compatible chat API
-// (Groq by default) and runs any tools the model asks for.
+// (Groq by default), streams the reply back as it is written, and runs any tools the model asks for.
 import { aiConfig, messages } from './store.js';
 import { buildSystemPrompt } from './prompt.js';
 import { TOOLS, runTool } from './tools.js';
+import { weatherSummary } from './weather.js';
 
 const HISTORY_LIMIT = 16;
 const MAX_TOOL_ROUNDS = 5;
 const REQUEST_TIMEOUT_MS = 60_000;
 
-const BRIEFING_REQUEST = `(Automatic message: I just opened the app. Give me a short spoken briefing, under 70 words. Greet me for the time of day. Mention anything overdue or due today and any upcoming reminders. Nudge one of my goals or ask how it is going. End with one useful suggestion. If you know little about me yet, introduce yourself in one sentence and ask what I am working towards. Do not use tools.)`;
+const briefingRequest = weather =>
+  '(Automatic message: I just opened the app. Give me a short spoken briefing, under 70 words. Greet me for the time of day. '
+  + 'Mention anything overdue or due today and any upcoming reminders. Nudge one of my goals or ask how it is going. '
+  + 'End with one useful suggestion. If you know little about me yet, introduce yourself in one sentence and ask what I am working towards. '
+  + `Do not use tools.${weather ? ` Today's weather: ${weather} Mention it in a few words if it matters for my day, like rain, heat or cold.` : ''})`;
 
 const FRIENDLY_ERRORS = {
   'no-key': "My brain isn't connected yet. Add your API key in settings and I'll be right with you.",
@@ -26,18 +31,24 @@ class BrainError extends Error {
   }
 }
 
-export async function chat(text) {
+// onText receives the reply piece by piece as it arrives, so the app can show and speak it straight away.
+export async function chat(text, { onText } = {}) {
   messages.add('user', text);
   const convo = [systemMessage(), ...recentHistory()];
   const actions = [];
+  const written = [];
+  const emit = delta => {
+    written.push(delta);
+    onText?.(delta);
+  };
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const reply = await complete(convo, TOOLS);
-      if (!reply.tool_calls?.length) return finish(reply.content, actions);
+      const reply = await complete(convo, TOOLS, emit);
+      if (!reply.tool_calls?.length) return finish(written.join(''), actions);
 
       convo.push({ role: 'assistant', content: reply.content || null, tool_calls: reply.tool_calls });
       for (const call of reply.tool_calls) {
-        const outcome = runTool(call.function?.name, call.function?.arguments);
+        const outcome = await runTool(call.function?.name, call.function?.arguments);
         if (outcome.ok) actions.push(outcome.action);
         convo.push({
           role: 'tool',
@@ -45,6 +56,7 @@ export async function chat(text) {
           content: JSON.stringify(outcome.ok ? { ok: true, result: outcome.result } : { ok: false, error: outcome.error }),
         });
       }
+      if (written.length) emit(' '); // keep text from before and after the tools apart
     }
     return finish('I went round in circles on that one. Could you put it another way?', actions);
   } catch (err) {
@@ -52,10 +64,11 @@ export async function chat(text) {
   }
 }
 
-export async function briefing() {
-  const convo = [systemMessage(), ...recentHistory().slice(-6), { role: 'user', content: BRIEFING_REQUEST }];
+export async function briefing({ onText } = {}) {
+  const weather = await weatherSummary().catch(() => null);
+  const convo = [systemMessage(), ...recentHistory().slice(-6), { role: 'user', content: briefingRequest(weather) }];
   try {
-    const reply = await complete(convo);
+    const reply = await complete(convo, null, onText);
     return finish(reply.content, []);
   } catch (err) {
     return failure(err);
@@ -76,25 +89,31 @@ function failure(err, actions = []) {
   return { reply: FRIENDLY_ERRORS[err.kind] ?? FRIENDLY_ERRORS.api, actions, error: true };
 }
 
-// Tries the main model, then the backup model if the main one is rate-limited or failing.
-async function complete(convo, tools) {
+// Tries the main model, then the backup model if the main one is rate-limited or failing,
+// but never after part of a reply has already been shown and spoken.
+async function complete(convo, tools, onText) {
   const ai = aiConfig();
   if (!ai.ready) throw new BrainError('no-key');
   const models = [...new Set([ai.model, ai.fallbackModel].filter(Boolean))];
+  let emitted = false;
+  const relay = delta => {
+    emitted = true;
+    onText?.(delta);
+  };
   let lastError;
   for (const model of models) {
     try {
-      return await request(ai, model, convo, tools);
+      return await request(ai, model, convo, tools, relay);
     } catch (err) {
       lastError = err;
-      if (!err.retryable) break;
+      if (!err.retryable || emitted) break;
     }
   }
   throw lastError;
 }
 
-async function request(ai, model, convo, tools) {
-  const body = { model, messages: convo, temperature: 0.7 };
+async function request(ai, model, convo, tools, onText) {
+  const body = { model, messages: convo, temperature: 0.7, stream: true };
   if (tools) Object.assign(body, { tools, tool_choice: 'auto' });
   if (model.includes('gpt-oss')) body.reasoning_effort = 'low'; // quicker replies for voice
 
@@ -117,8 +136,57 @@ async function request(ai, model, convo, tools) {
     throw new BrainError(kind, `${model} ${res.status} ${detail}`, retryable);
   }
 
-  const data = await res.json();
-  const message = data.choices?.[0]?.message;
-  if (!message) throw new BrainError('api', `${model} returned no message`, true);
-  return message;
+  // A few services ignore "stream" and answer in one piece.
+  if (!res.headers.get('content-type')?.includes('text/event-stream')) {
+    const message = (await res.json()).choices?.[0]?.message;
+    if (!message) throw new BrainError('api', `${model} returned no message`, true);
+    if (message.content) onText(message.content);
+    return message;
+  }
+
+  try {
+    return await readStream(res, model, onText);
+  } catch (err) {
+    if (err instanceof BrainError) throw err;
+    throw new BrainError('network', `${model} stream interrupted: ${err.message}`);
+  }
+}
+
+// Reads server-sent events: text arrives in small pieces, tool calls arrive in fragments to stitch together.
+async function readStream(res, model, onText) {
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let pending = '';
+  let content = '';
+  const calls = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    pending += value;
+    const lines = pending.split('\n');
+    pending = lines.pop();
+    for (const line of lines) {
+      const payload = line.trim().replace(/^data:\s*/, '');
+      if (!line.trim().startsWith('data:') || payload === '[DONE]') continue;
+      let chunk;
+      try {
+        chunk = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+      if (chunk.error) throw new BrainError('api', `${model} stream error: ${chunk.error.message ?? ''}`);
+      const delta = chunk.choices?.[0]?.delta ?? {};
+      if (delta.content) {
+        content += delta.content;
+        onText(delta.content);
+      }
+      for (const part of delta.tool_calls ?? []) {
+        const call = (calls[part.index ?? 0] ??= { id: '', type: 'function', function: { name: '', arguments: '' } });
+        if (part.id) call.id = part.id;
+        if (part.function?.name) call.function.name += part.function.name;
+        if (part.function?.arguments) call.function.arguments += part.function.arguments;
+      }
+    }
+  }
+  const toolCalls = calls.filter(Boolean);
+  return { role: 'assistant', content, ...(toolCalls.length && { tool_calls: toolCalls }) };
 }

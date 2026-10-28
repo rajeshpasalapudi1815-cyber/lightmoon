@@ -363,3 +363,14 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
 @media (max-width: 420px) {
   .wide-only { display: none; }
 }
+
+/* ---------- Shared content, lock screen, settings sections ---------- */
+.msg.shared { align-self: center; max-width: 92%; border: 1px dashed var(--cyan-dim); background: rgba(63, 216, 255, 0.05); }
+.chip-button { cursor: pointer; font: inherit; font-size: 13px; padding: 6px 12px; }
+.chip-button:hover { background: rgba(63, 216, 255, 0.22); }
+.link-btn { background: none; border: 0; padding: 0; color: var(--muted); font-size: 13px; text-decoration: underline; cursor: pointer; justify-self: center; }
+.link-btn:hover { color: var(--text); }
+.data-box .row input { flex: 1; min-width: 0; }
+.pin-setup { display: grid; gap: 10px; margin-top: 4px; }
+.pin-setup button { justify-self: start; }
+#lockStatus { color: var(--text); }

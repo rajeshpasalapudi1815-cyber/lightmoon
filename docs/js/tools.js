@@ -1,6 +1,7 @@
-// Tools the model can call to change LightMoon's memory, tasks and goals.
+// Tools the model can call to change LightMoon's memory, tasks and goals, and to check the weather.
 import { memories, tasks, goals, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
 import { normalizeTime, localStamp, prettyTime } from './time.js';
+import { findPlace, savedPlace, savePlace, weatherSummary } from './weather.js';
 
 function tool(name, description, properties, required = []) {
   return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
@@ -57,6 +58,17 @@ export const TOOLS = [
     { goal_id: ID, status: { type: 'string', enum: GOAL_STATUSES } },
     ['goal_id', 'status'],
   ),
+  tool(
+    'get_weather',
+    "Get today's weather: now, the day's range, and when rain is likely. Uses the user's saved place unless they name a city.",
+    { city: { type: 'string', description: 'Optional city, e.g. "Hyderabad".' } },
+  ),
+  tool(
+    'set_weather_place',
+    'Save the city used for weather in daily briefings, when the user tells you where they are.',
+    { city: { type: 'string', description: 'The city, e.g. "Hyderabad".' } },
+    ['city'],
+  ),
 ];
 
 function toId(value) {
@@ -90,7 +102,8 @@ function findGoal(id) {
   return goal;
 }
 
-// Each handler returns a short summary (shown as a chip under the reply), or an object with extras.
+// Each handler returns a short summary (shown as a chip under the reply), or an object with extras:
+// `result` (what the model is told, when it differs from the chip) and `calendar` (a reminder to export).
 const handlers = {
   remember({ content, category }) {
     const fact = toText(content, 'content', 300);
@@ -150,15 +163,27 @@ const handlers = {
     const verb = { achieved: 'Goal achieved', dropped: 'Goal dropped', active: 'Goal reactivated' }[status];
     return `${verb}: ${goal.title}`;
   },
+
+  async get_weather({ city }) {
+    const place = city?.trim() ? await findPlace(city) : savedPlace();
+    if (!place) throw new Error('No weather place is saved. Ask the user which city they are in, then use set_weather_place.');
+    return { text: `Checked the weather: ${place.name}`, result: await weatherSummary(place) };
+  },
+
+  async set_weather_place({ city }) {
+    const place = await findPlace(toText(city, 'city', 100));
+    savePlace(place);
+    return `Weather place: ${place.name}`;
+  },
 };
 
-export function runTool(name, rawArgs) {
+export async function runTool(name, rawArgs) {
   if (!Object.hasOwn(handlers, name)) return { ok: false, error: `Unknown tool "${name}".` };
   try {
     const args = typeof rawArgs === 'string' ? JSON.parse(rawArgs || '{}') : (rawArgs ?? {});
-    const out = handlers[name](args);
+    const out = await handlers[name](args);
     const action = typeof out === 'string' ? { text: out } : out;
-    return { ok: true, result: action.text, action };
+    return { ok: true, result: action.result ?? action.text, action };
   } catch (err) {
     return { ok: false, error: err.message };
   }
