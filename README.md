@@ -44,10 +44,15 @@ Things to try:
 
 ## Good to know
 
-- **Reminders** go off while LightMoon is open. Missed ones are announced the next time you open it.
-  For reminders that must reach you even when LightMoon is closed, tap **Add to Google Calendar** under the reminder.
-- **Your data stays on the device.** Your phone and your computer each keep their own copy.
-  Use **Settings → Download backup** now and then, and **Restore backup** to move your data to another device.
+- **Reminders:** turn on **Settings → Reminder notifications** and reminders pop up on that device at the right
+  time, even when LightMoon is closed. The LightMoon cloud only learns *when* each reminder is due; the text stays
+  on your devices. (Without notifications, reminders go off while the app is open, and missed ones are announced
+  the next time you open it.)
+- **Sync between devices:** **Settings → Start syncing** on one device shows a sync code. On the other, choose
+  **I have a code** and type it in. Memories, tasks, goals and chats are then combined and kept in step.
+  Everything is encrypted on the device with that code before upload, so keep the code private. Your API key, PIN
+  and voice settings stay on each device.
+- **Backups:** **Settings → Download backup** saves everything to a file; **Restore backup** brings it back.
   Backups never include your API key.
 - **Switching the AI:** Settings → *AI brain (advanced)*. Any OpenAI-compatible service works.
   Leave the defaults to use Groq's free tier, with an automatic backup model when the free limit is hit.
@@ -70,6 +75,12 @@ docs/                 the app (GitHub Pages publishes this folder)
   js/store.js         on-device storage, backup and restore
   js/weather.js       today's weather from Open-Meteo
   js/lock.js          PIN and fingerprint app lock
+  js/cloud.js         reminder notifications and encrypted sync
+  js/vault.js         sync codes and encryption
+  js/notifier.js      what the service worker shows when a reminder is due
+cloud/                the small cloud service (Cloudflare Worker + D1 database, free plan)
+  src/worker.js       stores encrypted sync data and reminder times; sends the reminder pushes
+  wrangler.toml       its settings; deploy with `npx wrangler deploy` from this folder
   sw.js               lets it install, work offline and show notifications
 serve.js              optional: run it on this computer at http://localhost:3000
 Start LightMoon.cmd   double-click to run serve.js and open the browser

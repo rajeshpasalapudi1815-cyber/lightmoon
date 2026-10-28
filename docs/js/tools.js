@@ -10,7 +10,7 @@ function tool(name, description, properties, required = []) {
   return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
 }
 
-const ID = { type: 'integer', description: 'The id shown as [#id] in your context.' };
+const ID = { type: 'string', description: 'The id shown as [#id] in your context, without the #, e.g. "k3x9q2".' };
 
 export const TOOLS = [
   tool(
@@ -75,8 +75,8 @@ export const TOOLS = [
 ];
 
 function toId(value) {
-  const id = Number(value);
-  if (!Number.isInteger(id) || id <= 0) throw new Error(`"${value}" is not a valid id.`);
+  const id = String(value ?? '').trim().replace(/^\[?#/, '').replace(/\]$/, '');
+  if (!/^[a-z0-9]{1,16}$/i.test(id)) throw new Error(`"${value}" is not a valid id.`);
   return id;
 }
 

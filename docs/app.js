@@ -3,6 +3,7 @@
 import * as store from './js/store.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
+import * as cloud from './js/cloud.js';
 import { chat, briefing } from './js/brain.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 
@@ -593,10 +594,11 @@ async function runBriefing(force = false) {
   }
 }
 
-function pollReminders() {
+async function pollReminders() {
   const due = store.tasks.takeDueReminders();
   if (!due.length) return;
-  for (const reminder of due) {
+  const notified = await cloud.notifiedReminders(); // already shown as a phone notification while closed
+  for (const reminder of due.filter(r => !notified[r.id])) {
     const minutesLate = (Date.now() - toDate(reminder.remind_at).getTime()) / 60_000;
     const late = minutesLate > LATE_REMINDER_MINUTES;
     addMessage('reminder', late ? `Missed reminder (${formatWhen(reminder.remind_at)}): ${reminder.title}` : `Reminder: ${reminder.title}`);
@@ -751,7 +753,57 @@ function openSettings() {
   $('#settingsError').textContent = '';
   paintWeatherSettings();
   paintLockSettings();
+  paintCloudSettings();
   $('#settings').showModal();
+}
+
+// ---------- Reminder notifications and sync ----------
+
+function describeAgo(ms) {
+  const minutes = Math.round((Date.now() - ms) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  return new Date(ms).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+function paintSyncStatus(status = cloud.syncStatus()) {
+  if (!cloud.syncCode()) return void ($('#syncStatus').textContent = 'Off');
+  $('#syncStatus').textContent = status.syncing ? 'Syncing...'
+    : status.error ? `Problem: ${status.error}`
+    : status.lastSync ? `On, last synced ${describeAgo(status.lastSync)}` : 'On';
+}
+
+function paintCloudSettings() {
+  const supported = cloud.notificationsSupported();
+  const on = cloud.notificationsOn();
+  $('#notifyStatus').textContent = !supported ? "Not available in this browser" : on ? 'On for this device' : 'Off';
+  $('#notifyOn').hidden = !supported || on;
+  $('#notifyOff').hidden = !on;
+
+  const code = cloud.syncCode();
+  $('#syncOffBox').hidden = Boolean(code);
+  $('#syncOnBox').hidden = !code;
+  $('#syncJoinRow').hidden = true;
+  $('#syncCodeInput').value = '';
+  $('#syncCodeShow').textContent = code ?? '';
+  $('#syncCopy').textContent = 'Copy code';
+  paintSyncStatus();
+}
+
+// Runs a cloud step from a Settings button, showing progress and any problem in the dialog.
+async function cloudAction(action, doneMessage) {
+  const error = $('#settingsError');
+  error.textContent = '';
+  for (const button of document.querySelectorAll('.cloud-box button')) button.disabled = true;
+  try {
+    await action();
+    if (doneMessage) note(doneMessage);
+  } catch (err) {
+    error.textContent = err.message;
+  } finally {
+    for (const button of document.querySelectorAll('.cloud-box button')) button.disabled = false;
+    paintCloudSettings();
+  }
 }
 
 // ---------- Weather settings ----------
@@ -997,6 +1049,32 @@ function wireUp() {
     weather.savePlace(null);
     paintWeatherSettings();
   });
+  $('#notifyOn').addEventListener('click', () => cloudAction(cloud.enableNotifications, 'Reminder notifications are on for this device.'));
+  $('#notifyOff').addEventListener('click', () => cloudAction(cloud.disableNotifications));
+  $('#syncStart').addEventListener('click', () => cloudAction(cloud.startSync));
+  $('#syncJoinShow').addEventListener('click', () => {
+    $('#syncJoinRow').hidden = false;
+    $('#syncCodeInput').focus();
+  });
+  $('#syncJoin').addEventListener('click', () => cloudAction(() => cloud.joinSync($('#syncCodeInput').value), 'Synced. This device now shares memories, tasks and goals with your other devices.'));
+  $('#syncCodeInput').addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    $('#syncJoin').click();
+  });
+  $('#syncNowBtn').addEventListener('click', () => cloudAction(() => cloud.syncNow({ required: true })));
+  $('#syncCopy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(cloud.syncCode());
+      $('#syncCopy').textContent = 'Copied';
+    } catch {
+      $('#settingsError').textContent = 'Copy failed. Write the code down instead.';
+    }
+  });
+  $('#syncStop').addEventListener('click', () => {
+    if (!confirm('Stop syncing on this device? It keeps what it has; changes stop flowing to and from your other devices.')) return;
+    cloudAction(cloud.stopSync);
+  });
 
   for (const tab of document.querySelectorAll('[role="tab"]')) {
     tab.addEventListener('click', () => {
@@ -1089,6 +1167,14 @@ function start({ auto = false } = {}) {
   pollReminders();
   setInterval(pollReminders, REMINDER_POLL_MS);
   setInterval(renderTasks, 60_000); // keeps overdue highlighting current
+  cloud.init({
+    // Another device's changes arrived: show them (the chat only if new messages came in).
+    onSynced({ messagesAdded }) {
+      applyState();
+      if (messagesAdded && !busy) renderHistory();
+    },
+    onStatus: paintSyncStatus,
+  });
 
   // Opened from a home-screen shortcut or the share sheet: do that instead of the usual briefing.
   // Otherwise brief (or greet), then start listening if that setting is on.
@@ -1124,7 +1210,13 @@ function soundAllowedWithoutTap() {
 }
 
 function boot() {
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js', { type: 'module' }).catch(() => {});
+    // A cloud reminder arrived while the app is open: announce it here instead of as a notification.
+    navigator.serviceWorker.addEventListener('message', event => {
+      if (event.data?.type === 'reminders-due' && started) pollReminders();
+    });
+  }
   navigator.storage?.persist?.().catch(() => {});
   wireUp();
   applyState();

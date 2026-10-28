@@ -1,5 +1,8 @@
-// Service worker: lets LightMoon install like an app, open without internet, and show reminder notifications.
-const CACHE = 'lightmoon-v3';
+// Service worker: lets LightMoon install like an app, open without internet, and show reminder
+// notifications, including when the cloud wakes it at a reminder's time while the app is closed.
+import { showDueReminders } from './js/notifier.js';
+
+const CACHE = 'lightmoon-v4';
 const APP_FILES = [
   './',
   './index.html',
@@ -12,6 +15,10 @@ const APP_FILES = [
   './js/time.js',
   './js/weather.js',
   './js/lock.js',
+  './js/idb.js',
+  './js/vault.js',
+  './js/cloud.js',
+  './js/notifier.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',
@@ -50,6 +57,9 @@ self.addEventListener('fetch', event => {
     })(),
   );
 });
+
+// The cloud's push means "a reminder is due now" (see notifier.js).
+self.addEventListener('push', event => event.waitUntil(showDueReminders({ registration: self.registration, clients: self.clients })));
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();

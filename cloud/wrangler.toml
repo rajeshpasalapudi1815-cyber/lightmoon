@@ -1,0 +1,19 @@
+# LightMoon cloud service (Cloudflare Workers, free plan).
+name = "lightmoon-cloud"
+main = "src/worker.js"
+compatibility_date = "2026-09-01"
+
+# Every minute: send push notifications for reminders that are due.
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "lightmoon"
+database_id = "00d27a62-396d-4f17-9215-f0febce4fdb9"
+
+[vars]
+ALLOWED_ORIGINS = "https://rajeshpasalapudi1815-cyber.github.io,http://localhost:3000"
+VAPID_SUBJECT = "https://rajeshpasalapudi1815-cyber.github.io/lightmoon/"
+VAPID_PUBLIC_KEY = "BHZKU-ghJRrG668pOnaesKU-YCU0rJnoAXEP7Bv54Zf2NGkqFG0QVXWvE0fSrf7L5yxaRmPD_HlVvnxexXH5TDY"
+# VAPID_PRIVATE_JWK is a secret: `wrangler secret put VAPID_PRIVATE_JWK` (locally it comes from .dev.vars).

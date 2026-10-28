@@ -1,5 +1,6 @@
 // Everything LightMoon knows is stored on this device, in the browser's local storage.
-// Nothing here leaves the device except the conversation sent to the AI service.
+// Nothing here leaves the device except the conversation sent to the AI service, and, if sync is on,
+// an encrypted copy (see cloud.js). Records carry random ids and change times so devices can merge.
 import { localStamp, today } from './time.js';
 
 export const MEMORY_CATEGORIES = ['preference', 'person', 'routine', 'goal', 'health', 'work', 'fact', 'other'];
@@ -15,16 +16,24 @@ export const DEFAULT_AI = {
 const DATA_KEY = 'assistant.data.v1';
 const AI_KEY = 'assistant.ai'; // kept apart from the data so backups never contain the API key
 const MAX_MESSAGES = 400;
+const KEEP_DELETED_MS = 60 * 86_400_000; // deletions are remembered this long so they reach other devices
+const COLLECTIONS = ['memories', 'tasks', 'goals', 'checkins'];
+const LOCAL_SETTINGS = new Set(['last_briefing']); // per device, never synced
 
 const blank = () => ({
   settings: {},
-  ids: { message: 0, memory: 0, task: 0, goal: 0, checkin: 0 },
+  settingsAt: {}, // when each setting last changed, for sync
   messages: [],
   memories: [],
   tasks: [],
   goals: [],
   checkins: [],
 });
+
+// Short random ids that won't clash between a phone and a computer.
+export function newId() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => (byte % 36).toString(36)).join('');
+}
 
 function readJson(key) {
   try {
@@ -42,19 +51,50 @@ function writeJson(key, value) {
   }
 }
 
+const createdMs = record => Date.parse(record.done_at ?? record.created_at ?? '') || 0;
+
 function normalize(saved) {
   const base = blank();
   if (!saved || typeof saved !== 'object') return base;
-  const list = name => (Array.isArray(saved[name]) ? saved[name] : []);
-  return {
+  const list = name => (Array.isArray(saved[name]) ? saved[name].filter(item => item && typeof item === 'object') : []);
+  const data = {
     settings: { ...saved.settings },
-    ids: { ...base.ids, ...saved.ids },
+    settingsAt: { ...saved.settingsAt },
     messages: list('messages'),
     memories: list('memories'),
     tasks: list('tasks'),
     goals: list('goals'),
     checkins: list('checkins'),
   };
+  return upgradeRecords(data);
+}
+
+// Older versions numbered records 1, 2, 3 on each device and kept no change times.
+// Give them unique ids and times so they can be merged with other devices.
+function upgradeRecords(data) {
+  const goalIds = new Map();
+  for (const name of COLLECTIONS) {
+    for (const record of data[name]) {
+      if (typeof record.id === 'number') {
+        const id = newId();
+        if (name === 'goals') goalIds.set(record.id, id);
+        record.id = id;
+      }
+      record.updated_at ??= Math.min(createdMs(record), Date.now());
+    }
+  }
+  for (const checkin of data.checkins) {
+    if (goalIds.has(checkin.goal_id)) checkin.goal_id = goalIds.get(checkin.goal_id);
+  }
+  data.messages.forEach((message, index) => {
+    if (typeof message.id === 'number') message.id = newId();
+    message.at ??= (Date.parse(message.created_at ?? '') || 0) + index; // keeps same-minute messages in order
+  });
+  data.messages.sort((a, b) => a.at - b.at);
+  for (const key of Object.keys(data.settings)) {
+    if (!LOCAL_SETTINGS.has(key)) data.settingsAt[key] ??= 0;
+  }
+  return data;
 }
 
 // Earlier versions (named Vega, and before that Jarvis) stored data under their own names.
@@ -80,18 +120,35 @@ function migrateOldKeys() {
 
 migrateOldKeys();
 let data = normalize(readJson(DATA_KEY));
+writeJson(DATA_KEY, data); // keep upgraded ids stable from the first launch
 
-function save() {
+const changeListeners = new Set();
+
+// Called after every change made on this device (cloud.js uses it to sync).
+export const onLocalChange = callback => changeListeners.add(callback);
+
+function save({ quiet = false } = {}) {
   if (data.messages.length > MAX_MESSAGES) data.messages = data.messages.slice(-MAX_MESSAGES);
+  const cutoff = Date.now() - KEEP_DELETED_MS;
+  for (const name of COLLECTIONS) data[name] = data[name].filter(r => !r.deleted || r.updated_at > cutoff);
   writeJson(DATA_KEY, data);
+  if (!quiet) for (const callback of changeListeners) callback();
 }
 
-const nextId = kind => ++data.ids[kind];
+// An edit always counts as newer than the version it replaces, even if this device's clock is behind.
+const touch = record => {
+  record.updated_at = Math.max(Date.now(), (record.updated_at ?? 0) + 1);
+};
+const live = name => data[name].filter(record => !record.deleted);
+const find = (name, id) => live(name).find(record => record.id === String(id));
 
-function removeWhere(name, predicate) {
-  const before = data[name].length;
-  data[name] = data[name].filter(item => !predicate(item));
-  if (data[name].length === before) return false;
+// Deleted records stay as an empty marker for a while, so the deletion reaches other devices.
+function remove(name, id) {
+  const record = find(name, id);
+  if (!record) return false;
+  for (const key of Object.keys(record)) if (!['id', 'goal_id'].includes(key)) delete record[key];
+  record.deleted = true;
+  touch(record);
   save();
   return true;
 }
@@ -111,6 +168,7 @@ export const settings = {
   get: (key, fallback = '') => data.settings[key] ?? fallback,
   set(key, value) {
     data.settings[key] = String(value);
+    if (!LOCAL_SETTINGS.has(key)) data.settingsAt[key] = Date.now();
     save();
   },
 };
@@ -125,9 +183,14 @@ export function profile() {
 
 export function saveProfile({ userName, address, assistantName }) {
   const clean = (value, max) => String(value).trim().slice(0, max);
-  if (typeof userName === 'string') data.settings.user_name = clean(userName, 60);
-  if (typeof address === 'string' && address.trim()) data.settings.address = clean(address, 30);
-  if (typeof assistantName === 'string' && assistantName.trim()) data.settings.assistant_name = clean(assistantName, 30);
+  const update = (key, value) => {
+    if (data.settings[key] === value) return;
+    data.settings[key] = value;
+    data.settingsAt[key] = Date.now();
+  };
+  if (typeof userName === 'string') update('user_name', clean(userName, 60));
+  if (typeof address === 'string' && address.trim()) update('address', clean(address, 30));
+  if (typeof assistantName === 'string' && assistantName.trim()) update('assistant_name', clean(assistantName, 30));
   save();
 }
 
@@ -149,32 +212,35 @@ export function saveAiConfig(changes) {
 
 export const messages = {
   add(role, content) {
-    data.messages.push({ id: nextId('message'), role, content, created_at: localStamp() });
+    const at = Math.max(Date.now(), (data.messages.at(-1)?.at ?? 0) + 1);
+    data.messages.push({ id: newId(), role, content, created_at: localStamp(), at });
     save();
   },
   recent: limit => data.messages.slice(-limit),
 };
 
+const byCreated = (a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? '') || a.updated_at - b.updated_at;
+
 export const memories = {
-  list: () => [...data.memories].reverse(),
+  list: () => live('memories').sort(byCreated).reverse(),
   add(content, category) {
-    data.memories.push({ id: nextId('memory'), content, category, created_at: localStamp() });
+    data.memories.push({ id: newId(), content, category, created_at: localStamp(), updated_at: Date.now() });
     save();
   },
-  remove: id => removeWhere('memories', memory => memory.id === id),
+  remove: id => remove('memories', id),
 };
 
 const whenOf = task => task.remind_at ?? task.due_at ?? '9999';
 
 export const tasks = {
-  open: () => data.tasks.filter(t => !t.done).sort((a, b) => whenOf(a).localeCompare(whenOf(b)) || a.id - b.id),
+  open: () => live('tasks').filter(t => !t.done).sort((a, b) => whenOf(a).localeCompare(whenOf(b)) || byCreated(a, b)),
   doneToday: () =>
-    data.tasks.filter(t => t.done && t.done_at?.startsWith(today())).sort((a, b) => b.done_at.localeCompare(a.done_at)),
-  get: id => data.tasks.find(t => t.id === id),
+    live('tasks').filter(t => t.done && t.done_at?.startsWith(today())).sort((a, b) => b.done_at.localeCompare(a.done_at)),
+  get: id => find('tasks', id),
   add({ title, dueAt = null, remindAt = null }) {
     data.tasks.push({
-      id: nextId('task'), title, due_at: dueAt, remind_at: remindAt,
-      done: false, reminded: false, done_at: null, created_at: localStamp(),
+      id: newId(), title, due_at: dueAt, remind_at: remindAt,
+      done: false, reminded: false, done_at: null, created_at: localStamp(), updated_at: Date.now(),
     });
     save();
   },
@@ -183,16 +249,28 @@ export const tasks = {
     if (!task || task.done) return false;
     task.done = true;
     task.done_at = localStamp();
+    touch(task);
     save();
     return true;
   },
-  remove: id => removeWhere('tasks', task => task.id === id),
+  remove: id => remove('tasks', id),
+
+  // Reminders on unfinished tasks due at or after `since` (ms), for notifications. This includes ones
+  // already announced on this device, so the user's other devices still get notified.
+  remindersSince: since =>
+    tasks.open()
+      .filter(t => t.remind_at)
+      .map(t => ({ id: t.id, title: t.title, at: Date.parse(t.remind_at) }))
+      .filter(r => Number.isFinite(r.at) && r.at >= since),
 
   // Returns reminders that are due and marks them delivered, so each one fires once.
   takeDueReminders() {
     const now = localStamp();
-    const due = data.tasks.filter(t => !t.done && !t.reminded && t.remind_at && t.remind_at <= now);
-    for (const task of due) task.reminded = true;
+    const due = live('tasks').filter(t => !t.done && !t.reminded && t.remind_at && t.remind_at <= now);
+    for (const task of due) {
+      task.reminded = true;
+      touch(task);
+    }
     if (due.length) save();
     return due.map(({ id, title, remind_at }) => ({ id, title, remind_at }));
   },
@@ -200,30 +278,77 @@ export const tasks = {
 
 export const goals = {
   active: () =>
-    data.goals
+    live('goals')
       .filter(goal => goal.status === 'active')
+      .sort(byCreated)
       .map(goal => {
-        const checkins = data.checkins.filter(c => c.goal_id === goal.id);
+        const checkins = live('checkins').filter(c => c.goal_id === goal.id).sort(byCreated);
         const last = checkins.at(-1);
         return { ...goal, checkin_count: checkins.length, last_note: last?.note ?? null, last_checkin: last?.created_at ?? null };
       }),
-  get: id => data.goals.find(goal => goal.id === id),
+  get: id => find('goals', id),
   add({ title, why = null, targetDate = null }) {
-    data.goals.push({ id: nextId('goal'), title, why, target_date: targetDate, status: 'active', created_at: localStamp() });
+    data.goals.push({ id: newId(), title, why, target_date: targetDate, status: 'active', created_at: localStamp(), updated_at: Date.now() });
     save();
   },
   setStatus(id, status) {
     const goal = goals.get(id);
     if (!goal) return false;
     goal.status = status;
+    touch(goal);
     save();
     return true;
   },
   logProgress(goalId, note, rating = null) {
-    data.checkins.push({ id: nextId('checkin'), goal_id: goalId, note, rating, created_at: localStamp() });
+    data.checkins.push({ id: newId(), goal_id: goalId, note, rating, created_at: localStamp(), updated_at: Date.now() });
     save();
   },
 };
+
+// ---------- Sync support (used by cloud.js) ----------
+
+const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+// The part of the data shared between devices, in a fixed order so two copies can be compared.
+export function syncableData(source = data) {
+  const settings = {};
+  const settingsAt = {};
+  for (const key of Object.keys(source.settings).sort()) {
+    if (LOCAL_SETTINGS.has(key)) continue;
+    settings[key] = source.settings[key];
+    settingsAt[key] = source.settingsAt[key] ?? 0;
+  }
+  const shared = { settings, settingsAt, messages: source.messages };
+  for (const name of COLLECTIONS) shared[name] = [...source[name]].sort(byId);
+  return shared;
+}
+
+// The same, for a copy that came from another device.
+export const syncableOf = remote => syncableData(normalize(remote));
+
+// Merges another device's copy in: for each record the most recent change wins, chats are combined.
+// Returns how many chat messages were new here.
+export function mergeIn(remote) {
+  const theirs = normalize(remote);
+  for (const name of COLLECTIONS) {
+    const merged = new Map(data[name].map(record => [record.id, record]));
+    for (const record of theirs[name]) {
+      const mine = merged.get(record.id);
+      if (!mine || (record.updated_at ?? 0) > (mine.updated_at ?? 0)) merged.set(record.id, record);
+    }
+    data[name] = [...merged.values()];
+  }
+  const known = new Set(data.messages.map(m => m.id));
+  const added = theirs.messages.filter(m => !known.has(m.id));
+  data.messages = [...data.messages, ...added].sort((a, b) => a.at - b.at || byId(a, b));
+  for (const [key, at] of Object.entries(theirs.settingsAt)) {
+    if (LOCAL_SETTINGS.has(key) || at <= (data.settingsAt[key] ?? 0)) continue;
+    data.settings[key] = theirs.settings[key];
+    data.settingsAt[key] = at;
+  }
+  save({ quiet: true });
+  return added.length;
+}
 
 // ---------- Whole-state helpers ----------
 
@@ -245,7 +370,7 @@ export function snapshot() {
   };
 }
 
-// Removes everything this app keeps on the device: data, AI settings, preferences and the app lock.
+// Removes everything this app keeps on the device: data, AI settings, preferences, the app lock and sync settings.
 export function eraseEverything() {
   for (const key of Object.keys(localStorage)) {
     if (key.startsWith('assistant.')) localStorage.removeItem(key);
@@ -254,7 +379,7 @@ export function eraseEverything() {
 }
 
 export function exportData() {
-  return JSON.stringify({ app: 'lightmoon', version: 1, exportedAt: new Date().toISOString(), ...data }, null, 2);
+  return JSON.stringify({ app: 'lightmoon', version: 2, exportedAt: new Date().toISOString(), ...data }, null, 2);
 }
 
 export function importData(text) {

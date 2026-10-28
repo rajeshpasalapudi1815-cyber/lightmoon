@@ -162,6 +162,38 @@
         <small>Forecasts come from Open-Meteo, free. Only your city's rough location is sent.</small>
       </div>
 
+      <div class="data-box cloud-box">
+        <span class="field-label">Reminder notifications: <span id="notifyStatus" class="status-value"></span></span>
+        <span class="row">
+          <button type="button" id="notifyOn" class="btn-ghost">Turn on</button>
+          <button type="button" id="notifyOff" class="btn-ghost" hidden>Turn off</button>
+        </span>
+        <small>Reminders pop up on this device even when LightMoon is closed. The LightMoon cloud only learns when each reminder is due, never what it says.</small>
+      </div>
+
+      <div class="data-box cloud-box">
+        <span class="field-label">Sync between devices: <span id="syncStatus" class="status-value"></span></span>
+        <div id="syncOffBox" class="sync-box">
+          <span class="row">
+            <button type="button" id="syncStart" class="btn-ghost">Start syncing</button>
+            <button type="button" id="syncJoinShow" class="btn-ghost">I have a code</button>
+          </span>
+          <span class="row" id="syncJoinRow" hidden>
+            <input id="syncCodeInput" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false">
+            <button type="button" id="syncJoin" class="btn-ghost">Join</button>
+          </span>
+        </div>
+        <div id="syncOnBox" class="sync-box" hidden>
+          <code id="syncCodeShow" class="sync-code"></code>
+          <span class="row">
+            <button type="button" id="syncCopy" class="btn-ghost">Copy code</button>
+            <button type="button" id="syncNowBtn" class="btn-ghost">Sync now</button>
+            <button type="button" id="syncStop" class="btn-ghost">Stop syncing</button>
+          </span>
+        </div>
+        <small>On your other device, open Settings → <em>I have a code</em> and enter this code: both devices' memories, tasks, goals and chats are combined. Everything is encrypted with the code before it leaves the device, so keep the code private. Your API key, PIN and voice settings stay on each device.</small>
+      </div>
+
       <div class="data-box">
         <span class="field-label">App lock: <span id="lockStatus"></span></span>
         <span class="row">
