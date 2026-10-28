@@ -153,14 +153,47 @@ async function notify(title, body) {
 }
 
 // ---------- Transcript and status ----------
+// The conversation is always kept, but by default only the moon shows: the chat button opens it.
+// Meanwhile reminders, notes and problems appear briefly as a caption under the moon.
 
-function addMessage(kind, text, actions = []) {
+const CAPTION_MS = 9000;
+let captionTimer = null;
+
+const chatOpen = () => document.body.classList.contains('show-chat');
+
+function setChatOpen(open) {
+  document.body.classList.toggle('show-chat', open);
+  const button = $('#chatBtn');
+  button.setAttribute('aria-pressed', String(open));
+  button.title = open ? 'Hide the conversation' : 'Show the conversation';
+  button.setAttribute('aria-label', button.title);
+  if (open) {
+    $('#chatUnread').hidden = true;
+    transcript.scrollTop = transcript.scrollHeight;
+  }
+}
+
+function showCaption(text, kind = '') {
+  const caption = $('#caption');
+  caption.textContent = text;
+  caption.className = `caption ${kind}`;
+  clearTimeout(captionTimer);
+  captionTimer = setTimeout(() => { caption.textContent = ''; }, CAPTION_MS);
+}
+
+// `fromHistory`: shown again on start-up, not something new.
+function addMessage(kind, text, actions = [], { fromHistory = false } = {}) {
   const node = el('div', `msg ${kind}`);
   if (kind.startsWith('assistant')) node.dataset.who = assistantName().toUpperCase();
   node.append(el('div', 'msg-text', text));
   addActions(node, actions);
   transcript.append(node);
   transcript.scrollTop = transcript.scrollHeight;
+  if (!fromHistory && !chatOpen()) {
+    $('#chatUnread').hidden = false;
+    if (kind === 'system' || kind === 'reminder') showCaption(text, kind);
+    if (kind.includes('error')) showCaption(text, 'error');
+  }
   return node;
 }
 
@@ -228,6 +261,7 @@ function streamReply() {
 
 // Something was shared to LightMoon from another app: offer quick things to do with it.
 function offerShared(text) {
+  setChatOpen(true); // the choices are in the conversation
   const preview = text.length > 280 ? `${text.slice(0, 280)}…` : text;
   const node = addMessage('shared', `Shared with ${assistantName()}:\n${preview}`);
   const row = el('div', 'actions');
@@ -387,6 +421,12 @@ function wakeWords() {
   return [...words];
 }
 
+// Shows what has been heard so far in the text box, scrolled so the latest words are in view.
+function showHeard(text) {
+  input.value = text;
+  input.scrollLeft = input.scrollWidth;
+}
+
 // Joins recognized phrases into one request. Chrome on Android repeats earlier words in later results
 // ("what", then "what is the weather"), so a phrase that starts with the previous one replaces it.
 function joinPhrases(phrases) {
@@ -442,7 +482,7 @@ const listener = {
       return;
     }
     if (this.capturing) {
-      input.value = opening;
+      showHeard(opening);
       if (!resume) this.waitForSilence();
     }
   },
@@ -472,7 +512,7 @@ const listener = {
     if (this.mode === 'command') {
       const finals = results.filter(r => r.isFinal).map(r => r[0].transcript);
       const interim = results.filter(r => !r.isFinal).map(r => r[0].transcript).join(' ');
-      input.value = `${joinPhrases([this.opening, ...finals])} ${interim}`.trim();
+      showHeard(`${joinPhrases([this.opening, ...finals])} ${interim}`.trim());
       this.waitForSilence(); // still talking: restart the pause timer
       return;
     }
@@ -757,7 +797,7 @@ function renderMemories() {
 
 function renderHistory() {
   transcript.replaceChildren();
-  for (const message of store.messages.recent(40)) addMessage(message.role, message.content);
+  for (const message of store.messages.recent(40)) addMessage(message.role, message.content, [], { fromHistory: true });
 }
 
 // ---------- Settings ----------
@@ -1159,8 +1199,10 @@ function wireUp() {
     event.preventDefault();
     const text = input.value;
     input.value = '';
+    if (text.trim()) setChatOpen(true); // typed messages are read, not heard: show the reply
     send(text);
   });
+  $('#chatBtn').addEventListener('click', () => setChatOpen(!chatOpen()));
   $('#core').addEventListener('click', () => listener.pushToTalk());
   $('#micBtn').addEventListener('click', () => listener.pushToTalk());
   $('#handsFreeBtn').addEventListener('click', toggleHandsFree);

@@ -379,6 +379,24 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
 .error-detail summary { cursor: pointer; }
 .error-detail code { display: block; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
 
+/* ---------- Voice view: the conversation is kept, but shown only when asked for ---------- */
+body:not(.show-chat) .transcript { display: none; }
+body:not(.show-chat) .core-wrap { flex: 1; justify-content: center; gap: 14px; }
+body:not(.show-chat) .reactor:not(.reactor-lg) { width: 200px; height: 200px; }
+.caption { margin: 0; max-width: 32em; min-height: 1.4em; padding: 0 8px; text-align: center; font-size: 15px; color: var(--muted); }
+.caption.reminder { color: var(--amber); }
+.caption.error { color: var(--danger); }
+#chatBtn { position: relative; }
+#chatBtn[aria-pressed='true'] { color: var(--cyan); border-color: var(--cyan); }
+.unread { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+@media (max-width: 860px) {
+  body:not(.show-chat) .reactor:not(.reactor-lg) { width: 170px; height: 170px; }
+}
+@media (max-width: 420px) {
+  .topbar-right { gap: 5px; }
+  .topbar .icon-btn { width: 34px; height: 34px; }
+}
+
 /* ---------- Reminder notifications and sync ---------- */
 .status-value { color: var(--text); }
 .sync-box { display: grid; gap: 8px; }

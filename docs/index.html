@@ -64,6 +64,10 @@
       <div class="topbar-right">
         <span id="clock" class="clock"></span>
         <button id="handsFreeBtn" class="chip-btn" aria-pressed="false" title="Listen for the wake word">Wake<span class="wide-only"> word</span>: off</button>
+        <button id="chatBtn" class="icon-btn" aria-pressed="false" aria-label="Show the conversation" title="Show the conversation">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span id="chatUnread" class="unread" hidden></span>
+        </button>
         <button id="panelsBtn" class="icon-btn only-mobile" aria-label="Tasks, goals and memory">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
         </button>
@@ -78,6 +82,7 @@
         <div class="core-wrap">
           <button id="core" class="reactor" aria-label="Tap to talk"><i></i><i></i><i></i><b></b></button>
           <p id="status" class="status" aria-live="polite">Standing by</p>
+          <p id="caption" class="caption" aria-live="polite"></p>
         </div>
         <div id="transcript" class="transcript" aria-live="polite"></div>
         <form id="composer" class="composer">
