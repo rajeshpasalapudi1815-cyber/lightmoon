@@ -268,7 +268,7 @@ export const tasks = {
   remindersSince: since =>
     tasks.open()
       .filter(t => t.remind_at)
-      .map(t => ({ id: t.id, title: t.title, announce: t.announce ?? null, at: Date.parse(t.remind_at) }))
+      .map(t => ({ id: t.id, title: t.title, announce: t.announce ?? null, at: Date.parse(t.remind_at), updated: t.updated_at }))
       .filter(r => Number.isFinite(r.at) && r.at >= since),
 
   // Returns reminders that are due and marks them delivered, so each one fires once.

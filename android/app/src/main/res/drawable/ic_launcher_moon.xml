@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App icon foreground: docs/icons/icon.svg, shrunk to fit Android's round and squircle masks. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <group
+        android:pivotX="256"
+        android:pivotY="256"
+        android:scaleX="0.72"
+        android:scaleY="0.72">
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#3FD8FF"
+            android:strokeAlpha="0.6"
+            android:strokeWidth="11"
+            android:pathData="M256,72 A184,184 0 1,1 256,440 A184,184 0 1,1 256,72 Z" />
+        <path
+            android:fillColor="#EFFCFF"
+            android:pathData="M247.6,143.31 A113,113 0 1,0 359.37,301.65 A97,97 0 0,1 247.6,143.31 Z" />
+        <path
+            android:fillColor="#EFFCFF"
+            android:pathData="M352,143 A6,6 0 1,0 364,143 A6,6 0 1,0 352,143 Z" />
+        <path
+            android:fillColor="#EFFCFF"
+            android:pathData="M395,205 A4,4 0 1,0 403,205 A4,4 0 1,0 395,205 Z" />
+    </group>
+</vector>

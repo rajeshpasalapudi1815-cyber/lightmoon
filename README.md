@@ -7,7 +7,23 @@ coaches you towards your goals, and keeps your tasks and reminders.
 Everything runs on the device itself. The only thing sent over the internet is the conversation, which goes
 to the AI service (Groq's free tier by default).
 
-## Install it on your Android phone
+## Install the Android app (recommended)
+
+The Android app speaks your reminders out loud at the right time, even when LightMoon is closed, the screen is off
+or the phone has restarted. It is the same LightMoon (it loads the live app, so updates arrive by themselves), plus
+the phone's own alarms and voice.
+
+1. On the phone, open https://github.com/rajeshpasalapudi1815-cyber/lightmoon/releases/latest and tap **LightMoon.apk**.
+2. When Chrome asks, allow it to install apps (**Settings → Allow from this source**), then tap **Install**.
+   Android may warn that the app is from an unknown developer: that's because it isn't from the Play Store.
+3. Open LightMoon, enter your name and Groq API key, and allow notifications and the microphone.
+4. In **Settings → Spoken reminders**, tap **Let it run in the background** (some phones otherwise stop it to save
+   battery), then **Test in 1 minute** and lock the phone: you should hear it.
+
+The app keeps its own data, separate from the Chrome version. To bring your memories and tasks across, use
+**Settings → Sync between devices** with the same code.
+
+## Or install it from Chrome
 
 1. Open the LightMoon link in **Chrome** on your phone.
 2. Tap the **⋮** menu, then **Add to Home screen** (or **Install app**), then **Install**. LightMoon now has its own icon and opens full-screen.
@@ -49,9 +65,10 @@ Things to try:
   on your devices. (Without notifications, reminders go off while the app is open, and missed ones are announced
   the next time you open it.)
 - **Spoken reminders:** when you set one ("remind me at 4:55 that I have a meeting at 5"), LightMoon writes what it
-  will say: "Boss, you have a meeting at 5 o'clock." If the app is open it says it at that moment; if it's closed,
-  the notification shows it and tapping it (or **Hear it**) opens LightMoon to say it. Phones don't let a closed web
-  app speak by itself. With the app lock on, notifications just say "You have a reminder".
+  will say: "Boss, you have a meeting at 5 o'clock." The Android app says it at that moment whether it's open or
+  not, at alarm volume. In the browser version it's said if the app is open; if it's closed, the notification shows
+  it and tapping it (or **Hear it**) opens LightMoon to say it, because phones don't let a closed web app speak by
+  itself. With the app lock on, notifications just say "You have a reminder".
 - **Sync between devices:** **Settings → Start syncing** on one device shows a sync code. On the other, choose
   **I have a code** and type it in. Memories, tasks, goals and chats are then combined and kept in step.
   Everything is encrypted on the device with that code before upload, so keep the code private. Your API key, PIN
@@ -82,12 +99,22 @@ docs/                 the app (GitHub Pages publishes this folder)
   js/cloud.js         reminder notifications and encrypted sync
   js/vault.js         sync codes and encryption
   js/notifier.js      what the service worker shows when a reminder is due
+  js/native.js        in the Android app: the phone's voice, listening and alarms
+  sw.js               lets it install, work offline and show notifications
 cloud/                the small cloud service (Cloudflare Worker + D1 database, free plan)
   src/worker.js       stores encrypted sync data and reminder times; sends the reminder pushes
   wrangler.toml       its settings; deploy with `npx wrangler deploy` from this folder
-  sw.js               lets it install, work offline and show notifications
+android/              the Android app (Capacitor), which opens the live web app
+  app/src/main/java/app/lightmoon/assistant/
+    ReminderAlarmsPlugin.java   what the web app calls to set the phone's alarms
+    ReminderStore.java          the upcoming reminders and their alarms
+    SpeakService.java           says a reminder out loud when its alarm goes off
+    SyncWorker.java             every 15 minutes, picks up reminders set on other devices
+    CloudCrypto.java            reads the encrypted sync copy, exactly as js/vault.js writes it
+scripts/android.mjs   `node scripts/android.mjs setup` once, then `node scripts/android.mjs build` for dist/LightMoon.apk
 serve.js              optional: run it on this computer at http://localhost:3000
 Start LightMoon.cmd   double-click to run serve.js and open the browser
 ```
 
-No build step and no packages to install. Plain HTML, CSS and JavaScript.
+The web app has no build step: plain HTML, CSS and JavaScript. Only the Android app needs building
+(Java 21 and the Android SDK; the setup script installs the SDK).

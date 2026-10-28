@@ -1,5 +1,6 @@
 // LightMoon app: runs entirely on this device. Chat, voice, memory, tasks, goals and reminders are all
 // handled here; the only thing sent over the internet is the conversation, to the AI service.
+import { isNativeApp, nativeAlarms } from './js/native.js'; // first: sets up voice in the Android app
 import * as store from './js/store.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
@@ -27,6 +28,7 @@ const LANGUAGES = [
 // Most natural-sounding voices first: Edge's natural British voices, then Chrome's and Apple's.
 const PREFERRED_VOICES = ['Microsoft Ryan Online', 'Microsoft Thomas Online', 'Google UK English Male', 'Microsoft George', 'Daniel'];
 const PREFS_KEY = 'assistant.prefs';
+const ASKED_NOTIFICATIONS_KEY = 'assistant.askedNotifications';
 const REMINDER_POLL_MS = 15_000;
 const LATE_REMINDER_MINUTES = 5;
 const RELOCK_AFTER_MS = 3 * 60_000; // with the app lock on, ask again after this long in the background
@@ -329,6 +331,9 @@ const speaker = {
       if (chosen) {
         utterance.voice = chosen;
         utterance.lang = chosen.lang;
+      } else if (isNativeApp) {
+        // The phone's own voice: British English, unless another language is chosen for listening.
+        utterance.lang = prefs.lang.startsWith('en') ? 'en-GB' : prefs.lang;
       }
       utterance.rate = rate;
       utterance.onend = utterance.onerror = () => {
@@ -600,6 +605,17 @@ async function runBriefing(force = false) {
 }
 
 async function pollReminders() {
+  if (nativeAlarms) {
+    // In the Android app, the phone's alarms say reminders while LightMoon is in the background or closed.
+    const { ids, visible } = await nativeAlarms.takeSpoken().catch(() => ({ ids: [], visible: true }));
+    for (const id of ids) {
+      const task = store.tasks.get(id);
+      if (!task || task.reminded) continue;
+      store.tasks.markReminded(id);
+      addMessage('reminder', sayReminder(task));
+    }
+    if (!visible) return;
+  }
   const due = store.tasks.takeDueReminders();
   if (!due.length) return;
   const notified = await cloud.notifiedReminders(); // already shown as a phone notification while closed
@@ -632,6 +648,14 @@ async function announceReminder(id) {
   addMessage('reminder', line);
   speaker.speak(line, { force: true });
   applyState();
+}
+
+// A reminder's alarm went off while LightMoon is on screen: announce it here, in the conversation.
+async function onReminderAlarm({ id, say }) {
+  if (!store.tasks.get(id)) await cloud.syncNow(); // set on another device and not synced here yet
+  if (store.tasks.get(id)) return pollReminders();
+  addMessage('reminder', say); // e.g. the test from Settings
+  speaker.speak(say, { force: true });
 }
 
 // ---------- Panels ----------
@@ -775,6 +799,7 @@ function openSettings() {
   paintWeatherSettings();
   paintLockSettings();
   paintCloudSettings();
+  paintPhoneSettings();
   $('#settings').showModal();
 }
 
@@ -792,6 +817,47 @@ function paintSyncStatus(status = cloud.syncStatus()) {
   $('#syncStatus').textContent = status.syncing ? 'Syncing...'
     : status.error ? `Problem: ${status.error}`
     : status.lastSync ? `On, last synced ${describeAgo(status.lastSync)}` : 'On';
+}
+
+// The Android app speaks reminders with the phone's own alarms instead of web notifications.
+async function paintPhoneSettings() {
+  $('#phoneBox').hidden = !nativeAlarms;
+  $('#notifyBox').hidden = isNativeApp;
+  if (!nativeAlarms) return;
+  const status = await nativeAlarms.status().catch(() => null);
+  if (!status) return void ($('#phoneStatus').textContent = 'Not available');
+  const upcoming = status.upcoming ? `${status.upcoming} coming up` : 'none coming up';
+  $('#phoneStatus').textContent = `On, ${upcoming}${status.exactAlarms ? '' : ' (may be a few minutes late)'}`;
+  $('#phoneNotify').hidden = status.notifications;
+  $('#phoneBattery').hidden = status.batteryUnrestricted;
+}
+
+async function allowPhoneNotifications() {
+  const status = await nativeAlarms.requestNotifications().catch(() => null);
+  if (!status?.notifications) {
+    $('#settingsError').textContent = 'Notifications are blocked. Allow them in your phone settings: Apps → LightMoon → Notifications.';
+  }
+  paintPhoneSettings();
+}
+
+async function testSpokenReminder() {
+  const word = addressWord();
+  const say = `${word.charAt(0).toUpperCase()}${word.slice(1)}, this is ${assistantName()}. Spoken reminders are working.`;
+  await nativeAlarms.test({ say, seconds: 60 });
+  note('Test set for one minute from now. Lock the phone or close the app; you should hear it.');
+  paintPhoneSettings();
+}
+
+// Android 13 and later ask before an app may show notifications. Ask once, on first start;
+// after that it's a button in Settings.
+async function askForNotificationsOnce() {
+  try {
+    if (localStorage.getItem(ASKED_NOTIFICATIONS_KEY)) return;
+    localStorage.setItem(ASKED_NOTIFICATIONS_KEY, '1');
+  } catch {
+    return;
+  }
+  await nativeAlarms.requestNotifications().catch(() => {});
 }
 
 function paintCloudSettings() {
@@ -1098,6 +1164,9 @@ function wireUp() {
     if (!confirm('Stop syncing on this device? It keeps what it has; changes stop flowing to and from your other devices.')) return;
     cloudAction(cloud.stopSync);
   });
+  $('#phoneNotify').addEventListener('click', allowPhoneNotifications);
+  $('#phoneBattery').addEventListener('click', () => nativeAlarms.openBatterySettings().catch(() => {}));
+  $('#phoneTest').addEventListener('click', testSpokenReminder);
 
   for (const tab of document.querySelectorAll('[role="tab"]')) {
     tab.addEventListener('click', () => {
@@ -1131,6 +1200,7 @@ function wireUp() {
   // Phones pause background apps, so catch up on reminders when LightMoon comes back to the front,
   // and ask for the PIN or fingerprint again after a while away.
   document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && $('#settings').open) paintPhoneSettings(); // back from the phone's battery settings
     if (!started) return;
     if (document.hidden) {
       hiddenAt = Date.now();
@@ -1199,8 +1269,17 @@ function start({ auto = false } = {}) {
     onStatus: paintSyncStatus,
   });
 
-  // Opened from a home-screen shortcut or the share sheet: do that instead of the usual briefing.
-  // Otherwise brief (or greet), then start listening if that setting is on.
+  if (nativeAlarms) {
+    nativeAlarms.addListener('reminderDue', onReminderAlarm);
+    askForNotificationsOnce().finally(() => greet(auto)); // the microphone question comes after this one
+  } else {
+    greet(auto);
+  }
+}
+
+// Opened from a home-screen shortcut or the share sheet: do that instead of the usual briefing.
+// Otherwise brief (or greet), then start listening if that setting is on.
+function greet(auto) {
   listener.autoStarted = auto;
   if (launch.reminder) {
     listenWhenFree = prefs.listenOnOpen; // say the reminder, then listen in case there's a reply
@@ -1236,7 +1315,13 @@ function soundAllowedWithoutTap() {
 }
 
 function boot() {
-  if ('serviceWorker' in navigator) {
+  // The Android app has its own alarms and voice, so it skips the web's notification worker and the
+  // always-on wake word (the phone's microphone beeps every few seconds when kept listening).
+  if (isNativeApp) {
+    prefs.handsFree = false;
+    $('#handsFreeBtn').hidden = true;
+  }
+  if ('serviceWorker' in navigator && !isNativeApp) {
     navigator.serviceWorker.register('./sw.js', { type: 'module' }).catch(() => {});
     // A cloud reminder arrived while the app is open: announce it here instead of as a notification.
     navigator.serviceWorker.addEventListener('message', event => {
@@ -1257,7 +1342,7 @@ function boot() {
     form.elements.userName.focus();
   } else if (lock.isEnabled()) {
     showLock();
-  } else if (soundAllowedWithoutTap()) {
+  } else if (isNativeApp || soundAllowedWithoutTap()) {
     start({ auto: true });
   } else {
     if (launch.reminder) $('#bootBtn').textContent = 'Hear reminder';

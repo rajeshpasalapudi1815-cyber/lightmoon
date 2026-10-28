@@ -5,6 +5,7 @@ import * as store from './store.js';
 import * as lock from './lock.js';
 import { reminderLine } from './announce.js';
 import { idbGet, idbSet } from './idb.js';
+import { nativeAlarms } from './native.js';
 import { newSyncCode, normalizeCode, spaceIdFor, keyFor, encryptJson, decryptJson } from './vault.js';
 
 export const DEFAULT_CLOUD_URL = 'https://lightmoon-cloud.lightmoon-cloud.workers.dev';
@@ -92,6 +93,16 @@ async function shareWithWorker() {
   const reminders = store.tasks.remindersSince(Date.now() - KEEP_RECENT_REMINDERS_MS)
     .map(r => ({ ...r, say: reminderLine(r, { address, user_name: userName }) }));
   await idbSet('reminders', reminders);
+  await scheduleOnPhone(reminders);
+}
+
+// In the Android app, the phone's own alarms say each reminder at its time, even with LightMoon closed.
+// With sync on, the phone also checks the synced copy now and then for reminders set on other devices.
+async function scheduleOnPhone(reminders) {
+  if (!nativeAlarms) return;
+  const upcoming = reminders.filter(r => r.at > Date.now()).map(({ id, title, at, say, updated }) => ({ id, title, at, say, updated }));
+  await nativeAlarms.schedule({ reminders: upcoming, hideText: lock.isEnabled() });
+  await nativeAlarms.configureBackground(config.syncCode ? { url: cloudUrl(), spaceId: config.spaceId, code: config.syncCode } : {});
 }
 
 // The lock was turned on or off: update what notifications may show.
@@ -221,6 +232,7 @@ async function runSync({ required = false } = {}) {
     if (merged) handlers.onSynced({ messagesAdded });
   } catch (err) {
     setStatus({ syncing: false, error: err.message });
+    shareWithWorker().catch(() => {}); // offline: still set this device's own reminders
     if (required) throw err;
   }
 }

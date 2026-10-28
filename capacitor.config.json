@@ -1,0 +1,12 @@
+{
+  "appId": "app.lightmoon.assistant",
+  "appName": "LightMoon",
+  "webDir": "docs",
+  "server": {
+    "url": "https://rajeshpasalapudi1815-cyber.github.io/lightmoon/",
+    "allowNavigation": ["rajeshpasalapudi1815-cyber.github.io"]
+  },
+  "android": {
+    "backgroundColor": "#04070d"
+  }
+}

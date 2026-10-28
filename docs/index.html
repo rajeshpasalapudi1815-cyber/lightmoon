@@ -162,13 +162,24 @@
         <small>Forecasts come from Open-Meteo, free. Only your city's rough location is sent.</small>
       </div>
 
-      <div class="data-box cloud-box">
+      <div class="data-box cloud-box" id="notifyBox">
         <span class="field-label">Reminder notifications: <span id="notifyStatus" class="status-value"></span></span>
         <span class="row">
           <button type="button" id="notifyOn" class="btn-ghost">Turn on</button>
           <button type="button" id="notifyOff" class="btn-ghost" hidden>Turn off</button>
         </span>
         <small>Reminders pop up on this device even when LightMoon is closed. The LightMoon cloud only learns when each reminder is due, never what it says.</small>
+        <small>On Android, the <a href="https://github.com/rajeshpasalapudi1815-cyber/lightmoon/releases/latest" target="_blank" rel="noopener">LightMoon app</a> also says each reminder out loud at its time, even with the phone locked.</small>
+      </div>
+
+      <div class="data-box" id="phoneBox" hidden>
+        <span class="field-label">Spoken reminders: <span id="phoneStatus" class="status-value"></span></span>
+        <span class="row">
+          <button type="button" id="phoneNotify" class="btn-ghost" hidden>Allow notifications</button>
+          <button type="button" id="phoneBattery" class="btn-ghost" hidden>Let it run in the background</button>
+          <button type="button" id="phoneTest" class="btn-ghost">Test in 1 minute</button>
+        </span>
+        <small>The phone says each reminder out loud at its time, even when LightMoon is closed or the screen is off, at alarm volume. With sync on, it also picks up reminders set on your other devices (it checks about every 15 minutes).</small>
       </div>
 
       <div class="data-box cloud-box">
