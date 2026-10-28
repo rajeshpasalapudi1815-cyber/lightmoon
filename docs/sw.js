@@ -1,5 +1,5 @@
 // Service worker: lets LightMoon install like an app, open without internet, and show reminder notifications.
-const CACHE = 'lightmoon-v2';
+const CACHE = 'lightmoon-v3';
 const APP_FILES = [
   './',
   './index.html',

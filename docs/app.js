@@ -11,7 +11,7 @@ const transcript = $('#transcript');
 const input = $('#input');
 const statusEl = $('#status');
 
-const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const speechRecognizer = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 const isTouch = matchMedia('(pointer: coarse)').matches;
 const LANGUAGES = [
   ['en-US', 'English (US)'],
@@ -29,6 +29,8 @@ const REMINDER_POLL_MS = 15_000;
 const LATE_REMINDER_MINUTES = 5;
 const RELOCK_AFTER_MS = 3 * 60_000; // with the app lock on, ask again after this long in the background
 const MAX_SHARED_CHARS = 6000;
+const FIRST_WORDS_WAIT_MS = 8000; // stop listening if nothing is said for this long
+const MAX_MIC_RESTARTS = 30; // some phones stop the mic after every pause; keep it going, within reason
 
 const prefs = loadPrefs();
 const launch = readLaunchParams();
@@ -38,13 +40,15 @@ let started = false; // user has tapped Initialize
 let locked = false; // the lock screen is showing
 let hiddenAt = 0; // when the app last went into the background
 let pendingShare = null; // shared content the next question is about
+let listenWhenFree = false; // start listening once the opening briefing or greeting has been spoken
 let audioCtx = null;
 
 // ---------- Small helpers ----------
 
 function loadPrefs() {
   const lang = LANGUAGES.find(([code]) => code === navigator.language)?.[0] ?? 'en-US';
-  const defaults = { voice: '', rate: 1, speak: true, lang, handsFree: false };
+  // sendAfterMs: how long a pause ends a spoken request (0 = only when the moon is tapped again).
+  const defaults = { voice: '', rate: 1, speak: true, lang, handsFree: false, sendAfterMs: 2500, listenOnOpen: true };
   try {
     // Move preferences saved under the app's earlier names.
     for (const oldKey of ['vega.prefs', 'jarvis.prefs']) {
@@ -194,7 +198,13 @@ function streamReply() {
     },
     done(out) {
       if (out.error) {
-        addMessage('assistant error', out.reply);
+        const errorNode = addMessage('assistant error', out.reply);
+        if (out.detail) {
+          // The service's own words, to make problems easy to report.
+          const details = el('details', 'error-detail');
+          details.append(el('summary', '', 'Details'), el('code', '', out.detail));
+          errorNode.append(details);
+        }
         say(out.reply);
         return;
       }
@@ -236,6 +246,10 @@ function offerShared(text) {
 // Recomputes what the core shows, and starts or stops wake-word listening to match.
 function refresh() {
   listener.sync();
+  if (listenWhenFree && started && !busy && !speaker.active && !locked && listener.mode !== 'command') {
+    listenWhenFree = false;
+    listener.start('command');
+  }
   let mode = 'idle';
   if (listener.capturing) mode = 'listening';
   else if (speaker.active) mode = 'speaking';
@@ -244,7 +258,8 @@ function refresh() {
   const idle = !state?.ai.ready
     ? 'Offline: add an API key in settings'
     : prefs.handsFree ? `Say "${assistantName()}" to wake me` : 'Standing by';
-  statusEl.textContent = { idle, listening: 'Listening...', thinking: 'Thinking...', speaking: 'Speaking...' }[mode];
+  const listening = prefs.sendAfterMs ? 'Listening... tap to send now' : 'Listening... tap when done';
+  statusEl.textContent = { idle, listening, thinking: 'Thinking...', speaking: 'Speaking...' }[mode];
 }
 
 function chime() {
@@ -360,30 +375,63 @@ function wakeWords() {
   return [...words];
 }
 
+// Joins recognized phrases into one request. Chrome on Android repeats earlier words in later results
+// ("what", then "what is the weather"), so a phrase that starts with the previous one replaces it.
+function joinPhrases(phrases) {
+  const joined = [];
+  for (const phrase of phrases.map(p => p.trim()).filter(Boolean)) {
+    const last = joined.at(-1);
+    if (last && phrase.toLowerCase().startsWith(last.toLowerCase())) joined[joined.length - 1] = phrase;
+    else joined.push(phrase);
+  }
+  return joined.join(' ');
+}
+
 const listener = {
   rec: null,
-  mode: null, // 'ptt' = tap to talk, 'wake' = always listening for the wake word
-  capturing: false, // a command is being captured right now
-  armTimer: null,
+  mode: null, // 'command' = taking a request (after a tap or the wake word), 'wake' = waiting for the wake word
+  capturing: false, // a request is being taken right now
+  opening: '', // words heard before this recognizer started (after the wake word, or before a mic restart)
+  silenceTimer: null,
+  restarts: 0,
+  failed: false,
+  autoStarted: false, // listening began without a tap (app opened by voice); a refusal then just means "tap to talk"
 
-  start(mode) {
+  get supported() {
+    return Boolean(speechRecognizer());
+  },
+
+  // Keeps listening through pauses; the request ends after prefs.sendAfterMs of quiet, or when the moon is tapped.
+  start(mode, { opening = '', resume = false } = {}) {
     this.stopRec();
-    const rec = new SpeechRec();
+    if (!this.supported) return;
+    const Recognizer = speechRecognizer();
+    const rec = new Recognizer();
     rec.lang = prefs.lang;
-    rec.continuous = mode === 'wake';
+    rec.continuous = true;
     rec.interimResults = true;
     rec.onresult = event => this.onResult(event);
     rec.onerror = event => this.onError(event);
     rec.onend = () => this.onEnd(rec);
     this.rec = rec;
     this.mode = mode;
-    this.capturing = mode === 'ptt';
+    this.capturing = mode === 'command';
+    this.opening = opening;
+    if (!resume) {
+      this.restarts = 0;
+      this.failed = false;
+    }
     try {
       rec.start();
     } catch {
       this.rec = null;
       this.mode = null;
       this.capturing = false;
+      return;
+    }
+    if (this.capturing) {
+      input.value = opening;
+      if (!resume) this.waitForSilence();
     }
   },
 
@@ -396,75 +444,78 @@ const listener = {
     }
   },
 
+  // Tap the moon or the mic: start listening; tap again to send straight away.
   pushToTalk() {
-    if (!SpeechRec) return note('Voice input needs Chrome or Edge. You can still type.');
+    if (!this.supported) return note('Voice input needs Chrome or Edge. You can still type.');
     if (speaker.active) speaker.stop(); // a tap always silences, even while a reply is still arriving
     if (busy) return;
-    if (this.mode === 'ptt') {
-      this.stopRec();
-      this.capturing = false;
-    } else {
-      this.start('ptt');
-    }
+    this.autoStarted = false;
+    if (this.mode === 'command') return this.finish();
+    this.start('command');
     refresh();
   },
 
   onResult(event) {
-    let interim = '';
-    let final = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const result = event.results[i];
-      if (result.isFinal) final += result[0].transcript;
-      else interim += result[0].transcript;
-    }
-    if (this.mode === 'ptt') {
-      input.value = (final || interim).trim();
-      if (final.trim()) {
-        this.capturing = false;
-        input.value = '';
-        send(final.trim());
-      }
+    const results = Array.from(event.results);
+    if (this.mode === 'command') {
+      const finals = results.filter(r => r.isFinal).map(r => r[0].transcript);
+      const interim = results.filter(r => !r.isFinal).map(r => r[0].transcript).join(' ');
+      input.value = `${joinPhrases([this.opening, ...finals])} ${interim}`.trim();
+      this.waitForSilence(); // still talking: restart the pause timer
       return;
     }
-    if (this.capturing && interim) statusEl.textContent = interim;
-    if (final.trim()) this.heard(final.trim());
+    for (let i = event.resultIndex; i < results.length; i++) {
+      if (results[i].isFinal && this.checkWakeWord(results[i][0].transcript)) break;
+    }
   },
 
-  // Wake-word mode: "LightMoon, what's on today?" runs straight away; "LightMoon." alone waits for the next phrase.
-  heard(text) {
-    if (this.capturing) {
-      this.capturing = false;
-      clearTimeout(this.armTimer);
-      send(text);
-      return;
-    }
+  waitForSilence() {
+    clearTimeout(this.silenceTimer);
+    const wait = input.value.trim() ? prefs.sendAfterMs : FIRST_WORDS_WAIT_MS;
+    if (wait) this.silenceTimer = setTimeout(() => this.finish(), wait);
+  },
+
+  // The request is complete: stop listening and send what was said (if anything).
+  finish() {
+    clearTimeout(this.silenceTimer);
+    const text = input.value.trim();
+    this.capturing = false;
+    this.stopRec();
+    input.value = '';
+    refresh();
+    if (text) send(text);
+  },
+
+  cancel() {
+    clearTimeout(this.silenceTimer);
+    this.capturing = false;
+    this.stopRec();
+    input.value = '';
+    refresh();
+  },
+
+  // Wake-word mode: "LightMoon, what's on today?" or "LightMoon." then the request.
+  checkWakeWord(text) {
     const lower = text.toLowerCase();
     const word = wakeWords().find(w => lower.includes(w));
-    if (!word) return;
-    const command = text.slice(lower.indexOf(word) + word.length).replace(/^[\s,.!?]+/, '').trim();
-    if (command) return send(command);
-    this.capturing = true;
+    if (!word) return false;
     chime();
+    this.start('command', { opening: text.slice(lower.indexOf(word) + word.length).replace(/^[\s,.!?]+/, '').trim() });
     refresh();
-    clearTimeout(this.armTimer);
-    this.armTimer = setTimeout(() => {
-      if (this.capturing && this.mode === 'wake') {
-        this.capturing = false;
-        refresh();
-      }
-    }, 8000);
+    return true;
   },
 
   onError(event) {
+    if (event.error === 'no-speech' || event.error === 'aborted') return; // normal
+    this.failed = true;
+    if (event.error === 'not-allowed' && this.autoStarted) return note('Tap the moon whenever you want to talk.');
     const problems = {
       'not-allowed': 'Microphone access is blocked. Allow the microphone for LightMoon in your browser or app settings, then try again.',
       'service-not-allowed': 'Speech recognition is not available in this browser. Try Chrome or Edge.',
       'audio-capture': 'No microphone was found.',
       network: 'Speech recognition needs an internet connection.',
     };
-    const problem = problems[event.error];
-    if (!problem) return; // 'no-speech' and 'aborted' are normal
-    note(problem);
+    note(problems[event.error] ?? `Voice input stopped (${event.error}).`);
     if (prefs.handsFree) {
       prefs.handsFree = false;
       savePrefs();
@@ -474,16 +525,21 @@ const listener = {
 
   onEnd(rec) {
     if (rec !== this.rec) return; // we stopped it ourselves
-    const wasWake = this.mode === 'wake';
     this.rec = null;
+    if (this.mode === 'command') {
+      // Some phones stop the mic after every pause: carry on until the user has been quiet long enough.
+      if (this.capturing && !this.failed && this.restarts++ < MAX_MIC_RESTARTS) {
+        return this.start('command', { opening: input.value.trim(), resume: true });
+      }
+      return this.finish();
+    }
     this.mode = null;
-    if (!wasWake) this.capturing = false;
     // Browsers end continuous recognition every so often; refresh() restarts it if it's still wanted.
-    setTimeout(refresh, wasWake ? 300 : 0);
+    setTimeout(refresh, 300);
   },
 
   sync() {
-    if (!started || !SpeechRec || this.mode === 'ptt') return;
+    if (!started || !this.supported || this.mode === 'command') return;
     const wanted = prefs.handsFree && !busy && !speaker.active && !document.hidden && !locked;
     if (wanted && !this.rec) this.start('wake');
     if (!wanted && this.mode === 'wake') {
@@ -521,7 +577,7 @@ async function send(text, { context = null } = {}) {
 async function runBriefing(force = false) {
   if (!state.ai.ready) return;
   if (!force && store.settings.get('last_briefing') === today()) {
-    speaker.speak(`Welcome back, ${addressWord()}.`);
+    speaker.speak(prefs.listenOnOpen ? `Yes, ${addressWord()}?` : `Welcome back, ${addressWord()}.`);
     return;
   }
   busy = true;
@@ -685,6 +741,8 @@ function openSettings() {
   fields.assistantName.value = state.profile.assistantName;
   fields.rate.value = prefs.rate;
   fields.speak.checked = prefs.speak;
+  fields.sendAfter.value = String(prefs.sendAfterMs);
+  fields.listenOnOpen.checked = prefs.listenOnOpen;
   fields.lang.value = prefs.lang;
   fields.apiKey.value = '';
   fillAiFields(fields, store.aiConfig());
@@ -830,6 +888,8 @@ function saveSettings(event) {
     voice: fields.voice.value,
     rate: Number(fields.rate.value),
     speak: fields.speak.checked,
+    sendAfterMs: Number(fields.sendAfter.value),
+    listenOnOpen: fields.listenOnOpen.checked,
     lang: fields.lang.value,
   });
   savePrefs();
@@ -879,7 +939,7 @@ function paintHandsFree() {
 }
 
 function toggleHandsFree() {
-  if (!SpeechRec) return note('Voice input needs Chrome or Edge.');
+  if (!listener.supported) return note('Voice input needs Chrome or Edge.');
   prefs.handsFree = !prefs.handsFree;
   savePrefs();
   paintHandsFree();
@@ -915,7 +975,7 @@ function wireUp() {
     speaker.speak(`At your service, ${addressWord()}.`, { voice: fields.voice.value, rate: Number(fields.rate.value), force: true });
   });
   $('#setupForm').addEventListener('submit', completeSetup);
-  $('#bootBtn').addEventListener('click', start);
+  $('#bootBtn').addEventListener('click', () => start());
   $('#lockForm').addEventListener('submit', unlockWithPin);
   $('#bioUnlock').addEventListener('click', unlockWithFingerprint);
   $('#forgotPin').addEventListener('click', eraseAfterForgottenPin);
@@ -955,7 +1015,10 @@ function wireUp() {
   // Space = tap to talk (when not typing); Escape = stop talking.
   document.addEventListener('keydown', event => {
     if (!started) return;
-    if (event.key === 'Escape') speaker.stop();
+    if (event.key === 'Escape') {
+      speaker.stop();
+      if (listener.capturing) listener.cancel();
+    }
     const focused = document.activeElement?.tagName;
     const typing = /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(focused) || document.querySelector('dialog[open]');
     if (event.code === 'Space' && !typing && !event.repeat) {
@@ -1004,17 +1067,18 @@ function completeSetup(event) {
   start();
 }
 
-// Runs from a tap, which browsers require before they allow sound and the microphone.
-function start() {
+// Usually runs from a tap, which browsers require before they allow sound and the microphone.
+// `auto` means the installed app was allowed to start without one (see soundAllowedWithoutTap).
+function start({ auto = false } = {}) {
   if (started) return;
   started = true;
   try {
-    audioCtx = new AudioContext();
+    audioCtx ??= new AudioContext();
   } catch {
     audioCtx = null;
   }
   if ('speechSynthesis' in window) speechSynthesis.speak(new SpeechSynthesisUtterance(''));
-  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+  if (!auto && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
 
   $('#boot').classList.add('leaving');
   $('#app').hidden = false;
@@ -1027,16 +1091,36 @@ function start() {
   setInterval(renderTasks, 60_000); // keeps overdue highlighting current
 
   // Opened from a home-screen shortcut or the share sheet: do that instead of the usual briefing.
+  // Otherwise brief (or greet), then start listening if that setting is on.
+  listener.autoStarted = auto;
   if (launch.shared) {
     offerShared(launch.shared);
-  } else if (launch.action === 'talk') {
-    listener.pushToTalk();
   } else if (launch.action === 'task') {
     input.value = 'Add a task: ';
     input.focus();
+  } else if (launch.action === 'talk') {
+    listenWhenFree = true;
   } else {
+    listenWhenFree = prefs.listenOnOpen;
     runBriefing(launch.action === 'briefing');
   }
+  refresh();
+}
+
+// Installed apps may play sound without a tap first (Chrome's autoplay rules for home-screen apps).
+// Then the start screen can be skipped, so "Hey Google, open LightMoon" goes straight to listening.
+function soundAllowedWithoutTap() {
+  try {
+    const context = new AudioContext();
+    if (context.state === 'running') {
+      audioCtx = context;
+      return true;
+    }
+    context.close();
+  } catch {
+    // No Web Audio: keep the start screen.
+  }
+  return false;
 }
 
 function boot() {
@@ -1053,6 +1137,8 @@ function boot() {
     form.elements.userName.focus();
   } else if (lock.isEnabled()) {
     showLock();
+  } else if (soundAllowedWithoutTap()) {
+    start({ auto: true });
   } else {
     $('#bootBtn').hidden = false;
     $('#bootBtn').focus();

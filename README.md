@@ -19,7 +19,8 @@ to the AI service (Groq's free tier by default).
 
 | Action | How |
 |---|---|
-| Talk | Tap the glowing core or the mic button (on a computer, Space also works) |
+| Talk | Tap the glowing core or the mic button (on a computer, Space also works). It sends once you pause for 2.5 seconds, or tap the core again to send right away. Change the pause in Settings |
+| Open by voice | Say **"Hey Google, open LightMoon"**. With *Start listening when the app opens* on (the default), it greets you and starts listening |
 | Hands-free | Turn on **Wake word**, then say "LightMoon, what's on my list today?" Best on a computer; on phones it uses more battery |
 | Stop it talking | Tap the core (or press Esc) |
 | Type | Use the box at the bottom |

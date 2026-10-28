@@ -1,7 +1,10 @@
 // Tools the model can call to change LightMoon's memory, tasks and goals, and to check the weather.
 import { memories, tasks, goals, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
 import { normalizeTime, localStamp, prettyTime } from './time.js';
-import { findPlace, savedPlace, savePlace, weatherSummary } from './weather.js';
+import { findPlace, placeFromDevice, savedPlace, savePlace, weatherSummary } from './weather.js';
+
+// What the model sends when the user means "where I am" rather than naming a city.
+const MEANS_HERE = /^(here|local|nearby)$|\b(my|current|this|our)\s+(location|city|place|area|town)\b|where i am/i;
 
 function tool(name, description, properties, required = []) {
   return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
@@ -165,8 +168,17 @@ const handlers = {
   },
 
   async get_weather({ city }) {
-    const place = city?.trim() ? await findPlace(city) : savedPlace();
-    if (!place) throw new Error('No weather place is saved. Ask the user which city they are in, then use set_weather_place.');
+    const named = city?.trim() && !MEANS_HERE.test(city.trim()) ? city.trim() : null;
+    let place = named ? await findPlace(named) : savedPlace();
+    if (!place) {
+      // No city saved yet: ask the phone where it is (it shows a permission prompt the first time).
+      try {
+        place = await placeFromDevice();
+      } catch (err) {
+        throw new Error(`${err.message} Ask the user which city they are in, then use set_weather_place.`);
+      }
+      savePlace(place);
+    }
     return { text: `Checked the weather: ${place.name}`, result: await weatherSummary(place) };
   },
 

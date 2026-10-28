@@ -23,11 +23,17 @@ const FRIENDLY_ERRORS = {
   api: 'The AI service had trouble with that request. Please try again in a moment.',
 };
 
+// Some models (gpt-oss especially) were trained with a web-search tool and occasionally try to call it,
+// or garble a tool call; the service then rejects the reply with "tool_use_failed". One retry with this
+// reminder almost always fixes it.
+const TOOL_REMINDER = 'Reminder: you cannot browse the web. Only call the tools you were given, with valid JSON arguments. For weather, call get_weather.';
+
 class BrainError extends Error {
-  constructor(kind, detail = '', retryable = false) {
+  constructor(kind, detail = '', { retryable = false, badToolCall = false } = {}) {
     super(`${kind}${detail ? `: ${detail}` : ''}`);
     this.kind = kind;
-    this.retryable = retryable;
+    this.retryable = retryable || badToolCall;
+    this.badToolCall = badToolCall;
   }
 }
 
@@ -86,11 +92,11 @@ function finish(content, actions) {
 
 function failure(err, actions = []) {
   console.error(`[brain] ${err.message}`);
-  return { reply: FRIENDLY_ERRORS[err.kind] ?? FRIENDLY_ERRORS.api, actions, error: true };
+  return { reply: FRIENDLY_ERRORS[err.kind] ?? FRIENDLY_ERRORS.api, actions, error: true, detail: err.message };
 }
 
-// Tries the main model, then the backup model if the main one is rate-limited or failing,
-// but never after part of a reply has already been shown and spoken.
+// Tries the main model (twice if it garbled a tool call), then the backup model if the main one is
+// rate-limited or failing, but never after part of a reply has already been shown and spoken.
 async function complete(convo, tools, onText) {
   const ai = aiConfig();
   if (!ai.ready) throw new BrainError('no-key');
@@ -102,11 +108,15 @@ async function complete(convo, tools, onText) {
   };
   let lastError;
   for (const model of models) {
-    try {
-      return await request(ai, model, convo, tools, relay);
-    } catch (err) {
-      lastError = err;
-      if (!err.retryable || emitted) break;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const messages = attempt ? [...convo, { role: 'system', content: TOOL_REMINDER }] : convo;
+      try {
+        return await request(ai, model, messages, tools, relay);
+      } catch (err) {
+        lastError = err;
+        if (!err.retryable || emitted) throw err;
+        if (!err.badToolCall) break; // rate limits and outages: go straight to the backup model
+      }
     }
   }
   throw lastError;
@@ -132,14 +142,16 @@ async function request(ai, model, convo, tools, onText) {
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 400);
     const kind = res.status === 401 || res.status === 403 ? 'auth' : res.status === 429 ? 'rate-limit' : 'api';
-    const retryable = res.status === 429 || res.status >= 500 || detail.includes('tool_use_failed');
-    throw new BrainError(kind, `${model} ${res.status} ${detail}`, retryable);
+    throw new BrainError(kind, `${model} ${res.status} ${detail}`, {
+      retryable: res.status === 429 || res.status >= 500,
+      badToolCall: detail.includes('tool_use_failed'),
+    });
   }
 
   // A few services ignore "stream" and answer in one piece.
   if (!res.headers.get('content-type')?.includes('text/event-stream')) {
     const message = (await res.json()).choices?.[0]?.message;
-    if (!message) throw new BrainError('api', `${model} returned no message`, true);
+    if (!message) throw new BrainError('api', `${model} returned no message`, { retryable: true });
     if (message.content) onText(message.content);
     return message;
   }
@@ -173,7 +185,13 @@ async function readStream(res, model, onText) {
       } catch {
         continue;
       }
-      if (chunk.error) throw new BrainError('api', `${model} stream error: ${chunk.error.message ?? ''}`);
+      if (chunk.error) {
+        // Errors found after the reply has started (like a rejected tool call) arrive inside the stream.
+        const { message = '', code = '', type = '' } = chunk.error;
+        throw new BrainError('api', `${model} stream error: ${code || type} ${message}`, {
+          badToolCall: `${code} ${message}`.includes('tool_use_failed') || /tool call/i.test(message),
+        });
+      }
       const delta = chunk.choices?.[0]?.delta ?? {};
       if (delta.content) {
         content += delta.content;
