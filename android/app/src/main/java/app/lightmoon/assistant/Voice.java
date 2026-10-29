@@ -8,10 +8,18 @@ import android.os.Looper;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.json.JSONObject;
 
 // Says a short line ("Call from Mom.") with Android's text-to-speech and lets go of it afterwards.
 // For moments Android won't let LightMoon start its speaking service (a call coming in, a message
@@ -71,6 +79,45 @@ final class Voice {
         tts.setSpeechRate(ReminderStore.voiceRate(context));
     }
 
+    // Words the user taught LightMoon to say their way ("Rajesh" as "Raa-jesh"), whole words in any case, as the
+    // app does (docs/js/speech.js), so a caller's name or a reminder sounds the same as in the app.
+    static String sayTheirWay(Context context, String text) {
+        if (text == null || text.isEmpty()) return text;
+        try {
+            JSONObject sayAs = new JSONObject(ReminderStore.sayAs(context));
+            Map<String, String> byLower = new HashMap<>();
+            List<String> words = new ArrayList<>();
+            Iterator<String> keys = sayAs.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                String word = key.trim();
+                String sound = sayAs.optString(key, "").trim();
+                if (word.isEmpty() || sound.isEmpty()) continue;
+                byLower.put(word.toLowerCase(Locale.ROOT), sound);
+                words.add(word);
+            }
+            if (words.isEmpty()) return text;
+            words.sort((a, b) -> b.length() - a.length()); // "Arogya 360" before "Arogya"
+            StringBuilder anyOf = new StringBuilder();
+            for (String word : words) {
+                if (anyOf.length() > 0) anyOf.append('|');
+                anyOf.append(Pattern.quote(word));
+            }
+            Pattern pattern = Pattern.compile(
+                "(?<![\\p{L}\\p{N}])(?:" + anyOf + ")(?![\\p{L}\\p{N}])", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+            Matcher matcher = pattern.matcher(text);
+            StringBuffer out = new StringBuffer();
+            while (matcher.find()) {
+                String sound = byLower.get(matcher.group().toLowerCase(Locale.ROOT));
+                matcher.appendReplacement(out, Matcher.quoteReplacement(sound != null ? sound : matcher.group()));
+            }
+            matcher.appendTail(out);
+            return out.toString();
+        } catch (Exception err) {
+            return text; // a broken list never stops a reminder being said
+        }
+    }
+
     static void stopAll() {
         for (Runnable stop : stoppers) main.post(stop);
         main.post(waiting::clear);
@@ -114,7 +161,7 @@ final class Voice {
                     main.post(finish);
                 }
             });
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "lightmoon-say");
+            tts.speak(sayTheirWay(app, text), TextToSpeech.QUEUE_FLUSH, null, "lightmoon-say");
         });
     }
 }

@@ -100,13 +100,16 @@ public class ReminderAlarmsPlugin extends Plugin {
         call.resolve(result);
     }
 
-    // { name, rate }: the voice and speed the app speaks with, for reminders, briefings and callers said by the phone.
+    // { name, rate, sayAs }: the voice and speed the app speaks with, and the words it says the user's way, for
+    // reminders, briefings and callers said by the phone.
     @PluginMethod
     public void setVoice(PluginCall call) {
         try {
             Object rate = call.getData().opt("rate");
             float speed = rate instanceof Number ? ((Number) rate).floatValue() : 1f;
-            ReminderStore.setVoice(getContext(), call.getString("name", ""), speed > 0 ? speed : 1f);
+            Object sayAs = call.getData().opt("sayAs");
+            String words = sayAs instanceof JSONObject ? sayAs.toString() : null;
+            ReminderStore.setVoice(getContext(), call.getString("name", ""), speed > 0 ? speed : 1f, words);
             call.resolve();
         } catch (Exception err) {
             call.reject(String.valueOf(err.getMessage()));

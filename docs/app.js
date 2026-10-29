@@ -376,7 +376,10 @@ const speaker = {
 
   speak(text, { voice = prefs.voice, rate = prefs.rate, force = false } = {}) {
     if ((!prefs.speak && !force) || !('speechSynthesis' in window)) return;
-    const phrases = speechChunks(text, { sayAs: store.pronunciations.all() });
+    const sayAs = store.pronunciations.all();
+    // Taught a new word (by the AI, or on another device): the phone's own announcements learn it too.
+    if (JSON.stringify(sayAs) !== this.sharedSayAs) this.shareVoice();
+    const phrases = speechChunks(text, { sayAs });
     if (!phrases.length) return;
     const generation = this.generation;
     this.active = true;
@@ -453,13 +456,17 @@ const speaker = {
     this.finish();
   },
 
-  // The phone says some things by itself (reminders, callers): in the same voice and at the same speed. The phone
-  // may be offline when a reminder goes off, so an online voice is replaced by its offline twin.
+  // The phone says some things by itself (reminders, callers): in the same voice, at the same speed, and saying
+  // the user's words their way. The phone may be offline when a reminder goes off, so an online voice is replaced
+  // by its offline twin.
+  sharedSayAs: '',
   shareVoice() {
     if (!nativeAlarms?.setVoice || !this.voices.length) return;
     const voice = this.pickVoice();
     const steady = isOnlineVoice(voice) ? this.voices.find(v => v.name === voice.name.replace(/-network$/, '-local')) : voice;
-    nativeAlarms.setVoice({ name: steady?.name ?? '', rate: prefs.rate }).catch(() => {});
+    const sayAs = store.pronunciations.all();
+    this.sharedSayAs = JSON.stringify(sayAs);
+    nativeAlarms.setVoice({ name: steady?.name ?? '', rate: prefs.rate, sayAs }).catch(() => {});
   },
 };
 
@@ -1434,6 +1441,7 @@ function paintSayAs() {
     remove.type = 'button';
     remove.addEventListener('click', () => {
       store.pronunciations.set(word, '');
+      speaker.shareVoice();
       paintSayAs();
     });
     const row = el('li', 'say-as-row');
@@ -1742,6 +1750,7 @@ function wireUp() {
     const sound = $('#sayAsSound').value.trim();
     if (!word || !sound) return;
     store.pronunciations.set(word, sound);
+    speaker.shareVoice();
     $('#sayAsWord').value = '';
     $('#sayAsSound').value = '';
     paintSayAs();

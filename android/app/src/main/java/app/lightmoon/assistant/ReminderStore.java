@@ -52,6 +52,7 @@ final class ReminderStore {
     private static final String KEY_ANSWERS = "answers";
     private static final String KEY_VOICE = "voice";
     private static final String KEY_RATE = "rate";
+    private static final String KEY_SAY_AS = "sayAs";
     private static final String ACTION = "app.lightmoon.assistant.REMINDER";
     private static final long FORGET_ANSWERS_MS = 2 * 86_400_000L;
 
@@ -117,8 +118,15 @@ final class ReminderStore {
 
     // The voice the app speaks with (an Android voice name, "" for the phone's British voice) and its speed, so
     // what the phone says by itself sounds the same (ReminderAlarmsPlugin.setVoice, Voice.useChosenVoice).
-    static void setVoice(Context context, String name, float rate) {
-        prefs(context).edit().putString(KEY_VOICE, name == null ? "" : name).putFloat(KEY_RATE, rate).apply();
+    // `sayAs`: the words the user taught LightMoon to say their way, as JSON ({ "Rajesh": "Raa-jesh" }); null keeps them.
+    static void setVoice(Context context, String name, float rate, String sayAs) {
+        SharedPreferences.Editor edit = prefs(context).edit().putString(KEY_VOICE, name == null ? "" : name).putFloat(KEY_RATE, rate);
+        if (sayAs != null) edit.putString(KEY_SAY_AS, sayAs);
+        edit.apply();
+    }
+
+    static String sayAs(Context context) {
+        return prefs(context).getString(KEY_SAY_AS, "{}");
     }
 
     static String voiceName(Context context) {

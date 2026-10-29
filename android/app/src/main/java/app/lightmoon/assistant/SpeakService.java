@@ -150,7 +150,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
         speaking = true;
         requestAudioFocus();
         ReminderStore.markSpoken(this, reminder.id);
-        tts.speak(reminder.say, TextToSpeech.QUEUE_ADD, null, "reminder-" + reminder.id);
+        tts.speak(Voice.sayTheirWay(this, reminder.say), TextToSpeech.QUEUE_ADD, null, "reminder-" + reminder.id);
     }
 
     static void showReminder(Context context, ReminderStore.Reminder reminder) {
