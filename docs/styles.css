@@ -637,3 +637,12 @@ body:not(.show-chat) .reactor:not(.reactor-lg) { width: 200px; height: 200px; }
   .settings-body { padding: 14px 16px 20px; }
   .settings-foot { padding: 10px 16px max(12px, env(safe-area-inset-bottom)); }
 }
+
+/* Words said the user's way (Settings → Voice and listening). */
+.say-as-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 14px; }
+.say-as-row { display: flex; align-items: center; gap: 8px; }
+.say-as-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.say-as-row .btn-ghost { padding: 4px 12px; font-size: 13px; }
+.say-as-empty { color: var(--muted); }
+.say-as-add { flex-wrap: wrap; }
+.say-as-add input { flex: 1 1 140px; min-width: 0; }

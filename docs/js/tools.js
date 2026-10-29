@@ -1,5 +1,5 @@
 // Tools the model can call to change LightMoon's memory, tasks and goals, and to check the weather.
-import { memories, tasks, goals, routines, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
+import { memories, tasks, goals, routines, pronunciations, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
 import { normalizeTime, localStamp, prettyTime } from './time.js';
 import { findPlace, placeFromDevice, savedPlace, savePlace, weatherSummary } from './weather.js';
 import { LIFE_TOOLS, lifeHandlers, isConnected as lifeConnected } from './lifelevelling.js';
@@ -88,6 +88,15 @@ export const TOOLS = [
     ['trigger', 'steps'],
   ),
   tool('delete_routine', 'Delete a routine.', { id: ID }, ['id']),
+  tool(
+    'set_pronunciation',
+    'Your voice says a word wrong and they tell you how it sounds: save it, and say it that way from now on. An empty say_as goes back to normal.',
+    {
+      word: { type: 'string', description: 'As it is written, e.g. "Rajesh".' },
+      say_as: { type: 'string', description: 'Spelled the way it sounds, e.g. "Raa-jesh".' },
+    },
+    ['word'],
+  ),
 ];
 
 // The Life Levelling tools are offered only while Life Levelling is connected, the phone tools only in the
@@ -247,6 +256,13 @@ const handlers = {
     const { trigger } = routine; // removing empties the record
     routines.remove(routine.id);
     return `Deleted the routine "${trigger}"`;
+  },
+
+  set_pronunciation({ word, say_as: sayAs }) {
+    const written = toText(word, 'word', 60);
+    const spoken = String(sayAs ?? '').trim().slice(0, 80);
+    pronunciations.set(written, spoken);
+    return spoken ? `Will say "${written}" as "${spoken}"` : `Back to the usual way of saying "${written}"`;
   },
 
   ...lifeHandlers,

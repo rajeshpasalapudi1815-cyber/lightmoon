@@ -38,9 +38,20 @@ const money = unit => (_, amount, short, word) => {
   return `${amount}${scale ? ` ${scale}` : ''} ${unit}`;
 };
 
-// Markdown, emoji, links and symbols out; words in. Each line of a list becomes its own sentence.
-export function forSpeech(text) {
-  const lines = String(text ?? '')
+// Words the user taught LightMoon to say differently ({ Rajesh: 'Raa-jesh' }), whole words only, in any case.
+function sayTheirWay(text, sayAs) {
+  const words = Object.keys(sayAs ?? {}).filter(word => word.trim() && String(sayAs[word]).trim());
+  if (!words.length) return text;
+  const escape = word => word.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  const byLower = new Map(words.map(word => [word.trim().toLowerCase().replace(/\s+/g, ' '), String(sayAs[word]).trim()]));
+  const pattern = new RegExp(`(?<![\\p{L}\\p{N}])(?:${words.sort((a, b) => b.length - a.length).map(escape).join('|')})(?![\\p{L}\\p{N}])`, 'giu');
+  return text.replace(pattern, match => byLower.get(match.toLowerCase().replace(/\s+/g, ' ')) ?? match);
+}
+
+// Markdown, emoji, links and symbols out; words in. Each line of a list becomes its own sentence. `sayAs`: the
+// user's own pronunciations.
+export function forSpeech(text, sayAs = {}) {
+  const lines = sayTheirWay(String(text ?? ''), sayAs)
     // Emoji and the invisible characters that join or colour them.
     .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}‍︎️⃣]/gu, '')
     .replace(/```[\s\S]*?```/g, '\n')
@@ -138,9 +149,9 @@ function splitLong(sentence, max) {
 }
 
 // What to hand the voice, in order: cleaned text in sentence-sized phrases of up to `max` characters.
-export function speechChunks(text, max = CHUNK_CHARS) {
+export function speechChunks(text, { max = CHUNK_CHARS, sayAs = {} } = {}) {
   const chunks = [];
-  for (const sentence of sentencesOf(forSpeech(text))) {
+  for (const sentence of sentencesOf(forSpeech(text, sayAs))) {
     for (const piece of splitLong(sentence, max)) {
       const last = chunks.length - 1;
       if (last >= 0 && chunks[last].length + 1 + piece.length <= max) chunks[last] += ` ${piece}`;

@@ -183,6 +183,27 @@ export const settings = {
   },
 };
 
+// How to say words the voice gets wrong, { written: 'as it sounds' } (e.g. { Rajesh: 'Raa-jesh' }), kept as one
+// synced setting so every device says them the same way.
+export const pronunciations = {
+  all() {
+    try {
+      const saved = JSON.parse(settings.get('pronunciations', '{}'));
+      return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+    } catch {
+      return {};
+    }
+  },
+  // An empty `sayAs` goes back to the voice's own way of saying it.
+  set(word, sayAs) {
+    const written = String(word).trim();
+    const saved = this.all();
+    for (const key of Object.keys(saved)) if (key.toLowerCase() === written.toLowerCase()) delete saved[key];
+    if (sayAs) saved[written] = String(sayAs).trim();
+    settings.set('pronunciations', JSON.stringify(saved));
+  },
+};
+
 export function profile() {
   return {
     userName: settings.get('user_name'),

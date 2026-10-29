@@ -376,7 +376,7 @@ const speaker = {
 
   speak(text, { voice = prefs.voice, rate = prefs.rate, force = false } = {}) {
     if ((!prefs.speak && !force) || !('speechSynthesis' in window)) return;
-    const phrases = speechChunks(text);
+    const phrases = speechChunks(text, { sayAs: store.pronunciations.all() });
     if (!phrases.length) return;
     const generation = this.generation;
     this.active = true;
@@ -1042,6 +1042,7 @@ function openSettings() {
   paintLockSettings();
   paintCloudSettings();
   paintRhythm();
+  paintSayAs();
   paintOfflineBrain();
   paintPhoneSettings();
   paintWakeSettings();
@@ -1414,6 +1415,33 @@ async function paintOfflineBrain() {
 }
 
 // What the rhythm learner has worked out from how reminders went (store.rhythm, js/rhythm.js).
+// Says something in the voice and at the speed picked in Settings, even before they're saved.
+function sayInChosenVoice(text) {
+  const fields = $('#settingsForm').elements;
+  speaker.speak(text, { voice: fields.voice.value, rate: Number(fields.rate.value), force: true });
+}
+
+// Words the user taught LightMoon to say their way, each with Test and Remove.
+function paintSayAs() {
+  const saved = Object.entries(store.pronunciations.all()).sort(([a], [b]) => a.localeCompare(b));
+  const list = $('#sayAsList');
+  if (!saved.length) return void list.replaceChildren(el('li', 'say-as-empty', 'None yet.'));
+  list.replaceChildren(...saved.map(([word, sound]) => {
+    const test = el('button', 'btn-ghost', 'Test');
+    test.type = 'button';
+    test.addEventListener('click', () => sayInChosenVoice(word));
+    const remove = el('button', 'btn-ghost', 'Remove');
+    remove.type = 'button';
+    remove.addEventListener('click', () => {
+      store.pronunciations.set(word, '');
+      paintSayAs();
+    });
+    const row = el('li', 'say-as-row');
+    row.append(el('span', '', `${word} → ${sound}`), test, remove);
+    return row;
+  }));
+}
+
 function paintRhythm() {
   const { insights } = store.rhythm();
   const list = $('#rhythmList');
@@ -1708,10 +1736,24 @@ function wireUp() {
   $('#exportBtn').addEventListener('click', downloadBackup);
   $('#importBtn').addEventListener('click', () => $('#importFile').click());
   $('#importFile').addEventListener('change', restoreBackup);
-  $('#testVoice').addEventListener('click', () => {
-    const fields = $('#settingsForm').elements;
-    speaker.speak(`At your service, ${addressWord()}.`, { voice: fields.voice.value, rate: Number(fields.rate.value), force: true });
+  $('#testVoice').addEventListener('click', () => sayInChosenVoice(`At your service, ${addressWord()}.`));
+  $('#sayAsAdd').addEventListener('click', () => {
+    const word = $('#sayAsWord').value.trim();
+    const sound = $('#sayAsSound').value.trim();
+    if (!word || !sound) return;
+    store.pronunciations.set(word, sound);
+    $('#sayAsWord').value = '';
+    $('#sayAsSound').value = '';
+    paintSayAs();
+    sayInChosenVoice(word);
   });
+  for (const field of ['#sayAsWord', '#sayAsSound']) {
+    $(field).addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault(); // not the settings form's Save
+      $('#sayAsAdd').click();
+    });
+  }
   $('#setupForm').addEventListener('submit', completeSetup);
   $('#bootBtn').addEventListener('click', () => start());
   $('#lockForm').addEventListener('submit', unlockWithPin);
