@@ -36,9 +36,10 @@ const FRIENDLY_ERRORS = {
 const TOOL_REMINDER = 'Reminder: you cannot browse the web. Only call the tools you were given, with valid JSON arguments. For weather, call get_weather; for facts, call look_up.';
 
 class BrainError extends Error {
-  constructor(kind, detail = '', { retryable = false, badToolCall = false, waitSeconds = null } = {}) {
+  constructor(kind, detail = '', { retryable = false, badToolCall = false, waitSeconds = null, missingModel = false } = {}) {
     super(`${kind}${detail ? `: ${detail}` : ''}`);
     this.kind = kind;
+    this.missingModel = missingModel;
     this.retryable = retryable || badToolCall;
     this.badToolCall = badToolCall;
     this.waitSeconds = waitSeconds; // the service said when to try again (its per-minute limit)
@@ -138,7 +139,9 @@ async function complete(convo, tools, onText, { onWait } = {}) {
     onText?.(delta);
   };
   let lastError;
+  let mainError; // why the main model failed: worth more than "the backup model doesn't exist"
   let waited = false;
+  const worst = err => (mainError && err.missingModel ? mainError : err);
   for (const model of models) {
     let messages = convo;
     let reminded = false;
@@ -147,7 +150,7 @@ async function complete(convo, tools, onText, { onWait } = {}) {
         return await request(ai, model, messages, tools, relay);
       } catch (err) {
         lastError = err;
-        if (!err.retryable || emitted) throw err;
+        if (!err.retryable || emitted) throw worst(err);
         if (err.badToolCall && !reminded) {
           reminded = true;
           messages = [...messages, { role: 'system', content: TOOL_REMINDER }];
@@ -158,12 +161,13 @@ async function complete(convo, tools, onText, { onWait } = {}) {
           onWait?.();
           await sleep(err.waitSeconds * 1000 + 500);
         } else {
+          mainError ??= err;
           break; // on to the backup model
         }
       }
     }
   }
-  throw lastError;
+  throw worst(lastError);
 }
 
 async function request(ai, model, convo, tools, onText) {
@@ -192,6 +196,7 @@ async function request(ai, model, convo, tools, onText) {
       retryable: res.status === 429 || res.status >= 500 || tooLarge,
       badToolCall: detail.includes('tool_use_failed'),
       waitSeconds: res.status === 429 ? secondsToWait(res, detail) : null,
+      missingModel: res.status === 404 || detail.includes('model_not_found'),
     });
   }
 

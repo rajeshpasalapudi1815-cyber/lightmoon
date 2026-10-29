@@ -9,8 +9,11 @@ export const DEFAULT_AI = {
   baseUrl: 'https://api.groq.com/openai/v1',
   apiKey: '',
   model: 'openai/gpt-oss-120b',
-  fallbackModel: 'llama-3.1-8b-instant',
+  fallbackModel: 'openai/gpt-oss-20b',
 };
+
+// Models Groq stopped serving to free accounts ("does not exist or you do not have access"), and what replaces them.
+const RETIRED_MODELS = { 'llama-3.1-8b-instant': DEFAULT_AI.fallbackModel };
 
 // Storage keys don't use the app's name, so renaming the assistant never strands data.
 const DATA_KEY = 'assistant.data.v1';
@@ -199,7 +202,8 @@ export function saveProfile({ userName, address, assistantName }) {
 export function aiConfig() {
   const ai = { ...DEFAULT_AI, ...readJson(AI_KEY) };
   ai.baseUrl = (ai.baseUrl || DEFAULT_AI.baseUrl).trim().replace(/\/+$/, '');
-  ai.model = ai.model || DEFAULT_AI.model;
+  ai.model = RETIRED_MODELS[ai.model] ?? (ai.model || DEFAULT_AI.model);
+  ai.fallbackModel = RETIRED_MODELS[ai.fallbackModel] ?? ai.fallbackModel;
   // Local servers such as Ollama don't need a key.
   const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(`${ai.baseUrl}/`);
   return { ...ai, ready: isLocal || Boolean(ai.apiKey) };
