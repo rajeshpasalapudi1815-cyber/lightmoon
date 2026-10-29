@@ -6,6 +6,7 @@ import { currentTools, runTool } from './tools.js';
 import { weatherSummary } from './weather.js';
 import { refresh as refreshLifeLevelling } from './lifelevelling.js';
 import { refresh as refreshPhone } from './phone.js';
+import { learnFrom, answerLocally } from './learning.js';
 
 const HISTORY_LIMIT = 10;
 const OLD_MESSAGE_CHARS = 600; // older messages are cut short: every request counts against the free tier's tokens per minute
@@ -61,7 +62,10 @@ export async function chat(text, { onText } = {}) {
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const reply = await complete(convo, currentTools(), emit, { onWait: () => onText?.('One moment. ') });
-      if (!reply.tool_calls?.length) return finish(written.join(''), actions);
+      if (!reply.tool_calls?.length) {
+        learnFrom(convo, currentTools(), reply); // our own model learns from the big one (see learning.js)
+        return finish(written.join(''), actions);
+      }
 
       convo.push({ role: 'assistant', content: reply.content || null, tool_calls: reply.tool_calls });
       for (const call of reply.tool_calls) {
@@ -86,6 +90,7 @@ export async function briefing({ onText } = {}) {
   const convo = [systemMessage(), ...recentHistory().slice(-6), { role: 'user', content: briefingRequest(weather) }];
   try {
     const reply = await complete(convo, null, onText);
+    learnFrom(convo, null, reply);
     return finish(reply.content, []);
   } catch (err) {
     return failure(err);
@@ -133,6 +138,8 @@ function failure(err, actions = []) {
 async function complete(convo, tools, onText, { onWait } = {}) {
   const ai = aiConfig();
   if (!ai.ready) throw new BrainError('no-key');
+  const local = await answerLocally(convo, tools, onText); // our own model, for kinds it has proven reliable at
+  if (local) return local;
   const models = [...new Set([ai.model, ai.fallbackModel].filter(Boolean))];
   let emitted = false;
   const relay = delta => {

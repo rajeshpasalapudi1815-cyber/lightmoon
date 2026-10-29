@@ -274,6 +274,33 @@
             <label>Backup model <input name="fallbackModel" spellcheck="false"><small>Used when the free limit is hit.</small></label>
             <span class="row actions"><button type="button" id="resetAi" class="btn-ghost">Reset to Groq defaults</button></span>
           </div>
+          <div class="set-card" id="ownModelCard">
+            <div class="card-head"><h3 class="card-title">Our own model</h3><span id="learnStatus" class="card-status"></span></div>
+            <label class="switch-row">Teach our own model <input type="checkbox" id="learnCollect"></label>
+            <p id="learnCount" class="card-note"></p>
+            <span class="row actions">
+              <button type="button" id="learnExport" class="btn-ghost">Download training data</button>
+              <button type="button" id="learnDelete" class="btn-ghost">Delete all</button>
+            </span>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>While this is on, LightMoon keeps a copy of each answer the big AI gives, here on this device, so a small AI of our own can learn to answer the same way. It leaves out the phone's calls, messages and calendar, and anything that looks like a one-time code or password. Nothing leaves this device unless you download the file.</p>
+              <p>To teach it, upload the file to a free Kaggle notebook and press Run (trainer/README.md in the LightMoon project has the steps).</p>
+            </details>
+          </div>
+          <div class="set-card" id="ownModelBox" hidden>
+            <h3 class="card-title">Our model on this computer</h3>
+            <p id="ownModelInUse" class="card-note"></p>
+            <p id="ownModelScores" class="card-note"></p>
+            <div id="ownModelKinds" class="perm-list" hidden></div>
+            <label class="switch-row">Let our model handle a kind once it's reliable <input type="checkbox" id="learnRoute"></label>
+            <label>Our model's address <input id="ownModelUrl" spellcheck="false" inputmode="url"></label>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>After each answer from the big AI, LightMoon quietly asks our model the same thing and checks whether it would have done the same: the same tool with the same details, or a reply that says much the same. You never see or hear its answers.</p>
+              <p>With the switch on, once it agrees at least 95 times in 100 over at least 50 questions of one kind, it answers that kind itself. If it has any trouble, the big AI answers instead. If Edge asks to let LightMoon reach devices on your network, allow it: that's our model, on this computer.</p>
+            </details>
+          </div>
         </section>
 
         <!-- ---------- Reminders ---------- -->

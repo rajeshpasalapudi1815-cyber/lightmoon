@@ -151,6 +151,7 @@ docs/                 the app (GitHub Pages publishes this folder)
   index.html          the HUD interface
   app.js              voice in/out, chat, panels, reminders, settings
   js/brain.js         talks to the AI model and runs its tools
+  js/learning.js      our own model: keeps the big model's answers as lessons, compares our model with it
   js/prompt.js        LightMoon's personality + what it knows about you
   js/tools.js         remember, tasks, reminders, goals, progress
   js/store.js         on-device storage, backup and restore
@@ -164,6 +165,7 @@ docs/                 the app (GitHub Pages publishes this folder)
   js/phone.js         in the Android app: what the AI knows of the phone and its phone tools (asks before calls and sends)
   js/knowledge.js     look_up and news_headlines: Wikipedia's search, summaries and "In the news"
   sw.js               lets it install, work offline and show notifications
+trainer/              teaching our own model from those lessons (a Kaggle notebook) and running it on a computer; see trainer/README.md
 cloud/                the small cloud service (Cloudflare Worker + D1 database, free plan)
   src/worker.js       stores encrypted sync data and reminder times; sends the reminder pushes
   wrangler.toml       its settings; deploy with `npx wrangler deploy` from this folder

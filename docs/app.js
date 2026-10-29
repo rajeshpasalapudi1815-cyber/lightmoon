@@ -9,6 +9,7 @@ import * as cloud from './js/cloud.js';
 import * as lifeLevelling from './js/lifelevelling.js';
 import { reminderLine, checkInLine, parseAlertId } from './js/announce.js';
 import { chat, briefing } from './js/brain.js';
+import { wireLearning } from './js/learning.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 
 const $ = selector => document.querySelector(selector);
@@ -1527,6 +1528,7 @@ function wireUp() {
   $('#settings').addEventListener('close', onSettingsClosed);
   addEventListener('popstate', onSettingsHistory);
   $('#resetAi').addEventListener('click', () => fillAiFields($('#settingsForm').elements, store.DEFAULT_AI));
+  wireLearning(); // Settings -> AI brain -> Our own model
   $('#exportBtn').addEventListener('click', downloadBackup);
   $('#importBtn').addEventListener('click', () => $('#importFile').click());
   $('#importFile').addEventListener('change', restoreBackup);
