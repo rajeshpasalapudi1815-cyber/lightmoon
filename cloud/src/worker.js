@@ -3,6 +3,8 @@
 // encrypted with the user's sync code, and reminders are only an id and a time.
 // Connected apps (Life Levelling) use the same space: a "feed" is their encrypted summary for LightMoon,
 // and an "inbox" holds LightMoon's encrypted requests for them. Both are encrypted with the sync code too.
+// Life Levelling's phone app also keeps its backup here (/backups): encrypted on the phone with a key from
+// the user's email and password. The cloud only checks a second, separate key to allow reading or replacing it.
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS spaces (
@@ -36,6 +38,19 @@ const SCHEMA = [
      blob       TEXT NOT NULL,
      created_at INTEGER NOT NULL,
      PRIMARY KEY (space_id, box, item_id))`,
+  `CREATE TABLE IF NOT EXISTS backups (
+     id           TEXT PRIMARY KEY,
+     auth_hash    TEXT NOT NULL,
+     parts        INTEGER NOT NULL,
+     size         INTEGER NOT NULL,
+     updated_at   INTEGER NOT NULL,
+     failures     INTEGER NOT NULL DEFAULT 0,
+     locked_until INTEGER NOT NULL DEFAULT 0)`,
+  `CREATE TABLE IF NOT EXISTS backup_parts (
+     backup_id TEXT NOT NULL,
+     part      INTEGER NOT NULL,
+     data      TEXT NOT NULL,
+     PRIMARY KEY (backup_id, part))`,
 ];
 
 const SPACE_ID = /^[0-9a-f]{64}$/; // a SHA-256 of the sync code, or a random id for a device on its own
@@ -48,6 +63,13 @@ const MAX_BLOB_CHARS = 1_500_000;
 const MAX_FEED_CHARS = 300_000;
 const MAX_REQUEST_CHARS = 20_000;
 const MAX_INBOX_ITEMS = 100;
+const BACKUP_ID = /^[0-9a-f]{64}$/;           // SHA-256 of the email, made on the phone
+const BACKUP_KEY = /^[A-Za-z0-9_-]{43}$/;      // 32 bytes, base64url
+const MAX_BACKUP_BODY_BYTES = 25_000_000;
+const MAX_BACKUP_CHARS = 24_000_000;
+const BACKUP_PART_CHARS = 500_000;             // D1 keeps each value under ~2 MB
+const BACKUP_TRIES = 10;
+const BACKUP_LOCK_MS = 15 * 60_000;
 const MAX_REMINDERS = 500;
 const KEEP_SENT_REMINDERS_MS = 7 * 86_400_000;
 const KEEP_INBOX_MS = 7 * 86_400_000;
@@ -98,7 +120,7 @@ function corsHeaders(request, env) {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Backup-Key',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
@@ -108,9 +130,9 @@ const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 const noContent = () => new Response(null, { status: 204 });
 
-async function readJson(request) {
+async function readJson(request, maxBytes = MAX_BODY_BYTES) {
   const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) throw new HttpError(413, 'Too large');
+  if (text.length > maxBytes) throw new HttpError(413, 'Too large');
   try {
     return JSON.parse(text || '{}');
   } catch {
@@ -124,6 +146,13 @@ async function route(request, env) {
   if (method === 'GET' && pathname === '/vapid-public-key') return json({ key: env.VAPID_PUBLIC_KEY });
 
   const [section, space, part, name, item, ...rest] = pathname.split('/').filter(Boolean);
+  if (section === 'backups' && BACKUP_ID.test(space ?? '') && !part) {
+    const key = request.headers.get('X-Backup-Key') ?? '';
+    if (!BACKUP_KEY.test(key)) throw new HttpError(401, 'Backup key required');
+    if (method === 'GET') return getBackup(env, space, key);
+    if (method === 'PUT') return putBackup(env, space, key, await readJson(request, MAX_BACKUP_BODY_BYTES));
+    if (method === 'DELETE') return deleteBackup(env, space, key);
+  }
   if (section !== 'spaces' || !SPACE_ID.test(space ?? '') || rest.length) throw new HttpError(404, 'Not found');
 
   if (part === 'data' && !name) {
@@ -145,6 +174,76 @@ async function route(request, env) {
     if (ITEM_ID.test(item ?? '') && method === 'DELETE') return removeFromInbox(env, space, name, item);
   }
   throw new HttpError(404, 'Not found');
+}
+
+// ---------- Life Levelling backups: encrypted on the phone, opened only with the account's key ----------
+
+const sha256Hex = async text => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+};
+
+// Checks the key against the backup. Too many wrong keys lock it for a while, so a password can't be guessed here.
+async function checkBackupKey(env, row, key) {
+  const now = Date.now();
+  if (row.locked_until > now) throw new HttpError(429, 'Too many wrong tries. Try again later.');
+  if ((await sha256Hex(key)) === row.auth_hash) {
+    if (row.failures) await env.DB.prepare('UPDATE backups SET failures = 0 WHERE id = ?').bind(row.id).run();
+    return;
+  }
+  const failures = row.failures + 1;
+  const lockedUntil = failures >= BACKUP_TRIES ? now + BACKUP_LOCK_MS : 0;
+  await env.DB.prepare('UPDATE backups SET failures = ?, locked_until = ? WHERE id = ?')
+    .bind(lockedUntil ? 0 : failures, lockedUntil, row.id).run();
+  throw new HttpError(403, 'Wrong key for this backup');
+}
+
+async function getBackup(env, id, key) {
+  const row = await env.DB.prepare('SELECT * FROM backups WHERE id = ?').bind(id).first();
+  if (!row) return json({ error: 'Not found' }, 404);
+  await checkBackupKey(env, row, key);
+  const { results } = await env.DB.prepare('SELECT data FROM backup_parts WHERE backup_id = ? ORDER BY part').bind(id).all();
+  return json({ blob: results.map(r => r.data).join(''), updatedAt: row.updated_at, size: row.size });
+}
+
+// { blob, newKey?, ifUpdatedAt? }: the first upload creates the backup; newKey changes the key (after a
+// password change). ifUpdatedAt replaces it only if it is still the backup the phone last saw (0: none yet),
+// so a phone never overwrites a backup it doesn't know about.
+async function putBackup(env, id, key, { blob, newKey, ifUpdatedAt }) {
+  if (typeof blob !== 'string' || !blob || blob.length > MAX_BACKUP_CHARS) throw new HttpError(400, 'Bad backup');
+  if (newKey != null && !BACKUP_KEY.test(String(newKey))) throw new HttpError(400, 'Bad new key');
+  if (ifUpdatedAt != null && !Number.isSafeInteger(ifUpdatedAt)) throw new HttpError(400, 'Bad ifUpdatedAt');
+  const row = await env.DB.prepare('SELECT * FROM backups WHERE id = ?').bind(id).first();
+  if (row) await checkBackupKey(env, row, key);
+  if (ifUpdatedAt != null && (row?.updated_at ?? 0) !== ifUpdatedAt) {
+    return json({ error: 'The backup has changed', updatedAt: row?.updated_at ?? 0 }, 409);
+  }
+  const authHash = await sha256Hex(newKey ?? key);
+  const parts = [];
+  for (let i = 0; i < blob.length; i += BACKUP_PART_CHARS) parts.push(blob.slice(i, i + BACKUP_PART_CHARS));
+  const now = Date.now();
+  const insertPart = env.DB.prepare('INSERT INTO backup_parts (backup_id, part, data) VALUES (?, ?, ?)');
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM backup_parts WHERE backup_id = ?').bind(id),
+    ...parts.map((data, part) => insertPart.bind(id, part, data)),
+    env.DB.prepare(
+      `INSERT INTO backups (id, auth_hash, parts, size, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET auth_hash = excluded.auth_hash, parts = excluded.parts, size = excluded.size,
+         updated_at = excluded.updated_at, failures = 0, locked_until = 0`,
+    ).bind(id, authHash, parts.length, blob.length, now),
+  ]);
+  return json({ updatedAt: now, size: blob.length });
+}
+
+async function deleteBackup(env, id, key) {
+  const row = await env.DB.prepare('SELECT * FROM backups WHERE id = ?').bind(id).first();
+  if (!row) return noContent();
+  await checkBackupKey(env, row, key);
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM backup_parts WHERE backup_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM backups WHERE id = ?').bind(id),
+  ]);
+  return noContent();
 }
 
 // ---------- Connected apps: their encrypted summary (feed) and LightMoon's requests to them (inbox) ----------
