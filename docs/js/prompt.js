@@ -1,5 +1,5 @@
 // Builds the system prompt: LightMoon's personality plus a fresh snapshot of everything it knows.
-import { profile, memories, tasks, goals } from './store.js';
+import { profile, memories, tasks, goals, routines } from './store.js';
 import { isPast, describeAgo } from './time.js';
 import { savedPlace } from './weather.js';
 import { promptSection as lifeLevellingSection, summary as lifeLevellingSummary } from './lifelevelling.js';
@@ -44,7 +44,10 @@ export function buildSystemPrompt() {
   const phoneGuidance = phone ? `
 - You are on their phone (see PHONE below): answer "what's on today", "did anyone call", "any messages" from it, and use the phone_* tools to add calendar events, call, message, open apps, set alarms or timers, and work the flashlight and volume.
 - Calling or sending a message needs their yes: the tool gives you a question to read back (who and what). Ask it, end your reply, and only call again with the confirm_id if their answer is yes. Never send or call on a guess; if a name matches several people, ask which.
-- Meetings in the phone's calendar are said out loud before they start on their own, so don't add reminders for them unless asked.` : '';
+- Meetings in the phone's calendar are said out loud before they start on their own, so don't add reminders for them unless asked.
+- Be proactive, once and briefly: if a missed call or a message looks important and unanswered, offer to call back or reply; if a meeting is coming up soon, mention it; if the battery is under 20% and not charging, say so.` : '';
+
+  const routineLines = routines.list().map(r => `- [#${r.id}] "${r.trigger}": ${r.steps}`);
 
   const goalLines = goals.active().map(g => {
     const parts = [`- [#${g.id}] ${g.title}`];
@@ -71,8 +74,9 @@ WHAT YOU DO
 - Keep their life organised with your tools: remember lasting facts about them (not small talk), add tasks and reminders, mark tasks done, set goals, and log progress when they report it.
 - When you set a reminder, write the announcement you will say when it goes off, as at that moment: "remind me at 4:55 that I have a meeting at 5" becomes "${spokenAddress}, you have a meeting at 5 o'clock."
 - For any question about weather, temperature or rain, call get_weather. It knows where the user is, so "my location" needs no city.
-- You cannot browse the internet and have no tools other than the ones provided. If you don't know something current, say so.
+- You cannot browse the web, but look_up searches Wikipedia, and news_headlines gives today's top world news. Use them for facts you're unsure of or that may have changed, and say they come from Wikipedia when it matters. You have no tools other than the ones provided; if you still don't know, say so.
 - After using a tool, confirm in a few words, e.g. "Done. I'll remind you at six."
+- Routines: when they describe one ("when I say good night, ..."), save it with save_routine. When they say one of the ROUTINES phrases below, or ask for it, carry out its steps in order with your tools, then sum up in a sentence or two. Steps that need their yes (calls, messages) still need it; skip a step you can't do and say so.
 - Never invent tasks, memories or facts. If a request is ambiguous, ask.${lifeGuidance}${phoneGuidance}
 
 CURRENT TIME: ${clock} (${timeZone}). Tool times use local time in the format YYYY-MM-DDTHH:MM.
@@ -86,5 +90,8 @@ ${taskLines.join('\n') || '- None.'}
 ${doneToday.length ? `Completed today: ${doneToday.join('; ')}` : ''}
 
 GOALS
-${goalLines.join('\n') || '- None set yet.'}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}${phone ? `\n\n${phone}` : ''}`;
+${goalLines.join('\n') || '- None set yet.'}
+
+ROUTINES (when they say the phrase, do the steps)
+${routineLines.join('\n') || '- None yet.'}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}${phone ? `\n\n${phone}` : ''}`;
 }

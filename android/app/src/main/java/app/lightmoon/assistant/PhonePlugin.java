@@ -1,6 +1,7 @@
 package app.lightmoon.assistant;
 
 import android.Manifest;
+import android.app.NotificationManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -11,11 +12,13 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.media.AudioManager;
 import android.net.Uri;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.provider.AlarmClock;
 import android.provider.CallLog;
 import android.provider.Settings;
 import android.telephony.SmsManager;
+import android.view.KeyEvent;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -54,6 +57,7 @@ public class PhonePlugin extends Plugin {
     @Override
     public void load() {
         active = this;
+        Briefings.scheduleAll(getContext());
         if (Meetings.canRead(getContext())) {
             Meetings.reschedule(getContext());
             if (PhonePrefs.meetingLead(getContext()) > 0) MeetingWorker.start(getContext());
@@ -91,10 +95,14 @@ public class PhonePlugin extends Plugin {
         status.put("calls", granted("calls"));
         status.put("texts", granted("texts"));
         status.put("messages", MessageListener.isEnabled(getContext()));
+        status.put("silence", Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+            || getContext().getSystemService(NotificationManager.class).isNotificationPolicyAccessGranted());
         status.put("telephony", PhonePrefs.hasTelephony(getContext()));
         status.put("meetingLead", PhonePrefs.meetingLead(getContext()));
         status.put("announceCalls", PhonePrefs.announceCalls(getContext()));
         status.put("readMessages", PhonePrefs.readMessages(getContext()));
+        status.put("briefingMorning", Briefings.time(getContext(), Briefings.MORNING));
+        status.put("briefingEvening", Briefings.time(getContext(), Briefings.EVENING));
         return status;
     }
 
@@ -146,7 +154,8 @@ public class PhonePlugin extends Plugin {
         }
     }
 
-    // { meetingLead (minutes, 0 = off), announceCalls, readMessages ("off" | "sender" | "full"), address }
+    // { meetingLead (minutes, 0 = off), announceCalls, readMessages ("off" | "sender" | "full"), address,
+    //   briefingMorning, briefingEvening ("07:00" or "" = off), place: { name, latitude, longitude } for the weather }
     @PluginMethod
     public void configure(PluginCall call) {
         android.content.SharedPreferences.Editor edit = PhonePrefs.get(getContext()).edit();
@@ -158,11 +167,30 @@ public class PhonePlugin extends Plugin {
         if ("off".equals(messages) || "sender".equals(messages) || "full".equals(messages)) edit.putString("readMessages", messages);
         String address = call.getString("address");
         if (address != null && !address.trim().isEmpty()) edit.putString("address", address.trim());
+        for (String kind : new String[] { Briefings.MORNING, Briefings.EVENING }) {
+            String time = call.getString(kind.equals(Briefings.MORNING) ? "briefingMorning" : "briefingEvening");
+            if (time != null && (time.isEmpty() || time.matches("\\d{2}:\\d{2}"))) edit.putString("briefing_" + kind, time);
+        }
+        JSObject place = call.getObject("place");
+        if (place != null && place.has("latitude") && place.has("longitude")) {
+            edit.putString("placeName", place.optString("name", ""))
+                .putString("placeLat", String.valueOf(place.optDouble("latitude")))
+                .putString("placeLon", String.valueOf(place.optDouble("longitude")));
+        }
         edit.commit();
+        Briefings.scheduleAll(getContext());
         Meetings.reschedule(getContext());
         if (PhonePrefs.meetingLead(getContext()) > 0 && Meetings.canRead(getContext())) MeetingWorker.start(getContext());
         else MeetingWorker.stop(getContext());
         call.resolve(currentStatus());
+    }
+
+    // { kind: "morning" | "evening" }: says that briefing now, to hear what it sounds like.
+    @PluginMethod
+    public void briefingNow(PluginCall call) {
+        String kind = Briefings.EVENING.equals(call.getString("kind")) ? Briefings.EVENING : Briefings.MORNING;
+        ContextCompat.startForegroundService(getContext(), new Intent(getContext(), SpeakService.class).putExtra("briefing", kind));
+        call.resolve();
     }
 
     // ---------- Calendar ----------
@@ -480,6 +508,118 @@ public class PhonePlugin extends Plugin {
         } catch (CameraAccessException | RuntimeException err) {
             call.reject("The flashlight is busy (the camera may be in use).");
         }
+    }
+
+    // { action: "play" | "pause" | "toggle" | "next" | "previous" }: for whichever app is playing (Spotify, YouTube Music...).
+    @PluginMethod
+    public void media(PluginCall call) {
+        String action = call.getString("action", "toggle");
+        int key;
+        switch (action) {
+            case "play": key = KeyEvent.KEYCODE_MEDIA_PLAY; break;
+            case "pause": key = KeyEvent.KEYCODE_MEDIA_PAUSE; break;
+            case "next": key = KeyEvent.KEYCODE_MEDIA_NEXT; break;
+            case "previous": key = KeyEvent.KEYCODE_MEDIA_PREVIOUS; break;
+            default: key = KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE;
+        }
+        AudioManager audio = getContext().getSystemService(AudioManager.class);
+        audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
+        audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
+        JSObject result = new JSObject();
+        result.put("musicActive", audio.isMusicActive());
+        call.resolve(result);
+    }
+
+    // { destination, mode?: "drive" | "walk" | "bike" | "transit" }: turn-by-turn directions in Google Maps.
+    @PluginMethod
+    public void navigate(PluginCall call) {
+        String destination = call.getString("destination", "").trim();
+        if (destination.isEmpty()) {
+            call.reject("Where to?");
+            return;
+        }
+        String mode = call.getString("mode", "drive");
+        String code = "walk".equals(mode) ? "w" : "bike".equals(mode) ? "b" : "transit".equals(mode) ? "r" : "d";
+        Intent maps = new Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=" + Uri.encode(destination) + "&mode=" + code))
+            .setPackage("com.google.android.apps.maps");
+        try {
+            getActivity().startActivity(maps);
+        } catch (ActivityNotFoundException err) {
+            // No Google Maps: any maps app, as a search for the place.
+            openView(call, Uri.parse("geo:0,0?q=" + Uri.encode(destination)), "There's no maps app on this phone.");
+            return;
+        }
+        call.resolve();
+    }
+
+    // { query, where?: "web" | "youtube" | "maps" }: opens the search in the right app or the browser.
+    @PluginMethod
+    public void search(PluginCall call) {
+        String query = call.getString("query", "").trim();
+        if (query.isEmpty()) {
+            call.reject("Search for what?");
+            return;
+        }
+        String where = call.getString("where", "web");
+        Uri uri = "youtube".equals(where) ? Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(query))
+            : "maps".equals(where) ? Uri.parse("geo:0,0?q=" + Uri.encode(query))
+            : Uri.parse("https://www.google.com/search?q=" + Uri.encode(query));
+        openView(call, uri, "Nothing on this phone can open that.");
+    }
+
+    private void openView(PluginCall call, Uri uri, String failure) {
+        try {
+            getActivity().startActivity(new Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            call.resolve();
+        } catch (ActivityNotFoundException err) {
+            call.reject(failure);
+        }
+    }
+
+    // { mode: "normal" | "vibrate" | "silent" } -> { mode } as set. Full silence needs Do Not Disturb access,
+    // which Android grants on its own screen; without it the phone goes to vibrate.
+    @PluginMethod
+    public void ringer(PluginCall call) {
+        String mode = call.getString("mode", "normal");
+        AudioManager audio = getContext().getSystemService(AudioManager.class);
+        NotificationManager notifications = getContext().getSystemService(NotificationManager.class);
+        boolean mayGoSilent = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || notifications.isNotificationPolicyAccessGranted();
+        String applied = mode;
+        try {
+            if ("silent".equals(mode) && mayGoSilent) audio.setRingerMode(AudioManager.RINGER_MODE_SILENT);
+            else if ("silent".equals(mode) || "vibrate".equals(mode)) {
+                audio.setRingerMode(AudioManager.RINGER_MODE_VIBRATE);
+                applied = "vibrate";
+            } else audio.setRingerMode(AudioManager.RINGER_MODE_NORMAL);
+        } catch (SecurityException err) {
+            call.reject("Android won't let LightMoon change the ringer while Do Not Disturb is on.");
+            return;
+        }
+        JSObject result = new JSObject();
+        result.put("mode", applied);
+        result.put("silentNeedsAccess", "silent".equals(mode) && !mayGoSilent);
+        call.resolve(result);
+    }
+
+    // Opens Android's screen where the user can let LightMoon fully silence the phone.
+    @PluginMethod
+    public void openSilenceAccess(PluginCall call) {
+        try {
+            getActivity().startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS));
+            call.resolve();
+        } catch (ActivityNotFoundException err) {
+            call.reject("Open Settings → Notifications → Do Not Disturb → app access and allow LightMoon.");
+        }
+    }
+
+    // -> { percent, charging }
+    @PluginMethod
+    public void battery(PluginCall call) {
+        BatteryManager battery = getContext().getSystemService(BatteryManager.class);
+        JSObject result = new JSObject();
+        result.put("percent", battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY));
+        result.put("charging", Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && battery.isCharging());
+        call.resolve(result);
     }
 
     // { stream: "media" | "ring" | "alarm", percent: 0-100 }

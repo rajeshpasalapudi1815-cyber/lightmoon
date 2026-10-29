@@ -142,6 +142,13 @@
         </select>
       </label>
       <label class="check"><input type="checkbox" name="listenOnOpen"> Start listening when the app opens</label>
+      <label>After answering you out loud
+        <select name="followUp">
+          <option value="questions">listen for your reply when it asks you something</option>
+          <option value="always">always listen for your reply</option>
+          <option value="off">wait until you tap or say its name</option>
+        </select>
+      </label>
       <label>Listening language <select name="lang" id="langSelect"></select></label>
       <label>API key <input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Leave blank to keep the current key"></label>
 
@@ -204,6 +211,7 @@
           <button type="button" id="allowCalls" class="btn-ghost">Allow calls</button>
           <button type="button" id="allowTexts" class="btn-ghost">Allow texts</button>
           <button type="button" id="allowMessages" class="btn-ghost">Allow reading messages</button>
+          <button type="button" id="allowSilence" class="btn-ghost" hidden>Allow full silence</button>
         </span>
         <label>Say meetings out loud
           <select id="meetingLead">
@@ -227,7 +235,36 @@
             <option value="off">stay quiet</option>
           </select>
         </label>
-        <small>Then you can ask LightMoon about your meetings, missed calls and messages, and have it call or text people, reply on WhatsApp or SMS, add meetings, open apps, set alarms and timers, and work the flashlight and volume. It always reads back and waits for your yes before calling or sending anything. Calls and messages are only spoken when the phone isn't on silent. When you talk to LightMoon, your upcoming meetings, recent calls and the last few messages go to the AI service along with the conversation.</small>
+        <label>Spoken morning briefing
+          <span class="row">
+            <select id="briefingMorning">
+              <option value="">off</option>
+              <option value="06:00">6:00</option>
+              <option value="06:30">6:30</option>
+              <option value="07:00">7:00</option>
+              <option value="07:30">7:30</option>
+              <option value="08:00">8:00</option>
+              <option value="08:30">8:30</option>
+              <option value="09:00">9:00</option>
+            </select>
+            <button type="button" id="briefingMorningTest" class="btn-ghost">Hear it now</button>
+          </span>
+        </label>
+        <label>Evening preview of tomorrow
+          <span class="row">
+            <select id="briefingEvening">
+              <option value="">off</option>
+              <option value="20:00">8:00 PM</option>
+              <option value="21:00">9:00 PM</option>
+              <option value="21:30">9:30 PM</option>
+              <option value="22:00">10:00 PM</option>
+              <option value="22:30">10:30 PM</option>
+            </select>
+            <button type="button" id="briefingEveningTest" class="btn-ghost">Hear it now</button>
+          </span>
+        </label>
+        <small>The briefings are said at alarm volume, even with LightMoon closed: the weather (for your weather place), meetings, reminders, and in the morning the calls and messages you missed overnight.</small>
+        <small>Then you can ask LightMoon about your meetings, missed calls and messages, and have it call or text people, reply on WhatsApp or SMS, add meetings, open apps, play or skip music, navigate, search, set alarms and timers, and work the flashlight, volume and ringer. It always reads back and waits for your yes before calling or sending anything. Calls and messages are only spoken when the phone isn't on silent. When you talk to LightMoon, your upcoming meetings, recent calls and the last few messages go to the AI service along with the conversation.</small>
       </div>
 
       <div class="data-box cloud-box">

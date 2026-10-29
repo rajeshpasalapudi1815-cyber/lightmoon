@@ -46,7 +46,7 @@ let started = false; // user has tapped Initialize
 let locked = false; // the lock screen is showing
 let hiddenAt = 0; // when the app last went into the background
 let pendingShare = null; // shared content the next question is about
-let listenWhenFree = false; // start listening once the opening briefing or greeting has been spoken
+let listenWhenFree = false; // start listening once the briefing, greeting or reply has been spoken ('follow-up': with a chime)
 let audioCtx = null;
 
 // ---------- Small helpers ----------
@@ -54,7 +54,9 @@ let audioCtx = null;
 function loadPrefs() {
   const lang = LANGUAGES.find(([code]) => code === navigator.language)?.[0] ?? 'en-US';
   // sendAfterMs: how long a pause ends a spoken request (0 = only when the moon is tapped again).
-  const defaults = { voice: '', rate: 1, speak: true, lang, handsFree: false, sendAfterMs: 2500, listenOnOpen: true };
+  // followUp: after a spoken request, listen for the answer once the reply is said: 'questions' (when the
+  // reply asks something), 'always', or 'off' (wait for a tap).
+  const defaults = { voice: '', rate: 1, speak: true, lang, handsFree: false, sendAfterMs: 2500, listenOnOpen: true, followUp: 'questions' };
   try {
     // Move preferences saved under the app's earlier names.
     for (const oldKey of ['vega.prefs', 'jarvis.prefs']) {
@@ -292,6 +294,7 @@ function offerShared(text) {
 function refresh() {
   listener.sync();
   if (listenWhenFree && started && !busy && !speaker.active && !locked && listener.mode !== 'command') {
+    if (listenWhenFree === 'follow-up') chime(); // "your turn"
     listenWhenFree = false;
     listener.start('command');
   }
@@ -537,7 +540,7 @@ const listener = {
     this.stopRec();
     input.value = '';
     refresh();
-    if (text) send(text);
+    if (text) send(text, { byVoice: true });
   },
 
   cancel() {
@@ -605,8 +608,15 @@ const listener = {
 
 // ---------- Conversation ----------
 
-// `context` is shared content the message is about (from "Share to LightMoon").
-async function send(text, { context = null } = {}) {
+// Conversation mode: after a spoken request, listen for the answer once the reply has been said, without a
+// tap or the wake word ("Call Mom?" "Yes."). If nothing is said, listening stops on its own after a moment.
+function shouldFollowUp(reply) {
+  if (!prefs.speak || prefs.followUp === 'off') return false;
+  return prefs.followUp === 'always' || /\?["')\]]*\s*$/.test(String(reply ?? '').trim());
+}
+
+// `context` is shared content the message is about (from "Share to LightMoon"); `byVoice`: it was spoken.
+async function send(text, { context = null, byVoice = false } = {}) {
   text = text.trim();
   if (!text || busy) return;
   context ??= pendingShare;
@@ -621,6 +631,7 @@ async function send(text, { context = null } = {}) {
     const out = await chat(context ? `${text}\n\nShared content:\n${context}` : text, { onText: live.push });
     live.done(out);
     applyState();
+    if (byVoice && !out.error && shouldFollowUp(out.reply)) listenWhenFree = 'follow-up';
   } finally {
     busy = false;
     refresh();
@@ -788,7 +799,7 @@ function renderGoals() {
 function renderMemories() {
   const list = $('#memoryList');
   list.replaceChildren();
-  if (!state.memories.length) {
+  if (!state.memories.length && !state.routines.length) {
     list.append(el('li', 'empty', "Nothing yet. As we talk I'll remember what matters: your preferences, people, routines and ambitions."));
   }
   for (const memory of state.memories) {
@@ -796,6 +807,14 @@ function renderMemories() {
     const main = el('div', 'item-main');
     main.append(el('div', 'tag', memory.category), el('div', 'item-title', memory.content));
     item.append(main, iconButton('del', '×', 'Forget this', () => store.memories.remove(memory.id)));
+    list.append(item);
+  }
+  // Routines live here too: "when I say good night, ..."
+  for (const routine of state.routines) {
+    const item = el('li', 'item');
+    const main = el('div', 'item-main');
+    main.append(el('div', 'tag', 'routine'), el('div', 'item-title', `"${routine.trigger}"`), el('div', 'item-meta', routine.steps));
+    item.append(main, iconButton('del', '×', `Delete the routine "${routine.trigger}"`, () => store.routines.remove(routine.id)));
     list.append(item);
   }
 }
@@ -836,6 +855,7 @@ function openSettings() {
   fields.speak.checked = prefs.speak;
   fields.sendAfter.value = String(prefs.sendAfterMs);
   fields.listenOnOpen.checked = prefs.listenOnOpen;
+  fields.followUp.value = prefs.followUp;
   fields.lang.value = prefs.lang;
   fields.apiKey.value = '';
   fillAiFields(fields, store.aiConfig());
@@ -951,9 +971,16 @@ async function paintPhonePowers(message) {
   $('#allowCalls').hidden = status.calls || !status.telephony;
   $('#allowTexts').hidden = status.texts || !status.telephony;
   $('#allowMessages').hidden = status.messages;
+  $('#allowSilence').hidden = status.silence !== false; // only offered by app versions that can silence the phone
   $('#meetingLead').value = String(status.meetingLead);
   $('#announceCalls').value = String(status.announceCalls);
   $('#readMessages').value = status.readMessages;
+  // Briefings need app version 1.4; earlier versions don't report them.
+  const briefings = typeof status.briefingMorning === 'string';
+  for (const kind of ['briefingMorning', 'briefingEvening']) {
+    $(`#${kind}`).closest('label').hidden = !briefings;
+    if (briefings) $(`#${kind}`).value = status[kind];
+  }
 }
 
 // Asks Android for one of the phone permissions; a "no" there can only be undone in the phone's settings.
@@ -976,14 +1003,21 @@ function savePhoneChoices() {
     meetingLead: Number($('#meetingLead').value),
     announceCalls: $('#announceCalls').value === 'true',
     readMessages: $('#readMessages').value,
+    briefingMorning: $('#briefingMorning').value,
+    briefingEvening: $('#briefingEvening').value,
   }).catch(err => { $('#settingsError').textContent = err.message; }).finally(() => paintPhonePowers());
 }
 
-// The phone says meetings, callers and messages itself, so it needs to know how to address the user.
+// The phone says meetings, callers, messages and briefings itself, so it needs to know how to address the
+// user, and where they are for the briefing's weather.
 function tellPhoneAddress() {
   if (!phone) return;
   const word = addressWord();
-  phone.configure({ address: `${word.charAt(0).toUpperCase()}${word.slice(1)}` }).catch(() => {});
+  const place = weather.savedPlace();
+  phone.configure({
+    address: `${word.charAt(0).toUpperCase()}${word.slice(1)}`,
+    ...(place && { place: { name: place.name, latitude: place.latitude, longitude: place.longitude } }),
+  }).catch(() => {});
 }
 
 // A meeting is starting soon, or a message came in, while LightMoon is on screen: say it here.
@@ -1192,6 +1226,7 @@ function saveSettings(event) {
     speak: fields.speak.checked,
     sendAfterMs: Number(fields.sendAfter.value),
     listenOnOpen: fields.listenOnOpen.checked,
+    followUp: fields.followUp.value,
     lang: fields.lang.value,
   });
   savePrefs();
@@ -1351,7 +1386,16 @@ function wireUp() {
     $('#allowTexts').addEventListener('click', () => allowPhone(() => phone.requestTexts(), 'texts'));
     // Notification access is granted on Android's own screen; the box repaints when the user comes back.
     $('#allowMessages').addEventListener('click', () => phone.openMessageAccess().catch(err => { $('#settingsError').textContent = err.message; }));
-    for (const id of ['#meetingLead', '#announceCalls', '#readMessages']) $(id).addEventListener('change', savePhoneChoices);
+    $('#allowSilence').addEventListener('click', () => phone.openSilenceAccess().catch(err => { $('#settingsError').textContent = err.message; }));
+    for (const id of ['#meetingLead', '#announceCalls', '#readMessages', '#briefingMorning', '#briefingEvening']) {
+      $(id).addEventListener('change', savePhoneChoices);
+    }
+    for (const kind of ['morning', 'evening']) {
+      $(`#briefing${kind === 'morning' ? 'Morning' : 'Evening'}Test`).addEventListener('click', () => {
+        tellPhoneAddress(); // the latest weather place
+        phone.briefingNow({ kind }).catch(err => { $('#settingsError').textContent = err.message; });
+      });
+    }
   }
 
   for (const tab of document.querySelectorAll('[role="tab"]')) {

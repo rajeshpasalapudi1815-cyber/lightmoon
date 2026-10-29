@@ -1,9 +1,10 @@
 // Tools the model can call to change LightMoon's memory, tasks and goals, and to check the weather.
-import { memories, tasks, goals, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
+import { memories, tasks, goals, routines, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
 import { normalizeTime, localStamp, prettyTime } from './time.js';
 import { findPlace, placeFromDevice, savedPlace, savePlace, weatherSummary } from './weather.js';
 import { LIFE_TOOLS, lifeHandlers, isConnected as lifeConnected } from './lifelevelling.js';
 import { phoneTools, phoneHandlers } from './phone.js';
+import { lookUp, headlines } from './knowledge.js';
 
 // What the model sends when the user means "where I am" rather than naming a city.
 const MEANS_HERE = /^(here|local|nearby)$|\b(my|current|this|our)\s+(location|city|place|area|town)\b|where i am/i;
@@ -79,6 +80,25 @@ export const TOOLS = [
     { city: { type: 'string', description: 'The city, e.g. "Hyderabad".' } },
     ['city'],
   ),
+  tool(
+    'look_up',
+    'Look something up on Wikipedia: a person, place, thing, event, idea or fact you are not sure of or that may have changed. '
+      + 'Pass a short topic, e.g. "Prime Minister of India" or "Charminar", not a whole question.',
+    { topic: { type: 'string' } },
+    ['topic'],
+  ),
+  tool('news_headlines', "Today's top world news (Wikipedia's In the news).", {}),
+  tool(
+    'save_routine',
+    'Save a routine the user asks for: a phrase, and what to do when they say it ("when I say good night, set an alarm for 6 '
+      + 'and tell me tomorrow\'s meetings"). Saving the same phrase again replaces its steps.',
+    {
+      trigger: { type: 'string', description: 'The phrase, short, e.g. "good night".' },
+      steps: { type: 'string', description: 'What to do, in order, in plain words, as the user described it.' },
+    },
+    ['trigger', 'steps'],
+  ),
+  tool('delete_routine', 'Delete a routine the user no longer wants.', { id: ID }, ['id']),
 ];
 
 // The Life Levelling tools are offered only while Life Levelling is connected, the phone tools only in the
@@ -150,8 +170,9 @@ const handlers = {
 
   delete_task({ id }) {
     const task = findTask(id);
+    const { title } = task; // removing empties the record
     tasks.remove(task.id);
-    return `Deleted: ${task.title}`;
+    return `Deleted: ${title}`;
   },
 
   add_goal({ title, why, target_date }) {
@@ -198,6 +219,29 @@ const handlers = {
     const place = await findPlace(toText(city, 'city', 100));
     savePlace(place);
     return `Weather place: ${place.name}`;
+  },
+
+  async look_up({ topic }) {
+    const what = toText(topic, 'topic', 200);
+    return { text: `Looked up: ${what}`, result: await lookUp(what) };
+  },
+
+  async news_headlines() {
+    return { text: 'Checked the news', result: await headlines() };
+  },
+
+  save_routine({ trigger, steps }) {
+    const phrase = toText(trigger, 'trigger', 60).replace(/^["']|["']$/g, '');
+    const isNew = routines.save({ trigger: phrase, steps: toText(steps, 'steps', 1000) });
+    return `${isNew ? 'New routine' : 'Routine updated'}: "${phrase}"`;
+  },
+
+  delete_routine({ id }) {
+    const routine = routines.get(toId(id));
+    if (!routine) throw new Error(`There is no routine #${id}.`);
+    const { trigger } = routine; // removing empties the record
+    routines.remove(routine.id);
+    return `Deleted the routine "${trigger}"`;
   },
 
   ...lifeHandlers,

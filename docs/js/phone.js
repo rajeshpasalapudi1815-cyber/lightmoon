@@ -18,7 +18,7 @@ const MAX_MISSED = 6;
 const MAX_MESSAGES = 10;
 
 let allowed = null;
-let seen = { events: [], calls: [], messages: [], at: 0 };
+let seen = { events: [], calls: [], messages: [], battery: null, at: 0 };
 const pending = new Map(); // confirm_id -> { say, run, at }
 
 export const phoneAvailable = () => Boolean(phone);
@@ -35,12 +35,13 @@ async function load() {
   if (!allowed) return;
   const now = Date.now();
   const startOfToday = new Date().setHours(0, 0, 0, 0);
-  const [events, calls, messages] = await Promise.all([
+  const [events, calls, messages, battery] = await Promise.all([
     allowed.calendar ? phone.events({ from: startOfToday, to: now + 36 * HOUR }).then(r => r.events, () => []) : [],
     allowed.calls ? phone.calls({ since: now - 24 * HOUR }).then(r => r.calls, () => []) : [],
     allowed.messages ? phone.messages({ since: now - 12 * HOUR }).then(r => r.messages, () => []) : [],
+    phone.battery?.().catch(() => null) ?? null,
   ]);
-  seen = { events, calls, messages, at: now };
+  seen = { events, calls, messages, battery, at: now };
 }
 
 // ---------- What the AI is told ----------
@@ -66,6 +67,7 @@ const messageRefs = () => seen.messages.slice(-MAX_MESSAGES).map((m, i) => ({ ..
 export function promptSection() {
   if (!allowed) return '';
   const lines = [];
+  if (seen.battery?.percent >= 0) lines.push(`Battery: ${seen.battery.percent}%${seen.battery.charging ? ', charging' : ''}.`);
   if (allowed.calendar) {
     const upcoming = seen.events.filter(e => e.end > Date.now()).slice(0, MAX_EVENTS);
     lines.push(upcoming.length ? 'Meetings and events:' : 'Calendar: nothing for the rest of today and tomorrow.');
@@ -85,7 +87,7 @@ export function promptSection() {
     allowed.calls && 'call people',
     allowed.texts && 'send texts',
     allowed.messages && 'reply to the messages above',
-    'open apps, set alarms and timers, the flashlight and volume',
+    'open apps, control music, navigate, search the web or YouTube, set alarms and timers, the flashlight, volume and ringer',
   ].filter(Boolean);
   return `PHONE (this phone, now; you can ${can.join(', ')})\n${lines.join('\n')}`;
 }
@@ -216,11 +218,23 @@ export function phoneTools() {
       seconds: { type: 'integer', minimum: 0, maximum: 3600, description: 'Timer: extra seconds.' },
       label: { type: 'string' },
     }),
-    tool('phone_device', 'Turn the flashlight on or off, or set a volume.', {
+    tool('phone_device', 'Turn the flashlight on or off, set a volume, or switch the ringer to normal, vibrate or silent.', {
       flashlight: { type: 'boolean', description: 'true = on, false = off.' },
       volume: { type: 'integer', minimum: 0, maximum: 100, description: 'Volume in percent.' },
       stream: { type: 'string', enum: ['media', 'ring', 'alarm'], description: 'Which volume. Default media.' },
+      ringer: { type: 'string', enum: ['normal', 'vibrate', 'silent'] },
     }),
+    tool('phone_media', 'Control the music or video playing on the phone (Spotify, YouTube Music...).', {
+      action: { type: 'string', enum: ['play', 'pause', 'toggle', 'next', 'previous'] },
+    }, ['action']),
+    tool('phone_navigate', 'Start turn-by-turn directions in Google Maps to a place or address.', {
+      destination: { type: 'string', description: 'A place, address or "home"/"work" if saved in Maps.' },
+      mode: { type: 'string', enum: ['drive', 'walk', 'bike', 'transit'], description: 'Default drive.' },
+    }, ['destination']),
+    tool('phone_search', 'Open a search on the phone: the web (Google), YouTube, or Maps (places nearby, e.g. "coffee near me").', {
+      query: { type: 'string' },
+      where: { type: 'string', enum: ['web', 'youtube', 'maps'], description: 'Default web.' },
+    }, ['query']),
   );
   return tools;
 }
@@ -331,8 +345,9 @@ export const phoneHandlers = {
     return `Alarm set: ${match[1].padStart(2, '0')}:${match[2]}${repeat.length ? ', repeating' : ''}`;
   },
 
-  async phone_device({ flashlight, volume, stream = 'media' }) {
+  async phone_device({ flashlight, volume, stream = 'media', ringer }) {
     const done = [];
+    let note = '';
     if (typeof flashlight === 'boolean') {
       await call(phone.flashlight({ on: flashlight }));
       done.push(`Flashlight ${flashlight ? 'on' : 'off'}`);
@@ -341,7 +356,33 @@ export const phoneHandlers = {
       await call(phone.volume({ stream, percent: Math.min(Math.max(Math.round(Number(volume)), 0), 100) }));
       done.push(`${stream} volume ${volume}%`);
     }
-    if (!done.length) throw new Error('Say flashlight (true/false) or volume (0-100).');
-    return done.join(', ');
+    if (ringer) {
+      const set = await call(phone.ringer({ mode: ringer }));
+      done.push(`Ringer: ${set.mode}`);
+      if (set.silentNeedsAccess) {
+        note = ' Full silence needs Do Not Disturb access, so the phone is on vibrate. Tell the user they can allow it in Settings → Phone.';
+      }
+    }
+    if (!done.length) throw new Error('Say flashlight (true/false), volume (0-100) or ringer.');
+    return note ? { text: done.join(', '), result: `${done.join(', ')}.${note}` } : done.join(', ');
+  },
+
+  async phone_media({ action }) {
+    await call(phone.media({ action }));
+    return { play: 'Playing', pause: 'Paused', next: 'Next track', previous: 'Previous track' }[action] ?? 'Play/pause';
+  },
+
+  async phone_navigate({ destination, mode = 'drive' }) {
+    const place = String(destination ?? '').trim();
+    if (!place) throw new Error('destination is required.');
+    await call(phone.navigate({ destination: place, mode }));
+    return `Directions to ${place}`;
+  },
+
+  async phone_search({ query, where = 'web' }) {
+    const what = String(query ?? '').trim();
+    if (!what) throw new Error('query is required.');
+    await call(phone.search({ query: what, where }));
+    return `Searching ${where === 'web' ? 'the web' : where === 'youtube' ? 'YouTube' : 'Maps'}: ${what}`;
   },
 };

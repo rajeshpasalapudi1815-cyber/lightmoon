@@ -13,6 +13,8 @@ public class BootReceiver extends BroadcastReceiver {
         if (Intent.ACTION_BOOT_COMPLETED.equals(action) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
             ReminderStore.rescheduleAll(context);
             Meetings.reschedule(context);
+            if (PhonePrefs.meetingLead(context) > 0 && Meetings.canRead(context)) MeetingWorker.start(context);
+            Briefings.scheduleAll(context);
         }
     }
 }

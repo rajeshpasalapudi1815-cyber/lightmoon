@@ -44,6 +44,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
         .build();
     private TextToSpeech tts;
     private boolean ready;
+    private int composing; // briefings still being put together
     private AudioFocusRequest focus;
 
     @Override
@@ -68,17 +69,38 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
             long now = System.currentTimeMillis();
             reminder = new ReminderStore.Reminder(sayId != null ? sayId : "say-" + now, intent.getStringExtra("title"), say, now, 0);
         }
-        if (reminder == null) {
-            if (queue.isEmpty() && tts == null) finish();
+        // Or a briefing, put together first (it may fetch the weather) by Briefings, off the main thread.
+        String briefing = intent == null ? null : intent.getStringExtra("briefing");
+        if (reminder == null && briefing != null) {
+            composing++;
+            handler.removeCallbacks(giveUp);
+            handler.postDelayed(giveUp, GIVE_UP_AFTER_MS);
+            Context app = getApplicationContext();
+            new Thread(() -> {
+                String text = Briefings.compose(app, briefing);
+                long now = System.currentTimeMillis();
+                handler.post(() -> {
+                    composing--;
+                    enqueue(new ReminderStore.Reminder("briefing-" + briefing + "-" + now, "Briefing", text, now, 0));
+                });
+            }).start();
             return START_NOT_STICKY;
         }
+        if (reminder == null) {
+            if (queue.isEmpty() && tts == null && composing == 0) finish();
+            return START_NOT_STICKY;
+        }
+        enqueue(reminder);
+        return START_NOT_STICKY;
+    }
+
+    private void enqueue(ReminderStore.Reminder reminder) {
         showReminder(this, reminder);
         queue.add(reminder);
         handler.removeCallbacks(giveUp);
         handler.postDelayed(giveUp, GIVE_UP_AFTER_MS);
         if (tts == null) tts = new TextToSpeech(this, this);
         else if (ready && !tts.isSpeaking()) speakNext();
-        return START_NOT_STICKY;
     }
 
     @Override
@@ -111,7 +133,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
     private void speakNext() {
         ReminderStore.Reminder reminder = queue.poll();
         if (reminder == null) {
-            finish();
+            if (composing == 0) finish(); // else a briefing is still being put together
             return;
         }
         requestAudioFocus();

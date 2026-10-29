@@ -23,6 +23,7 @@ const APP_FILES = [
   './js/native.js',
   './js/lifelevelling.js',
   './js/phone.js',
+  './js/knowledge.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',

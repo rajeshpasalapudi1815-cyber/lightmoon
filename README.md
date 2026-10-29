@@ -32,10 +32,15 @@ Only in the Android app:
 - **Your phone:** Settings → *Phone*, allow what you want: *calendar* (it says each meeting out loud a few minutes
   before, even when closed, and can add meetings), *calls* (says who's calling, calls people, knows missed calls),
   *texts* (sends SMS) and *reading messages* (Android's notification access: it notices new WhatsApp, SMS, Telegram
-  and Signal messages, says who they're from or reads them out, and replies in the chat). It also opens apps, sets
-  alarms and timers, and works the flashlight and volume. Before calling or sending anything it reads back who and
-  what and waits for your yes. Calls and messages are spoken only when the phone isn't on silent; one-time codes are
-  never read out or sent to the AI.
+  and Signal messages, says who they're from or reads them out, and replies in the chat). It also opens apps, plays,
+  pauses and skips music, starts Google Maps directions, searches Google, YouTube or Maps, sets alarms and timers,
+  and works the flashlight, volume and ringer (full silence needs *Allow full silence*). Before calling or sending
+  anything it reads back who and what and waits for your yes. Calls and messages are spoken only when the phone
+  isn't on silent; one-time codes are never read out or sent to the AI. Meetings added or moved in the calendar are
+  picked up within about a minute.
+- **Spoken briefings:** Settings → *Phone* → *Spoken morning briefing* (and *Evening preview of tomorrow*): at that
+  time the phone says the weather for your weather city, the day's meetings and reminders, and in the morning the
+  calls and messages you missed overnight, even with LightMoon closed. *Hear it now* plays it straight away.
 
 ## Life Levelling
 
@@ -70,6 +75,7 @@ reminders even when it's closed (it checks the copy every 15 minutes).
 | Hands-free | Turn on **Wake word**, then say "LightMoon, what's on my list today?" Best on a computer; on phones it uses more battery |
 | Stop it talking | Tap the core (or press Esc) |
 | Type | Use the box at the bottom |
+| Keep talking | When you ask by voice and LightMoon answers with a question, it chimes and listens for your answer, no tap needed. Settings → *After answering you out loud*: when it asks something (default), always, or wait for a tap |
 
 LightMoon starts speaking as soon as the first sentence of its reply arrives, so answers feel quick.
 
@@ -87,6 +93,11 @@ Things to try:
 - "Remember that I work best in the mornings."
 - "I finished the slides." (ticks off the task)
 - "What should I focus on today?"
+- "Who designed the Charminar?" or "What's in the news?" (looks it up on Wikipedia)
+- "When I say good night, set an alarm for 6, turn the volume down and tell me tomorrow's first meeting."
+  Later, just say "Good night." Routines are listed under *Memory*, and sync like the rest.
+- On the Android phone: "Play the next song", "Navigate to the airport", "Search YouTube for lofi music",
+  "Put my phone on vibrate", "Call Mom", "Any messages?", "What's on tomorrow?"
 
 ## Good to know
 
@@ -132,6 +143,7 @@ docs/                 the app (GitHub Pages publishes this folder)
   js/native.js        in the Android app: the phone's voice, listening and alarms
   js/lifelevelling.js the Life Levelling link: its summary for the AI, and requests back to it
   js/phone.js         in the Android app: what the AI knows of the phone and its phone tools (asks before calls and sends)
+  js/knowledge.js     look_up and news_headlines: Wikipedia's search, summaries and "In the news"
   sw.js               lets it install, work offline and show notifications
 cloud/                the small cloud service (Cloudflare Worker + D1 database, free plan)
   src/worker.js       stores encrypted sync data and reminder times; sends the reminder pushes
@@ -150,6 +162,8 @@ android/              the Android app (Capacitor), which opens the live web app
     PhonePlugin.java            the phone for the web app: calendar, calls, texts, chat replies, apps, alarms, flashlight
     Meetings.java               reads and adds calendar events; alarms that say meetings before they start
     MeetingReceiver.java        says a meeting when its alarm goes off; MeetingWorker.java refreshes them every 15 min
+    CalendarWatcher.java        sets them again as soon as the calendar changes
+    Briefings.java              the spoken morning briefing and evening preview; BriefingReceiver.java sets them off
     CallReceiver.java           says who's calling
     MessageListener.java        notices new chat messages (notification access), says them, replies through them
     Contacts.java, Voice.java   contact lookup; a short spoken line; PhonePrefs.java holds the Phone settings

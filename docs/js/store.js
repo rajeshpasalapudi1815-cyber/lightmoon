@@ -17,7 +17,7 @@ const DATA_KEY = 'assistant.data.v1';
 const AI_KEY = 'assistant.ai'; // kept apart from the data so backups never contain the API key
 const MAX_MESSAGES = 400;
 const KEEP_DELETED_MS = 60 * 86_400_000; // deletions are remembered this long so they reach other devices
-const COLLECTIONS = ['memories', 'tasks', 'goals', 'checkins'];
+const COLLECTIONS = ['memories', 'tasks', 'goals', 'checkins', 'routines'];
 const LOCAL_SETTINGS = new Set(['last_briefing']); // per device, never synced
 
 const blank = () => ({
@@ -28,6 +28,7 @@ const blank = () => ({
   tasks: [],
   goals: [],
   checkins: [],
+  routines: [], // "good night" -> steps the AI carries out with its tools
 });
 
 // Short random ids that won't clash between a phone and a computer.
@@ -65,6 +66,7 @@ function normalize(saved) {
     tasks: list('tasks'),
     goals: list('goals'),
     checkins: list('checkins'),
+    routines: list('routines'),
   };
   return upgradeRecords(data);
 }
@@ -313,6 +315,25 @@ export const goals = {
   },
 };
 
+// A routine: a phrase ("good night") and what to do when the user says it, in their words; the AI carries
+// the steps out with its tools. Saving one with an existing phrase replaces it.
+export const routines = {
+  list: () => live('routines').filter(r => typeof r.trigger === 'string').sort((a, b) => a.trigger.localeCompare(b.trigger)),
+  get: id => find('routines', id),
+  save({ trigger, steps }) {
+    const existing = live('routines').find(r => r.trigger.toLowerCase() === trigger.toLowerCase());
+    if (existing) {
+      existing.steps = steps;
+      touch(existing);
+    } else {
+      data.routines.push({ id: newId(), trigger, steps, created_at: localStamp(), updated_at: Date.now() });
+    }
+    save();
+    return !existing;
+  },
+  remove: id => remove('routines', id),
+};
+
 // ---------- Sync support (used by cloud.js) ----------
 
 const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -375,6 +396,7 @@ export function snapshot() {
     doneToday: tasks.doneToday(),
     goals: goals.active(),
     memories: memories.list(),
+    routines: routines.list(),
   };
 }
 

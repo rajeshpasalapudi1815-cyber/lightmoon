@@ -19,13 +19,16 @@ public class MeetingWorker extends Worker {
         super(context, params);
     }
 
+    // Also watches the calendar for changes (CalendarWatcher), so new meetings don't wait for the next refresh.
     static void start(Context context) {
         PeriodicWorkRequest request = new PeriodicWorkRequest.Builder(MeetingWorker.class, 15, TimeUnit.MINUTES).build();
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request);
+        CalendarWatcher.start(context);
     }
 
     static void stop(Context context) {
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME);
+        CalendarWatcher.stop(context);
     }
 
     @NonNull

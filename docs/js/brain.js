@@ -8,7 +8,7 @@ import { refresh as refreshLifeLevelling } from './lifelevelling.js';
 import { refresh as refreshPhone } from './phone.js';
 
 const HISTORY_LIMIT = 16;
-const MAX_TOOL_ROUNDS = 5;
+const MAX_TOOL_ROUNDS = 8; // a routine can take several steps
 const REQUEST_TIMEOUT_MS = 60_000;
 
 const briefingRequest = weather =>
@@ -30,7 +30,7 @@ const FRIENDLY_ERRORS = {
 // Some models (gpt-oss especially) were trained with a web-search tool and occasionally try to call it,
 // or garble a tool call; the service then rejects the reply with "tool_use_failed". One retry with this
 // reminder almost always fixes it.
-const TOOL_REMINDER = 'Reminder: you cannot browse the web. Only call the tools you were given, with valid JSON arguments. For weather, call get_weather.';
+const TOOL_REMINDER = 'Reminder: you cannot browse the web. Only call the tools you were given, with valid JSON arguments. For weather, call get_weather; for facts, call look_up.';
 
 class BrainError extends Error {
   constructor(kind, detail = '', { retryable = false, badToolCall = false } = {}) {
