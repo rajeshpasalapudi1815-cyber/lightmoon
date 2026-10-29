@@ -112,217 +112,397 @@
     </main>
   </div>
 
-  <dialog id="settings" class="settings">
+  <dialog id="settings" class="settings" aria-labelledby="settingsTitle">
     <form id="settingsForm">
-      <h2>Settings</h2>
-      <label>Your name <input name="userName" maxlength="60"></label>
-      <label>Address me as
-        <select name="address">
-          <option value="sir">Sir</option>
-          <option value="ma'am">Ma'am</option>
-          <option value="boss">Boss</option>
-          <option value="name">By my name</option>
-        </select>
-      </label>
-      <label>Assistant name (also the wake word) <input name="assistantName" maxlength="30"></label>
-      <label>Voice
-        <span class="row">
-          <select name="voice" id="voiceSelect"></select>
-          <button type="button" id="testVoice" class="btn-ghost">Test</button>
-        </span>
-      </label>
-      <label>Speaking speed <input type="range" name="rate" min="0.8" max="1.4" step="0.05"></label>
-      <label class="check"><input type="checkbox" name="speak"> Speak replies out loud</label>
-      <label>When I stop talking, send after
-        <select name="sendAfter">
-          <option value="1500">a short pause (1.5 seconds)</option>
-          <option value="2500">a normal pause (2.5 seconds)</option>
-          <option value="4000">a long pause (4 seconds)</option>
-          <option value="0">only when I tap the moon again</option>
-        </select>
-      </label>
-      <label class="check"><input type="checkbox" name="listenOnOpen"> Start listening when the app opens</label>
-      <label>After answering you out loud
-        <select name="followUp">
-          <option value="questions">listen for your reply when it asks you something</option>
-          <option value="always">always listen for your reply</option>
-          <option value="off">wait until you tap or say its name</option>
-        </select>
-      </label>
-      <label>Listening language <select name="lang" id="langSelect"></select></label>
-      <label>API key <input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Leave blank to keep the current key"></label>
+      <header class="settings-head">
+        <button type="button" id="settingsBack" class="settings-back" aria-label="Back to all settings" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <h2 id="settingsTitle">Settings</h2>
+      </header>
 
-      <details class="advanced">
-        <summary>AI brain (advanced)</summary>
-        <label>API address <input name="baseUrl" spellcheck="false" inputmode="url"></label>
-        <label>Model <input name="model" spellcheck="false"></label>
-        <label>Backup model (used when the free limit is hit) <input name="fallbackModel" spellcheck="false"></label>
-        <button type="button" id="resetAi" class="btn-ghost">Reset to Groq defaults</button>
-      </details>
+      <div class="settings-body">
+        <!-- The menu: each button opens the page with the same data-page. -->
+        <nav id="settingsMenu" class="settings-menu" aria-label="Settings sections">
+          <div class="menu-section">
+            <h3 class="menu-heading">LightMoon</h3>
+            <div class="menu-group">
+              <button type="button" class="menu-item" data-page="you">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+                <span class="menu-text"><span class="menu-title">You and LightMoon</span><span class="menu-sub">Your name and how it addresses you</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <button type="button" class="menu-item" data-page="voice">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></span>
+                <span class="menu-text"><span class="menu-title">Voice and listening</span><span class="menu-sub">How it speaks and when it listens</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <button type="button" class="menu-item" data-page="ai">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg></span>
+                <span class="menu-text"><span class="menu-title">AI brain</span><span class="menu-sub">API key and model</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
+          </div>
 
-      <div class="data-box">
-        <span class="field-label">Weather in briefings</span>
-        <span class="row">
-          <input id="weatherCity" placeholder="Your city, e.g. Hyderabad" autocomplete="address-level2">
-          <button type="button" id="weatherFind" class="btn-ghost">Set</button>
-        </span>
-        <span class="row">
-          <button type="button" id="weatherHere" class="btn-ghost">Use my location</button>
-          <button type="button" id="weatherClear" class="btn-ghost" hidden>Remove</button>
-        </span>
-        <small id="weatherStatus"></small>
-        <small>Forecasts come from Open-Meteo, free. Only your city's rough location is sent.</small>
+          <div class="menu-section">
+            <h3 class="menu-heading">Your day</h3>
+            <div class="menu-group">
+              <button type="button" class="menu-item" data-page="reminders">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></span>
+                <span class="menu-text"><span class="menu-title">Reminders</span><span class="menu-sub">Notifications and spoken reminders</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <button type="button" class="menu-item" data-page="briefings">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg></span>
+                <span class="menu-text"><span class="menu-title">Weather and briefings</span><span class="menu-sub">Your city and spoken briefings</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <button type="button" class="menu-item" data-page="phone">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg></span>
+                <span class="menu-text"><span class="menu-title">Phone</span><span class="menu-sub">Calendar, calls, messages, announcements</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="menu-section">
+            <h3 class="menu-heading">Your data</h3>
+            <div class="menu-group">
+              <button type="button" class="menu-item" data-page="sync">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></span>
+                <span class="menu-text"><span class="menu-title">Sync and Life Levelling</span><span class="menu-sub">Your other devices and Life Levelling</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <button type="button" class="menu-item" data-page="lock">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+                <span class="menu-text"><span class="menu-title">App lock</span><span class="menu-sub">PIN and fingerprint</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <button type="button" class="menu-item" data-page="backup">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
+                <span class="menu-text"><span class="menu-title">Backup</span><span class="menu-sub">Download or restore everything</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
+          </div>
+        </nav>
+
+        <!-- ---------- You and LightMoon ---------- -->
+        <section class="settings-page" data-page="you" data-title="You and LightMoon" hidden>
+          <div class="set-card">
+            <label>Your name <input name="userName" maxlength="60"></label>
+            <label>Address me as
+              <select name="address">
+                <option value="sir">Sir</option>
+                <option value="ma'am">Ma'am</option>
+                <option value="boss">Boss</option>
+                <option value="name">By my name</option>
+              </select>
+            </label>
+            <label>Assistant name <input name="assistantName" maxlength="30"><small>Also the wake word.</small></label>
+          </div>
+        </section>
+
+        <!-- ---------- Voice and listening ---------- -->
+        <section class="settings-page" data-page="voice" data-title="Voice and listening" hidden>
+          <div class="set-card">
+            <h3 class="card-title">Speaking</h3>
+            <label class="switch-row">Speak replies out loud <input type="checkbox" name="speak"></label>
+            <label>Voice
+              <span class="row">
+                <select name="voice" id="voiceSelect"></select>
+                <button type="button" id="testVoice" class="btn-ghost">Test</button>
+              </span>
+            </label>
+            <label>Speaking speed
+              <input type="range" name="rate" min="0.8" max="1.4" step="0.05">
+              <span class="range-ends" aria-hidden="true"><span>Slower</span><span>Faster</span></span>
+            </label>
+          </div>
+
+          <div class="set-card">
+            <h3 class="card-title">Listening</h3>
+            <label class="switch-row">Start listening when the app opens <input type="checkbox" name="listenOnOpen"></label>
+            <label>When I stop talking, send after
+              <select name="sendAfter">
+                <option value="1500">a short pause (1.5 seconds)</option>
+                <option value="2500">a normal pause (2.5 seconds)</option>
+                <option value="4000">a long pause (4 seconds)</option>
+                <option value="0">only when I tap the moon again</option>
+              </select>
+            </label>
+            <label>After answering you out loud
+              <select name="followUp">
+                <option value="questions">listen when it asks you something</option>
+                <option value="always">always listen for your reply</option>
+                <option value="off">wait for a tap or its name</option>
+              </select>
+            </label>
+            <label>Listening language <select name="lang" id="langSelect"></select></label>
+          </div>
+
+          <div class="set-card" id="wakeBox" hidden>
+            <div class="card-head"><h3 class="card-title">Wake word</h3><span id="wakeStatus" class="card-status"></span></div>
+            <span class="row actions">
+              <button type="button" id="wakeOn" class="btn-ghost">Turn on</button>
+              <button type="button" id="wakeOpenSelf" class="btn-ghost" hidden>Allow LightMoon to open itself</button>
+              <button type="button" id="wakeOff" class="btn-ghost" hidden>Turn off</button>
+            </span>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>With the app closed, say "LightMoon", wait for the chime, then speak. It opens ready to listen; on a locked phone it asks for your fingerprint first. It listens only for its name, entirely on this phone (the first time, it downloads a 41 MB offline voice model). It uses some battery, and Android shows a microphone dot while it listens.</p>
+            </details>
+          </div>
+        </section>
+
+        <!-- ---------- AI brain ---------- -->
+        <section class="settings-page" data-page="ai" data-title="AI brain" hidden>
+          <div class="set-card">
+            <p id="modelInfo" class="card-note"></p>
+            <label>API key <input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Leave blank to keep the current key"></label>
+          </div>
+          <div class="set-card">
+            <h3 class="card-title">Advanced</h3>
+            <label>API address <input name="baseUrl" spellcheck="false" inputmode="url"></label>
+            <label>Model <input name="model" spellcheck="false"></label>
+            <label>Backup model <input name="fallbackModel" spellcheck="false"><small>Used when the free limit is hit.</small></label>
+            <span class="row actions"><button type="button" id="resetAi" class="btn-ghost">Reset to Groq defaults</button></span>
+          </div>
+        </section>
+
+        <!-- ---------- Reminders ---------- -->
+        <section class="settings-page" data-page="reminders" data-title="Reminders" hidden>
+          <div class="set-card cloud-box" id="notifyBox">
+            <div class="card-head"><h3 class="card-title">Reminder notifications</h3><span id="notifyStatus" class="card-status"></span></div>
+            <span class="row actions">
+              <button type="button" id="notifyOn" class="btn-ghost">Turn on</button>
+              <button type="button" id="notifyOff" class="btn-ghost" hidden>Turn off</button>
+            </span>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>Reminders pop up on this device even when LightMoon is closed. The LightMoon cloud only learns when each reminder is due, never what it says.</p>
+              <p>On Android, the <a href="https://github.com/rajeshpasalapudi1815-cyber/lightmoon/releases/latest" target="_blank" rel="noopener">LightMoon app</a> also says each reminder out loud at its time, even with the phone locked.</p>
+            </details>
+          </div>
+
+          <div class="set-card" id="phoneBox" hidden>
+            <div class="card-head"><h3 class="card-title">Spoken reminders</h3><span id="phoneStatus" class="card-status"></span></div>
+            <span class="row actions">
+              <button type="button" id="phoneNotify" class="btn-ghost" hidden>Allow notifications</button>
+              <button type="button" id="phoneBattery" class="btn-ghost" hidden>Let it run in the background</button>
+              <button type="button" id="phoneTest" class="btn-ghost">Test in 1 minute</button>
+            </span>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>The phone says each reminder out loud at its time, even when LightMoon is closed or the screen is off, at alarm volume. With sync on, it also picks up reminders set on your other devices (it checks about every 15 minutes).</p>
+            </details>
+          </div>
+        </section>
+
+        <!-- ---------- Weather and briefings ---------- -->
+        <section class="settings-page" data-page="briefings" data-title="Weather and briefings" hidden>
+          <div class="set-card">
+            <h3 class="card-title">Weather</h3>
+            <label>Your city
+              <span class="row">
+                <input id="weatherCity" placeholder="e.g. Hyderabad" autocomplete="address-level2">
+                <button type="button" id="weatherFind" class="btn-ghost">Set</button>
+              </span>
+            </label>
+            <small id="weatherStatus" class="card-note"></small>
+            <span class="row actions">
+              <button type="button" id="weatherHere" class="btn-ghost">Use my location</button>
+              <button type="button" id="weatherClear" class="btn-ghost" hidden>Remove</button>
+            </span>
+            <details class="help">
+              <summary>Privacy</summary>
+              <p>Forecasts come from Open-Meteo, free. Only your city's rough location is sent.</p>
+            </details>
+          </div>
+
+          <div class="set-card" id="briefingBox" hidden>
+            <h3 class="card-title">Spoken briefings</h3>
+            <label>Morning briefing
+              <span class="row">
+                <select id="briefingMorning">
+                  <option value="">off</option>
+                  <option value="06:00">6:00</option>
+                  <option value="06:30">6:30</option>
+                  <option value="07:00">7:00</option>
+                  <option value="07:30">7:30</option>
+                  <option value="08:00">8:00</option>
+                  <option value="08:30">8:30</option>
+                  <option value="09:00">9:00</option>
+                </select>
+                <button type="button" id="briefingMorningTest" class="btn-ghost">Hear it now</button>
+              </span>
+            </label>
+            <label>Evening preview of tomorrow
+              <span class="row">
+                <select id="briefingEvening">
+                  <option value="">off</option>
+                  <option value="20:00">8:00 PM</option>
+                  <option value="21:00">9:00 PM</option>
+                  <option value="21:30">9:30 PM</option>
+                  <option value="22:00">10:00 PM</option>
+                  <option value="22:30">10:30 PM</option>
+                </select>
+                <button type="button" id="briefingEveningTest" class="btn-ghost">Hear it now</button>
+              </span>
+            </label>
+            <details class="help">
+              <summary>What it says</summary>
+              <p>The briefings are said at alarm volume, even with LightMoon closed: the weather (for your city above), meetings, reminders, and in the morning the calls and messages you missed overnight.</p>
+            </details>
+          </div>
+        </section>
+
+        <!-- ---------- Phone ---------- -->
+        <section class="settings-page" data-page="phone" data-title="Phone" hidden>
+          <div class="set-card" id="phonePowersBox" hidden>
+            <div class="card-head"><h3 class="card-title">What LightMoon may use</h3><span id="phonePowersStatus" class="card-status"></span></div>
+            <div class="perm-list">
+              <div class="perm-row">
+                <span class="perm-text"><span class="perm-name">Calendar</span><small>Says meetings before they start, adds new ones</small></span>
+                <button type="button" id="allowCalendar" class="btn-ghost">Allow</button>
+                <span class="perm-ok">Allowed</span>
+              </div>
+              <div class="perm-row">
+                <span class="perm-text"><span class="perm-name">Calls</span><small>Says who's calling, calls people, knows missed calls</small></span>
+                <button type="button" id="allowCalls" class="btn-ghost">Allow</button>
+                <span class="perm-ok">Allowed</span>
+              </div>
+              <div class="perm-row">
+                <span class="perm-text"><span class="perm-name">Texts</span><small>Sends SMS for you</small></span>
+                <button type="button" id="allowTexts" class="btn-ghost">Allow</button>
+                <span class="perm-ok">Allowed</span>
+              </div>
+              <div class="perm-row">
+                <span class="perm-text"><span class="perm-name">Reading messages</span><small>Notices WhatsApp, SMS, Telegram and Signal messages, and replies</small></span>
+                <button type="button" id="allowMessages" class="btn-ghost">Allow</button>
+                <span class="perm-ok">Allowed</span>
+              </div>
+              <div class="perm-row">
+                <span class="perm-text"><span class="perm-name">Full silence</span><small>Lets it put the phone fully on silent, not just vibrate</small></span>
+                <button type="button" id="allowSilence" class="btn-ghost" hidden>Allow</button>
+                <span class="perm-ok">Allowed</span>
+              </div>
+            </div>
+            <details class="help">
+              <summary>"Reading messages" is greyed out?</summary>
+              <p>If Android greys out LightMoon on the notification access screen ("restricted setting"), open phone Settings → Apps → LightMoon → ⋮ (top right) → Allow restricted settings, then try again. Android does this for apps installed outside the Play Store.</p>
+            </details>
+          </div>
+
+          <div class="set-card" id="phoneAnnounceBox" hidden>
+            <h3 class="card-title">Say out loud</h3>
+            <label>Meetings
+              <select id="meetingLead">
+                <option value="0">no</option>
+                <option value="5">5 minutes before</option>
+                <option value="10">10 minutes before</option>
+                <option value="15">15 minutes before</option>
+                <option value="30">30 minutes before</option>
+              </select>
+            </label>
+            <label>When a call comes in
+              <select id="announceCalls">
+                <option value="true">say who's calling</option>
+                <option value="false">stay quiet</option>
+              </select>
+            </label>
+            <label>When a message arrives
+              <select id="readMessages">
+                <option value="sender">say who it's from</option>
+                <option value="full">read it out</option>
+                <option value="off">stay quiet</option>
+              </select>
+            </label>
+            <details class="help">
+              <summary>What else it can do on the phone</summary>
+              <p>You can ask LightMoon about your meetings, missed calls and messages, and have it call or text people, reply on WhatsApp or SMS, add meetings, open apps, play or skip music, navigate, search, set alarms and timers, and work the flashlight, volume and ringer. It always reads back and waits for your yes before calling or sending anything. Calls and messages are only spoken when the phone isn't on silent.</p>
+              <p>When you talk to LightMoon, your upcoming meetings, recent calls and the last few messages go to the AI service along with the conversation.</p>
+            </details>
+          </div>
+        </section>
+
+        <!-- ---------- Sync and Life Levelling ---------- -->
+        <section class="settings-page" data-page="sync" data-title="Sync and Life Levelling" hidden>
+          <div class="set-card cloud-box">
+            <div class="card-head"><h3 class="card-title">Sync between devices</h3><span id="syncStatus" class="card-status"></span></div>
+            <div id="syncOffBox" class="sync-box">
+              <span class="row actions">
+                <button type="button" id="syncStart" class="btn-ghost">Start syncing</button>
+                <button type="button" id="syncJoinShow" class="btn-ghost">I have a code</button>
+              </span>
+              <span class="row" id="syncJoinRow" hidden>
+                <input id="syncCodeInput" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false">
+                <button type="button" id="syncJoin" class="btn-ghost">Join</button>
+              </span>
+            </div>
+            <div id="syncOnBox" class="sync-box" hidden>
+              <code id="syncCodeShow" class="sync-code"></code>
+              <span class="row actions">
+                <button type="button" id="syncCopy" class="btn-ghost">Copy code</button>
+                <button type="button" id="syncNowBtn" class="btn-ghost">Sync now</button>
+                <button type="button" id="syncStop" class="btn-ghost">Stop syncing</button>
+              </span>
+            </div>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>On your other device, open Settings → Sync and Life Levelling → <em>I have a code</em> and enter this code: both devices' memories, tasks, goals and chats are combined. Everything is encrypted with the code before it leaves the device, so keep the code private. Your API key, PIN and voice settings stay on each device.</p>
+            </details>
+          </div>
+
+          <div class="set-card">
+            <h3 class="card-title">Life Levelling</h3>
+            <p id="lifeStatus" class="card-note"></p>
+          </div>
+        </section>
+
+        <!-- ---------- App lock ---------- -->
+        <section class="settings-page" data-page="lock" data-title="App lock" hidden>
+          <div class="set-card">
+            <div class="card-head"><h3 class="card-title">App lock</h3><span id="lockStatus" class="card-status"></span></div>
+            <span class="row actions">
+              <button type="button" id="lockPin" class="btn-ghost">Turn on</button>
+              <button type="button" id="lockBio" class="btn-ghost" hidden>Add fingerprint</button>
+              <button type="button" id="lockOff" class="btn-ghost" hidden>Turn off</button>
+            </span>
+            <div id="pinSetup" class="pin-setup" hidden>
+              <label>New PIN (4 to 8 digits) <input id="newPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="new-password"></label>
+              <label>Repeat the PIN <input id="newPin2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="new-password"></label>
+              <button type="button" id="savePin" class="btn-ghost">Save PIN</button>
+            </div>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>Asks for your PIN or fingerprint when the app opens and after a few minutes away. It keeps others out of the app; it doesn't encrypt your data.</p>
+            </details>
+          </div>
+        </section>
+
+        <!-- ---------- Backup ---------- -->
+        <section class="settings-page" data-page="backup" data-title="Backup" hidden>
+          <div class="set-card">
+            <h3 class="card-title">Your data</h3>
+            <p class="card-note">Everything is stored only on this device. Backups don't include your API key.</p>
+            <span class="row actions">
+              <button type="button" id="exportBtn" class="btn-ghost">Download backup</button>
+              <button type="button" id="importBtn" class="btn-ghost">Restore backup</button>
+              <input type="file" id="importFile" accept=".json,application/json" hidden>
+            </span>
+          </div>
+        </section>
       </div>
 
-      <div class="data-box cloud-box" id="notifyBox">
-        <span class="field-label">Reminder notifications: <span id="notifyStatus" class="status-value"></span></span>
-        <span class="row">
-          <button type="button" id="notifyOn" class="btn-ghost">Turn on</button>
-          <button type="button" id="notifyOff" class="btn-ghost" hidden>Turn off</button>
-        </span>
-        <small>Reminders pop up on this device even when LightMoon is closed. The LightMoon cloud only learns when each reminder is due, never what it says.</small>
-        <small>On Android, the <a href="https://github.com/rajeshpasalapudi1815-cyber/lightmoon/releases/latest" target="_blank" rel="noopener">LightMoon app</a> also says each reminder out loud at its time, even with the phone locked.</small>
-      </div>
-
-      <div class="data-box" id="phoneBox" hidden>
-        <span class="field-label">Spoken reminders: <span id="phoneStatus" class="status-value"></span></span>
-        <span class="row">
-          <button type="button" id="phoneNotify" class="btn-ghost" hidden>Allow notifications</button>
-          <button type="button" id="phoneBattery" class="btn-ghost" hidden>Let it run in the background</button>
-          <button type="button" id="phoneTest" class="btn-ghost">Test in 1 minute</button>
-        </span>
-        <small>The phone says each reminder out loud at its time, even when LightMoon is closed or the screen is off, at alarm volume. With sync on, it also picks up reminders set on your other devices (it checks about every 15 minutes).</small>
-      </div>
-
-      <div class="data-box" id="wakeBox" hidden>
-        <span class="field-label">Wake word: <span id="wakeStatus" class="status-value"></span></span>
-        <span class="row">
-          <button type="button" id="wakeOn" class="btn-ghost">Turn on</button>
-          <button type="button" id="wakeOpenSelf" class="btn-ghost" hidden>Allow LightMoon to open itself</button>
-          <button type="button" id="wakeOff" class="btn-ghost" hidden>Turn off</button>
-        </span>
-        <small>With the app closed, say "LightMoon", wait for the chime, then speak. It opens ready to listen; on a locked phone it asks for your fingerprint first. It listens only for its name, entirely on this phone (the first time, it downloads a 41 MB offline voice model). It uses some battery, and Android shows a microphone dot while it listens.</small>
-      </div>
-
-      <div class="data-box" id="phonePowersBox" hidden>
-        <span class="field-label">Phone: <span id="phonePowersStatus" class="status-value"></span></span>
-        <span class="row">
-          <button type="button" id="allowCalendar" class="btn-ghost">Allow calendar</button>
-          <button type="button" id="allowCalls" class="btn-ghost">Allow calls</button>
-          <button type="button" id="allowTexts" class="btn-ghost">Allow texts</button>
-          <button type="button" id="allowMessages" class="btn-ghost">Allow reading messages</button>
-          <button type="button" id="allowSilence" class="btn-ghost" hidden>Allow full silence</button>
-        </span>
-        <label>Say meetings out loud
-          <select id="meetingLead">
-            <option value="0">no</option>
-            <option value="5">5 minutes before</option>
-            <option value="10">10 minutes before</option>
-            <option value="15">15 minutes before</option>
-            <option value="30">30 minutes before</option>
-          </select>
-        </label>
-        <label>When a call comes in
-          <select id="announceCalls">
-            <option value="true">say who's calling</option>
-            <option value="false">stay quiet</option>
-          </select>
-        </label>
-        <label>When a message arrives
-          <select id="readMessages">
-            <option value="sender">say who it's from</option>
-            <option value="full">read it out</option>
-            <option value="off">stay quiet</option>
-          </select>
-        </label>
-        <label>Spoken morning briefing
-          <span class="row">
-            <select id="briefingMorning">
-              <option value="">off</option>
-              <option value="06:00">6:00</option>
-              <option value="06:30">6:30</option>
-              <option value="07:00">7:00</option>
-              <option value="07:30">7:30</option>
-              <option value="08:00">8:00</option>
-              <option value="08:30">8:30</option>
-              <option value="09:00">9:00</option>
-            </select>
-            <button type="button" id="briefingMorningTest" class="btn-ghost">Hear it now</button>
-          </span>
-        </label>
-        <label>Evening preview of tomorrow
-          <span class="row">
-            <select id="briefingEvening">
-              <option value="">off</option>
-              <option value="20:00">8:00 PM</option>
-              <option value="21:00">9:00 PM</option>
-              <option value="21:30">9:30 PM</option>
-              <option value="22:00">10:00 PM</option>
-              <option value="22:30">10:30 PM</option>
-            </select>
-            <button type="button" id="briefingEveningTest" class="btn-ghost">Hear it now</button>
-          </span>
-        </label>
-        <small>If Android greys out LightMoon on the notification access screen ("restricted setting"), open phone Settings → Apps → LightMoon → ⋮ (top right) → Allow restricted settings, then try again. Android does this for apps installed outside the Play Store.</small>
-        <small>The briefings are said at alarm volume, even with LightMoon closed: the weather (for your weather place), meetings, reminders, and in the morning the calls and messages you missed overnight.</small>
-        <small>Then you can ask LightMoon about your meetings, missed calls and messages, and have it call or text people, reply on WhatsApp or SMS, add meetings, open apps, play or skip music, navigate, search, set alarms and timers, and work the flashlight, volume and ringer. It always reads back and waits for your yes before calling or sending anything. Calls and messages are only spoken when the phone isn't on silent. When you talk to LightMoon, your upcoming meetings, recent calls and the last few messages go to the AI service along with the conversation.</small>
-      </div>
-
-      <div class="data-box cloud-box">
-        <span class="field-label">Sync between devices: <span id="syncStatus" class="status-value"></span></span>
-        <div id="syncOffBox" class="sync-box">
-          <span class="row">
-            <button type="button" id="syncStart" class="btn-ghost">Start syncing</button>
-            <button type="button" id="syncJoinShow" class="btn-ghost">I have a code</button>
-          </span>
-          <span class="row" id="syncJoinRow" hidden>
-            <input id="syncCodeInput" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false">
-            <button type="button" id="syncJoin" class="btn-ghost">Join</button>
-          </span>
+      <footer class="settings-foot">
+        <p id="settingsError" class="form-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" id="cancelSettings" class="btn-ghost">Cancel</button>
+          <button type="submit" class="btn-primary">Save</button>
         </div>
-        <div id="syncOnBox" class="sync-box" hidden>
-          <code id="syncCodeShow" class="sync-code"></code>
-          <span class="row">
-            <button type="button" id="syncCopy" class="btn-ghost">Copy code</button>
-            <button type="button" id="syncNowBtn" class="btn-ghost">Sync now</button>
-            <button type="button" id="syncStop" class="btn-ghost">Stop syncing</button>
-          </span>
-        </div>
-        <small>On your other device, open Settings → <em>I have a code</em> and enter this code: both devices' memories, tasks, goals and chats are combined. Everything is encrypted with the code before it leaves the device, so keep the code private. Your API key, PIN and voice settings stay on each device.</small>
-        <small><strong>Life Levelling:</strong> <span id="lifeStatus"></span></small>
-      </div>
-
-      <div class="data-box">
-        <span class="field-label">App lock: <span id="lockStatus"></span></span>
-        <span class="row">
-          <button type="button" id="lockPin" class="btn-ghost">Turn on</button>
-          <button type="button" id="lockBio" class="btn-ghost" hidden>Add fingerprint</button>
-          <button type="button" id="lockOff" class="btn-ghost" hidden>Turn off</button>
-        </span>
-        <div id="pinSetup" class="pin-setup" hidden>
-          <label>New PIN (4 to 8 digits) <input id="newPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="new-password"></label>
-          <label>Repeat the PIN <input id="newPin2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="new-password"></label>
-          <button type="button" id="savePin" class="btn-ghost">Save PIN</button>
-        </div>
-        <small>Asks for your PIN or fingerprint when the app opens and after a few minutes away. It keeps others out of the app; it doesn't encrypt your data.</small>
-      </div>
-
-      <div class="data-box">
-        <span class="field-label">Your data</span>
-        <span class="row">
-          <button type="button" id="exportBtn" class="btn-ghost">Download backup</button>
-          <button type="button" id="importBtn" class="btn-ghost">Restore backup</button>
-          <input type="file" id="importFile" accept=".json,application/json" hidden>
-        </span>
-        <small>Everything is stored only on this device. Backups don't include your API key.</small>
-      </div>
-
-      <p id="modelInfo" class="muted"></p>
-      <p id="settingsError" class="form-error" role="alert"></p>
-      <div class="dialog-actions">
-        <button type="button" id="cancelSettings" class="btn-ghost">Cancel</button>
-        <button type="submit" class="btn-primary">Save</button>
-      </div>
+      </footer>
     </form>
   </dialog>
 

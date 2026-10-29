@@ -293,20 +293,21 @@ body[data-state='listening'] .mic { color: var(--amber); border-color: var(--amb
 
 /* ---------- Settings dialog ---------- */
 dialog.settings {
-  width: min(460px, calc(100% - 32px));
+  width: min(480px, calc(100% - 32px));
+  height: min(760px, calc(100dvh - 32px));
+  max-height: none;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--panel-solid);
   color: var(--text);
+  overflow: hidden;
 }
 dialog::backdrop { background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(3px); }
-dialog form { display: grid; gap: 14px; padding: 22px; max-height: 85vh; overflow-y: auto; }
+dialog.settings form { display: flex; flex-direction: column; height: 100%; }
 dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-transform: uppercase; color: var(--cyan); }
 .row { display: flex; gap: 8px; }
 .row select { flex: 1; min-width: 0; }
-.check { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 14px; }
-.check input { width: auto; accent-color: var(--cyan); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 /* ---------- Phones and small windows ---------- */
@@ -349,12 +350,6 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
 .chip-link { text-decoration: none; border-style: dashed; }
 .chip-link:hover { background: rgba(63, 216, 255, 0.2); }
 .mini.cal { font-size: 12px; text-decoration: none; padding: 3px 6px; color: var(--cyan); white-space: nowrap; }
-.advanced { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-.advanced summary { cursor: pointer; color: var(--muted); font-size: 13px; }
-.advanced > label, .advanced > button { margin-top: 12px; }
-.field-label { font-size: 13px; color: var(--muted); }
-.data-box { display: grid; gap: 6px; }
-.data-box .row { flex-wrap: wrap; }
 
 @media (max-width: 860px) {
   .panels { top: calc(59px + env(safe-area-inset-top)); }
@@ -370,10 +365,8 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
 .chip-button:hover { background: rgba(63, 216, 255, 0.22); }
 .link-btn { background: none; border: 0; padding: 0; color: var(--muted); font-size: 13px; text-decoration: underline; cursor: pointer; justify-self: center; }
 .link-btn:hover { color: var(--text); }
-.data-box .row input { flex: 1; min-width: 0; }
 .pin-setup { display: grid; gap: 10px; margin-top: 4px; }
 .pin-setup button { justify-self: start; }
-#lockStatus { color: var(--text); }
 
 .error-detail { margin-top: 6px; font-size: 12px; color: var(--muted); }
 .error-detail summary { cursor: pointer; }
@@ -398,7 +391,6 @@ body:not(.show-chat) .reactor:not(.reactor-lg) { width: 200px; height: 200px; }
 }
 
 /* ---------- Reminder notifications and sync ---------- */
-.status-value { color: var(--text); }
 .sync-box { display: grid; gap: 8px; }
 .sync-code {
   display: block;
@@ -413,3 +405,225 @@ body:not(.show-chat) .reactor:not(.reactor-lg) { width: 200px; height: 200px; }
   overflow-wrap: anywhere;
 }
 .cloud-box button:disabled { opacity: 0.5; cursor: progress; }
+
+/* ---------- Settings: a menu of sections, each opening as its own page ---------- */
+.settings-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 60px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-head h2 { font-size: 18px; letter-spacing: 0.16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-back {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-left: -8px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--cyan);
+  cursor: pointer;
+}
+.settings-back:hover { background: rgba(63, 216, 255, 0.1); }
+.settings-back svg, .menu-icon svg, .menu-chev {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.settings-back svg { width: 22px; height: 22px; }
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 18px 20px;
+}
+.settings-menu, .settings-page { display: grid; gap: 14px; }
+.settings-menu { gap: 20px; }
+
+.menu-section { display: grid; gap: 8px; }
+.menu-heading {
+  margin: 0 0 0 4px;
+  font: 600 12px var(--hud);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.menu-group { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: rgba(255, 255, 255, 0.015); }
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 12px 12px 14px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.menu-group > .menu-item:first-child,
+.menu-group > .menu-item[hidden] + .menu-item:not([hidden]) { border-top: 0; }
+.menu-item:hover { background: rgba(63, 216, 255, 0.06); }
+.menu-item:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.menu-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: rgba(63, 216, 255, 0.1);
+  color: var(--cyan);
+}
+.menu-icon svg { width: 19px; height: 19px; }
+.menu-text { display: grid; flex: 1; min-width: 0; gap: 1px; }
+.menu-title { font-size: 15px; font-weight: 500; }
+.menu-sub { font-size: 12.5px; color: var(--muted); }
+.menu-chev { width: 18px; height: 18px; flex-shrink: 0; color: var(--muted); }
+
+/* A card groups the settings for one thing; its rows line up on the same left edge. */
+.set-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
+.card-title {
+  margin: 0;
+  font: 600 13px var(--hud);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+.card-status { font-size: 13px; color: var(--text); }
+.card-status:empty { display: none; }
+.card-note { margin: 0; font-size: 13px; color: var(--muted); }
+.card-note:empty { display: none; }
+.set-card label small { font-size: 12px; }
+.set-card .row { flex-wrap: wrap; }
+.set-card .row input, .set-card .row select { flex: 1 1 160px; min-width: 0; }
+.set-card .row > button { flex-shrink: 0; }
+.actions { gap: 8px; }
+
+/* On/off settings: the words on the left, a switch on the right. */
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+.switch-row input[type='checkbox'] {
+  appearance: none;
+  position: relative;
+  width: 44px;
+  height: 26px;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.switch-row input[type='checkbox']::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.2s, background 0.2s;
+}
+.switch-row input[type='checkbox']:checked { background: rgba(63, 216, 255, 0.28); border-color: var(--cyan-dim); }
+.switch-row input[type='checkbox']:checked::before { transform: translateX(18px); background: var(--cyan); }
+
+.range-ends { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); }
+
+/* Phone permissions: each one says what it's for, with Allow or "Allowed" lined up on the right. */
+.perm-list { display: grid; }
+.perm-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.perm-list > .perm-row:first-child,
+.perm-list > .perm-row[hidden] + .perm-row:not([hidden]) { border-top: 0; padding-top: 0; }
+.perm-text { display: grid; flex: 1; min-width: 0; gap: 1px; }
+.perm-name { font-size: 14px; color: var(--text); }
+.perm-text small { font-size: 12px; }
+.perm-row button { flex-shrink: 0; padding: 6px 16px; }
+.perm-ok { display: none; flex-shrink: 0; font-size: 13px; color: var(--ok); }
+.perm-ok::before { content: '✓ '; }
+.perm-row button[hidden] + .perm-ok { display: inline; }
+
+/* Longer explanations stay folded until asked for. */
+.help { font-size: 13px; color: var(--muted); }
+.help summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+}
+.help summary::-webkit-details-marker { display: none; }
+.help summary::before {
+  content: 'i';
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font: 600 10px/1 var(--body);
+}
+.help summary:hover { color: var(--text); }
+.help[open] summary { color: var(--text); }
+.help p { margin: 8px 0 0; line-height: 1.55; }
+
+.settings-foot {
+  display: grid;
+  gap: 6px;
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--panel-solid);
+}
+.settings-foot .form-error:empty { display: none; }
+.settings-foot .dialog-actions { margin-top: 0; }
+
+/* On a phone, Settings fills the screen like the phone's own settings. */
+@media (max-width: 560px) {
+  dialog.settings {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  .settings-head { padding-top: max(12px, env(safe-area-inset-top)); padding-left: 16px; padding-right: 16px; }
+  .settings-body { padding: 14px 16px 20px; }
+  .settings-foot { padding: 10px 16px max(12px, env(safe-area-inset-bottom)); }
+}

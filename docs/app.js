@@ -12,6 +12,7 @@ import { chat, briefing } from './js/brain.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 
 const $ = selector => document.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const transcript = $('#transcript');
 const input = $('#input');
 const statusEl = $('#status');
@@ -868,7 +869,69 @@ function openSettings() {
   paintPhoneSettings();
   paintWakeSettings();
   paintPhonePowers();
+  showSettingsPage(null);
+  hideEmptySettings();
   $('#settings').showModal();
+  // A history step for Settings (and one for each page opened), so the phone's back button steps back.
+  history.pushState({ settings: 'menu' }, '');
+  settingsSteps = 1;
+}
+
+// ---------- Settings pages: the menu, and each section on its own page ----------
+let settingsSteps = 0; // history entries added while Settings is open
+
+function showSettingsPage(name) {
+  const page = name ? $(`.settings-page[data-page="${name}"]`) : null;
+  for (const section of $$('.settings-page')) section.hidden = section !== page;
+  $('#settingsMenu').hidden = Boolean(page);
+  $('#settingsBack').hidden = !page;
+  $('#settingsTitle').textContent = page?.dataset.title ?? 'Settings';
+  $('.settings-body').scrollTop = 0;
+}
+
+function openSettingsPage(name) {
+  const onPage = $('#settingsMenu').hidden;
+  showSettingsPage(name);
+  if (onPage) history.replaceState({ settings: name }, '');
+  else {
+    history.pushState({ settings: name }, '');
+    settingsSteps++;
+  }
+  $('#settingsBack').focus({ preventScroll: true });
+}
+
+// Sections with nothing for this device (Phone in a browser, say) are left out of the menu.
+function hideEmptySettings() {
+  for (const item of $$('.menu-item')) {
+    const cards = $$(`.settings-page[data-page="${item.dataset.page}"] .set-card`);
+    item.hidden = cards.every(card => card.hidden);
+  }
+  for (const section of $$('.menu-section')) section.hidden = $$('.menu-item', section).every(item => item.hidden);
+}
+
+// Back (the arrow, Esc, or the phone's back button) goes from a page to the menu, and from the menu out.
+function onSettingsHistory(event) {
+  if (!$('#settings').open) return;
+  const where = event.state?.settings;
+  if (where) {
+    settingsSteps = where === 'menu' ? 1 : 2;
+    showSettingsPage(where === 'menu' ? null : where);
+  } else {
+    settingsSteps = 0;
+    $('#settings').close();
+  }
+}
+
+// However Settings closed (Save, Cancel, back), take its history steps back off.
+function onSettingsClosed() {
+  if (settingsSteps > 0) history.go(-settingsSteps);
+  settingsSteps = 0;
+}
+
+// A problem with something on another page: show that page, and the problem.
+function settingsProblem(page, text) {
+  if ($(`.settings-page[data-page="${page}"]`).hidden) openSettingsPage(page);
+  $('#settingsError').textContent = text;
 }
 
 // ---------- Reminder notifications and sync ----------
@@ -961,26 +1024,30 @@ async function turnOnWakeWord() {
 // ---------- Phone (Android app): calendar, calls, texts and messages, apps, alarms (js/phone.js) ----------
 
 async function paintPhonePowers(message) {
-  $('#phonePowersBox').hidden = !phone;
+  for (const box of ['#phonePowersBox', '#phoneAnnounceBox', '#briefingBox']) $(box).hidden = !phone;
   if (!phone) return;
   const status = await phone.status().catch(() => null);
   if (!status) return void ($('#phonePowersStatus').textContent = 'Not available');
-  const allowed = [status.calendar && 'calendar', status.calls && 'calls', status.texts && 'texts', status.messages && 'messages'].filter(Boolean);
-  $('#phonePowersStatus').textContent = message ?? (allowed.length ? `Allowed: ${allowed.join(', ')}` : 'Nothing allowed yet');
+  // Each permission's row shows "Allow", or "Allowed" once its button is hidden. Calls and texts need a SIM.
+  const offered = ['calendar', 'messages', ...(status.telephony ? ['calls', 'texts'] : [])];
+  const allowed = offered.filter(kind => status[kind]).length;
+  $('#phonePowersStatus').textContent = message
+    ?? (allowed === offered.length ? 'All allowed' : allowed ? `${allowed} of ${offered.length} allowed` : 'Nothing allowed yet');
   $('#allowCalendar').hidden = status.calendar;
-  $('#allowCalls').hidden = status.calls || !status.telephony;
-  $('#allowTexts').hidden = status.texts || !status.telephony;
+  $('#allowCalls').hidden = status.calls;
+  $('#allowTexts').hidden = status.texts;
   $('#allowMessages').hidden = status.messages;
-  $('#allowSilence').hidden = status.silence !== false; // only offered by app versions that can silence the phone
+  $('#allowSilence').hidden = status.silence !== false;
+  $('#allowCalls').closest('.perm-row').hidden = !status.telephony;
+  $('#allowTexts').closest('.perm-row').hidden = !status.telephony;
+  $('#allowSilence').closest('.perm-row').hidden = status.silence === undefined; // app versions before 1.4 can't silence
   $('#meetingLead').value = String(status.meetingLead);
   $('#announceCalls').value = String(status.announceCalls);
   $('#readMessages').value = status.readMessages;
   // Briefings need app version 1.4; earlier versions don't report them.
   const briefings = typeof status.briefingMorning === 'string';
-  for (const kind of ['briefingMorning', 'briefingEvening']) {
-    $(`#${kind}`).closest('label').hidden = !briefings;
-    if (briefings) $(`#${kind}`).value = status[kind];
-  }
+  $('#briefingBox').hidden = !briefings;
+  if (briefings) for (const kind of ['briefingMorning', 'briefingEvening']) $(`#${kind}`).value = status[kind];
 }
 
 // Asks Android for one of the phone permissions; a "no" there can only be undone in the phone's settings.
@@ -1215,9 +1282,9 @@ function saveSettings(event) {
   const error = $('#settingsError');
 
   const apiKey = fields.apiKey.value.trim();
-  if (/\s/.test(apiKey)) return void (error.textContent = "That API key doesn't look right. Copy it again.");
+  if (/\s/.test(apiKey)) return void settingsProblem('ai', "That API key doesn't look right. Copy it again.");
   const baseUrl = fields.baseUrl.value.trim();
-  if (!/^https?:\/\/[^\s]+$/.test(baseUrl)) return void (error.textContent = 'The API address must start with https://');
+  if (!/^https?:\/\/[^\s]+$/.test(baseUrl)) return void settingsProblem('ai', 'The API address must start with https://');
 
   const langChanged = fields.lang.value !== prefs.lang;
   Object.assign(prefs, {
@@ -1317,6 +1384,16 @@ function wireUp() {
   $('#panelsBtn').addEventListener('click', () => $('#panels').classList.toggle('open'));
   $('#settingsForm').addEventListener('submit', saveSettings);
   $('#cancelSettings').addEventListener('click', () => $('#settings').close());
+  for (const item of $$('.menu-item')) item.addEventListener('click', () => openSettingsPage(item.dataset.page));
+  $('#settingsBack').addEventListener('click', () => history.back());
+  $('#settings').addEventListener('cancel', event => {
+    if ($('#settingsMenu').hidden) { // Esc on a page: back to the menu, not out of Settings
+      event.preventDefault();
+      history.back();
+    }
+  });
+  $('#settings').addEventListener('close', onSettingsClosed);
+  addEventListener('popstate', onSettingsHistory);
   $('#resetAi').addEventListener('click', () => fillAiFields($('#settingsForm').elements, store.DEFAULT_AI));
   $('#exportBtn').addEventListener('click', downloadBackup);
   $('#importBtn').addEventListener('click', () => $('#importFile').click());
