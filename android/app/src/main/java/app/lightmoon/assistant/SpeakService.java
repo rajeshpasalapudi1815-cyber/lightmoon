@@ -44,11 +44,16 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
         .build();
     private TextToSpeech tts;
     private boolean ready;
+    private boolean speaking; // a line has been handed to the voice and isn't finished yet
+    private boolean finished; // this run has ended: late results (a slow briefing) are dropped, never said hours later
     private int composing; // briefings still being put together
+    private int lastStartId;
     private AudioFocusRequest focus;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        lastStartId = startId;
+        finished = false;
         createChannels(this);
         // Android requires the "speaking" notification at once; it goes away when the reminder has been said.
         Notification speaking = new NotificationCompat.Builder(this, CHANNEL_SPEAKING)
@@ -80,6 +85,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
                 String text = Briefings.compose(app, briefing);
                 long now = System.currentTimeMillis();
                 handler.post(() -> {
+                    if (finished) return; // gave up waiting for it
                     composing--;
                     enqueue(new ReminderStore.Reminder("briefing-" + briefing + "-" + now, "Briefing", text, now, 0));
                 });
@@ -100,7 +106,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
         handler.removeCallbacks(giveUp);
         handler.postDelayed(giveUp, GIVE_UP_AFTER_MS);
         if (tts == null) tts = new TextToSpeech(this, this);
-        else if (ready && !tts.isSpeaking()) speakNext();
+        else if (ready && !speaking) speakNext();
     }
 
     @Override
@@ -119,23 +125,30 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
 
             @Override
             public void onDone(String utteranceId) {
-                handler.post(SpeakService.this::speakNext);
+                handler.post(SpeakService.this::lineDone);
             }
 
             @Override
             public void onError(String utteranceId) {
-                handler.post(SpeakService.this::speakNext);
+                handler.post(SpeakService.this::lineDone);
             }
         });
         speakNext();
     }
 
+    private void lineDone() {
+        speaking = false;
+        speakNext();
+    }
+
     private void speakNext() {
+        if (finished || tts == null) return;
         ReminderStore.Reminder reminder = queue.poll();
         if (reminder == null) {
             if (composing == 0) finish(); // else a briefing is still being put together
             return;
         }
+        speaking = true;
         requestAudioFocus();
         ReminderStore.markSpoken(this, reminder.id);
         tts.speak(reminder.say, TextToSpeech.QUEUE_ADD, null, "reminder-" + reminder.id);
@@ -177,6 +190,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
     }
 
     private void finish() {
+        finished = true;
         handler.removeCallbacks(giveUp);
         AudioManager audio = getSystemService(AudioManager.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && focus != null) audio.abandonAudioFocusRequest(focus);
@@ -184,8 +198,13 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
             tts.shutdown();
             tts = null;
         }
+        ready = false;
+        speaking = false;
+        composing = 0;
+        queue.clear();
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
-        stopSelf();
+        // Only if no newer start is on its way (that one carries on with a fresh voice).
+        stopSelfResult(lastStartId);
     }
 
     static void createChannels(Context context) {

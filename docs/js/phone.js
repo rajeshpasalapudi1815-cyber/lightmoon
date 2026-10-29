@@ -57,9 +57,11 @@ const eventLine = e => `${dayWord(e.start)} ${e.allDay ? 'all day' : `${clock(e.
 const who = c => c.name || c.number || 'unknown number';
 
 // One-time codes and other security messages never go to the AI service.
-// ("pin code" alone is a postal code in India, so it doesn't count.)
-const SECURITY_CODE = /\b(otp|one[- ]?time|verification|security code|passcode|login code|auth\w* code|pin(?!\s*code))\b/i;
-const shareable = text => (SECURITY_CODE.test(text) && /\d{4,8}/.test(text) ? '(a one-time code or security message, hidden)' : String(text).slice(0, 200));
+// A security word and a code-like number, the same rule as MessageListener.java ("pin code" alone is a
+// postal code in India, so it doesn't count).
+const SECURITY_WORDS = /\b(otp|one[- ]?time|verification|security code|passcode|login code|auth\w* code|(?<!pin )code|pin(?!\s*code)|sign[- ]?in|log[- ]?in)\b/i;
+const CODE_NUMBER = /\d{4,8}|\d{3}[- ]\d{3}/;
+const shareable = text => (SECURITY_WORDS.test(text) && CODE_NUMBER.test(text) ? '(a one-time code or security message, hidden)' : String(text).slice(0, 200));
 
 // Recent messages get short references (M1, M2...) the AI uses to reply.
 const messageRefs = () => seen.messages.slice(-MAX_MESSAGES).map((m, i) => ({ ...m, ref: `M${i + 1}` }));
@@ -333,7 +335,7 @@ export const phoneHandlers = {
   },
 
   async phone_alarm({ time, days, minutes, seconds, label }) {
-    const timer = (Number(minutes) || 0) * 60 + (Number(seconds) || 0);
+    const timer = Math.round((Number(minutes) || 0) * 60 + (Number(seconds) || 0));
     if (timer > 0) {
       await call(phone.setTimer({ seconds: timer, label: label || null }));
       return `Timer: ${timer >= 60 ? `${Math.floor(timer / 60)} min` : ''}${timer % 60 ? ` ${timer % 60} s` : ''}`.trim();

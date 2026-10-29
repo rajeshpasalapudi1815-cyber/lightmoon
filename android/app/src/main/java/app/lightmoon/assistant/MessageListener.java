@@ -9,6 +9,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Telephony;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
@@ -38,13 +40,24 @@ public class MessageListener extends NotificationListenerService {
     private static final String PREFS = "lightmoon.messages";
     private static final int KEEP = 80;
     private static final long KEEP_MS = 2 * 86_400_000L;
-    // One-time codes and security messages are never read out loud (only who sent them). Same rule as
-    // docs/js/phone.js; "pin code" alone is a postal code in India.
-    private static final Pattern SECURITY_CODE = Pattern.compile(
-        "\\b(otp|one[- ]?time|verification|security code|passcode|login code|auth\\w* code|pin(?!\\s*code))\\b", Pattern.CASE_INSENSITIVE);
+    // One-time codes and security messages are never read out loud (only who sent them): a security word and
+    // a code-like number. Same rule as docs/js/phone.js; "pin code" alone is a postal code in India.
+    private static final Pattern SECURITY_WORDS = Pattern.compile(
+        "\\b(otp|one[- ]?time|verification|security code|passcode|login code|auth\\w* code|(?<!pin )code|pin(?!\\s*code)|sign[- ]?in|log[- ]?in)\\b",
+        Pattern.CASE_INSENSITIVE);
+    private static final Pattern CODE_NUMBER = Pattern.compile("\\d{4,8}|\\d{3}[- ]\\d{3}");
+    private static final long GATHER_MS = 2_500; // a burst of messages is announced once
 
-    // Reply actions by conversation, while their notification is showing (they can't be saved).
+    // Reply actions by conversation, while their notification is showing (they can't be saved), and which
+    // conversation each notification answers, to forget the action when the notification goes.
     private static final Map<String, Notification.Action> replies = new ConcurrentHashMap<>();
+    private static final Map<String, String> conversationOf = new ConcurrentHashMap<>();
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final List<JSONObject> toAnnounce = new ArrayList<>(); // main thread only
+
+    static boolean looksLikeCode(String text) {
+        return SECURITY_WORDS.matcher(text).find() && CODE_NUMBER.matcher(text).find();
+    }
 
     static boolean isEnabled(Context context) {
         return NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.getPackageName());
@@ -62,7 +75,17 @@ public class MessageListener extends NotificationListenerService {
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
-        record(sbn, true);
+        try {
+            record(sbn, true);
+        } catch (RuntimeException err) {
+            // Another app's odd notification must never take LightMoon down; skip it.
+        }
+    }
+
+    @Override
+    public void onNotificationRemoved(StatusBarNotification sbn) {
+        String conversation = conversationOf.remove(sbn.getKey());
+        if (conversation != null) replies.remove(conversation);
     }
 
     private boolean isChat(StatusBarNotification sbn) {
@@ -103,10 +126,25 @@ public class MessageListener extends NotificationListenerService {
             return;
         }
         Notification.Action reply = replyAction(n);
-        if (reply != null && !chat.isEmpty()) replies.put(app + "|" + chat, reply);
+        if (reply != null && !chat.isEmpty()) {
+            replies.put(app + "|" + chat, reply);
+            conversationOf.put(sbn.getKey(), app + "|" + chat);
+        }
 
         List<JSONObject> fresh = remember(this, found);
-        if (announce && !fresh.isEmpty()) announce(fresh);
+        if (announce && !fresh.isEmpty()) {
+            main.post(() -> {
+                boolean first = toAnnounce.isEmpty();
+                toAnnounce.addAll(fresh);
+                if (first) main.postDelayed(this::announceGathered, GATHER_MS);
+            });
+        }
+    }
+
+    private void announceGathered() {
+        List<JSONObject> batch = new ArrayList<>(toAnnounce);
+        toAnnounce.clear();
+        if (!batch.isEmpty()) announce(batch);
     }
 
     private static JSONObject message(String app, String appName, String chat, String from, String body, long at) throws JSONException {
@@ -125,9 +163,15 @@ public class MessageListener extends NotificationListenerService {
         JSONObject last = fresh.get(fresh.size() - 1);
         String from = last.optString("from");
         String app = last.optString("app");
+        Set<String> senders = new java.util.LinkedHashSet<>();
+        for (JSONObject m : fresh) senders.add(m.optString("from") + (m.optString("app").equals(app) ? "" : " on " + m.optString("app")));
         String say;
-        if ("full".equals(mode) && fresh.size() == 1 && !SECURITY_CODE.matcher(last.optString("text")).find()) {
+        if ("full".equals(mode) && fresh.size() == 1 && !looksLikeCode(last.optString("text"))) {
             say = PhonePrefs.address(this) + ", " + from + " on " + app + ": " + last.optString("text");
+        } else if (senders.size() > 1) {
+            List<String> names = new ArrayList<>(senders);
+            say = PhonePrefs.address(this) + ", " + fresh.size() + " new messages, from "
+                + String.join(", ", names.subList(0, names.size() - 1)) + " and " + names.get(names.size() - 1) + ".";
         } else if (fresh.size() > 1) {
             say = PhonePrefs.address(this) + ", " + fresh.size() + " new " + app + " messages from " + from + ".";
         } else {

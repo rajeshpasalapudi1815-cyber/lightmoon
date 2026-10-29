@@ -1,8 +1,15 @@
 package app.lightmoon.assistant;
 
 import android.Manifest;
+import android.app.Activity;
 import android.app.NotificationManager;
-import android.content.ActivityNotFoundException;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
+import android.os.Handler;
+import android.os.Looper;
+import java.util.concurrent.atomic.AtomicBoolean;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -79,6 +86,20 @@ public class PhonePlugin extends Plugin {
         return true;
     }
 
+    // ---------- Numbers from the web app ----------
+    // org.json reads a whole number above 2^31 (a time in milliseconds) as a Long, which Capacitor's getDouble
+    // and getInt don't accept, and 66.00000000000001 as a Double, which getInt doesn't: read any number.
+
+    private static Long longArg(PluginCall call, String name, Long fallback) {
+        Object value = call.getData().opt(name);
+        return value instanceof Number ? Long.valueOf(Math.round(((Number) value).doubleValue())) : fallback;
+    }
+
+    private static Integer intArg(PluginCall call, String name, Integer fallback) {
+        Long value = longArg(call, name, null);
+        return value == null ? fallback : (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, value));
+    }
+
     // ---------- Permissions and settings ----------
 
     private boolean granted(String alias) {
@@ -149,7 +170,7 @@ public class PhonePlugin extends Plugin {
         try {
             getActivity().startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
             call.resolve();
-        } catch (ActivityNotFoundException err) {
+        } catch (RuntimeException err) {
             call.reject("Open Settings → Notifications → Device & app notifications and allow LightMoon.");
         }
     }
@@ -159,7 +180,7 @@ public class PhonePlugin extends Plugin {
     @PluginMethod
     public void configure(PluginCall call) {
         android.content.SharedPreferences.Editor edit = PhonePrefs.get(getContext()).edit();
-        Integer lead = call.getInt("meetingLead");
+        Integer lead = intArg(call, "meetingLead", null);
         if (lead != null) edit.putInt("meetingLead", Math.max(0, Math.min(lead, 120)));
         Boolean calls = call.getBoolean("announceCalls");
         if (calls != null) edit.putBoolean("announceCalls", calls);
@@ -189,8 +210,12 @@ public class PhonePlugin extends Plugin {
     @PluginMethod
     public void briefingNow(PluginCall call) {
         String kind = Briefings.EVENING.equals(call.getString("kind")) ? Briefings.EVENING : Briefings.MORNING;
-        ContextCompat.startForegroundService(getContext(), new Intent(getContext(), SpeakService.class).putExtra("briefing", kind));
-        call.resolve();
+        try {
+            ContextCompat.startForegroundService(getContext(), new Intent(getContext(), SpeakService.class).putExtra("briefing", kind));
+            call.resolve();
+        } catch (RuntimeException err) {
+            call.reject("The phone wouldn't start the briefing right now.");
+        }
     }
 
     // ---------- Calendar ----------
@@ -203,8 +228,8 @@ public class PhonePlugin extends Plugin {
             return;
         }
         long now = System.currentTimeMillis();
-        long from = call.getDouble("from", (double) now).longValue();
-        long to = call.getDouble("to", (double) (now + 86_400_000L)).longValue();
+        long from = longArg(call, "from", now);
+        long to = longArg(call, "to", now + 86_400_000L);
         try {
             JSObject result = new JSObject();
             result.put("events", Meetings.events(getContext(), from, to));
@@ -222,14 +247,14 @@ public class PhonePlugin extends Plugin {
             return;
         }
         String title = call.getString("title", "").trim();
-        Double start = call.getDouble("start");
-        Double end = call.getDouble("end");
+        Long start = longArg(call, "start", null);
+        Long end = longArg(call, "end", null);
         if (title.isEmpty() || start == null || end == null || end <= start) {
             call.reject("An event needs a title, a start and an end after it.");
             return;
         }
         try {
-            long id = Meetings.add(getContext(), title, start.longValue(), end.longValue(), call.getString("location"), call.getString("notes"));
+            long id = Meetings.add(getContext(), title, start, end, call.getString("location"), call.getString("notes"));
             JSObject result = new JSObject();
             result.put("id", id);
             call.resolve(result);
@@ -247,7 +272,7 @@ public class PhonePlugin extends Plugin {
             call.reject("Call access is off. Turn it on in LightMoon's Settings → Phone.");
             return;
         }
-        long since = call.getDouble("since", (double) (System.currentTimeMillis() - 86_400_000L)).longValue();
+        long since = longArg(call, "since", System.currentTimeMillis() - 86_400_000L);
         String[] columns = { CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NAME, CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.DURATION };
         JSArray list = new JSArray();
         try (Cursor cursor = getContext().getContentResolver().query(
@@ -321,7 +346,8 @@ public class PhonePlugin extends Plugin {
 
     // ---------- Texts and chat replies ----------
 
-    // { number, text }: sends an SMS (the app asked the user first).
+    // { number, text }: sends an SMS (the app asked the user first), and answers once the phone says it went
+    // (or didn't: no signal, no default SIM), so LightMoon never says "sent" for a text that wasn't.
     @PluginMethod
     @SuppressWarnings("deprecation") // SmsManager.getDefault() is the only way before Android 12
     public void sendText(PluginCall call) {
@@ -335,13 +361,42 @@ public class PhonePlugin extends Plugin {
             call.reject("A text needs a number and something to say.");
             return;
         }
+        Context context = getContext();
+        String action = "app.lightmoon.assistant.SMS_SENT." + System.nanoTime();
+        Handler main = new Handler(Looper.getMainLooper());
+        AtomicBoolean answered = new AtomicBoolean(false);
+        int[] waiting = { 0 };
+        boolean[] failed = { false };
+        BroadcastReceiver[] receiver = { null };
+        Runnable answer = () -> {
+            if (!answered.compareAndSet(false, true)) return;
+            try { context.unregisterReceiver(receiver[0]); } catch (RuntimeException ignored) { /* already gone */ }
+            if (failed[0]) call.reject("The text didn't go: the phone may have no signal, or no SIM chosen for texts.");
+            else if (waiting[0] > 0) call.reject("The phone hasn't confirmed the text was sent yet. It may go when there's signal.");
+            else call.resolve();
+        };
+        receiver[0] = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context ctx, Intent intent) {
+                if (getResultCode() != Activity.RESULT_OK) failed[0] = true;
+                if (--waiting[0] <= 0 || failed[0]) main.post(answer);
+            }
+        };
         try {
-            SmsManager sms = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? getContext().getSystemService(SmsManager.class) : SmsManager.getDefault();
+            SmsManager sms = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? context.getSystemService(SmsManager.class) : SmsManager.getDefault();
             ArrayList<String> parts = sms.divideMessage(text);
-            sms.sendMultipartTextMessage(number, null, parts, null, null);
-            call.resolve();
+            ArrayList<PendingIntent> sent = new ArrayList<>();
+            for (int i = 0; i < parts.size(); i++) {
+                Intent result = new Intent(action).setPackage(context.getPackageName());
+                sent.add(PendingIntent.getBroadcast(context, i, result, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_ONE_SHOT));
+            }
+            waiting[0] = parts.size();
+            ContextCompat.registerReceiver(context, receiver[0], new IntentFilter(action), ContextCompat.RECEIVER_NOT_EXPORTED);
+            sms.sendMultipartTextMessage(number, null, parts, sent, null);
+            main.postDelayed(answer, 30_000);
         } catch (RuntimeException err) {
-            call.reject("The phone couldn't send the text.");
+            failed[0] = true;
+            main.post(answer);
         }
     }
 
@@ -352,7 +407,7 @@ public class PhonePlugin extends Plugin {
             call.reject("Reading messages is off. Turn it on in LightMoon's Settings → Phone.");
             return;
         }
-        long since = call.getDouble("since", (double) (System.currentTimeMillis() - 86_400_000L)).longValue();
+        long since = longArg(call, "since", System.currentTimeMillis() - 86_400_000L);
         try {
             JSObject result = new JSObject();
             result.put("messages", MessageListener.recent(getContext(), since));
@@ -394,7 +449,7 @@ public class PhonePlugin extends Plugin {
         try {
             getActivity().startActivity(intent);
             call.resolve();
-        } catch (ActivityNotFoundException err) {
+        } catch (RuntimeException err) {
             call.reject("WhatsApp isn't installed.");
         }
     }
@@ -429,7 +484,12 @@ public class PhonePlugin extends Plugin {
             call.reject("There's no app called \"" + call.getString("name") + "\" on this phone.");
             return;
         }
-        getActivity().startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        try {
+            getActivity().startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (RuntimeException err) {
+            call.reject("Android wouldn't open " + bestLabel + ".");
+            return;
+        }
         JSObject result = new JSObject();
         result.put("label", bestLabel);
         call.resolve(result);
@@ -442,8 +502,8 @@ public class PhonePlugin extends Plugin {
     // { hour, minute, label?, days?: [1..7, Sunday = 1] }: sets an alarm in the phone's clock app.
     @PluginMethod
     public void setAlarm(PluginCall call) {
-        Integer hour = call.getInt("hour");
-        Integer minute = call.getInt("minute");
+        Integer hour = intArg(call, "hour", null);
+        Integer minute = intArg(call, "minute", null);
         if (hour == null || minute == null || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
             call.reject("An alarm needs a time.");
             return;
@@ -469,7 +529,7 @@ public class PhonePlugin extends Plugin {
     // { seconds, label? }: starts a timer in the phone's clock app.
     @PluginMethod
     public void setTimer(PluginCall call) {
-        Integer seconds = call.getInt("seconds");
+        Integer seconds = intArg(call, "seconds", null);
         if (seconds == null || seconds < 1 || seconds > 86_400) {
             call.reject("A timer needs a length up to 24 hours.");
             return;
@@ -486,7 +546,7 @@ public class PhonePlugin extends Plugin {
         try {
             getActivity().startActivity(intent);
             call.resolve();
-        } catch (ActivityNotFoundException err) {
+        } catch (RuntimeException err) {
             call.reject("This phone's clock app doesn't take alarms from other apps.");
         }
     }
@@ -544,7 +604,7 @@ public class PhonePlugin extends Plugin {
             .setPackage("com.google.android.apps.maps");
         try {
             getActivity().startActivity(maps);
-        } catch (ActivityNotFoundException err) {
+        } catch (RuntimeException err) {
             // No Google Maps: any maps app, as a search for the place.
             openView(call, Uri.parse("geo:0,0?q=" + Uri.encode(destination)), "There's no maps app on this phone.");
             return;
@@ -571,7 +631,7 @@ public class PhonePlugin extends Plugin {
         try {
             getActivity().startActivity(new Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             call.resolve();
-        } catch (ActivityNotFoundException err) {
+        } catch (RuntimeException err) {
             call.reject(failure);
         }
     }
@@ -591,7 +651,7 @@ public class PhonePlugin extends Plugin {
                 audio.setRingerMode(AudioManager.RINGER_MODE_VIBRATE);
                 applied = "vibrate";
             } else audio.setRingerMode(AudioManager.RINGER_MODE_NORMAL);
-        } catch (SecurityException err) {
+        } catch (RuntimeException err) {
             call.reject("Android won't let LightMoon change the ringer while Do Not Disturb is on.");
             return;
         }
@@ -607,7 +667,7 @@ public class PhonePlugin extends Plugin {
         try {
             getActivity().startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS));
             call.resolve();
-        } catch (ActivityNotFoundException err) {
+        } catch (RuntimeException err) {
             call.reject("Open Settings → Notifications → Do Not Disturb → app access and allow LightMoon.");
         }
     }
@@ -627,13 +687,13 @@ public class PhonePlugin extends Plugin {
     public void volume(PluginCall call) {
         String stream = call.getString("stream", "media");
         int type = "ring".equals(stream) ? AudioManager.STREAM_RING : "alarm".equals(stream) ? AudioManager.STREAM_ALARM : AudioManager.STREAM_MUSIC;
-        int percent = Math.max(0, Math.min(100, call.getInt("percent", 50)));
+        int percent = Math.max(0, Math.min(100, intArg(call, "percent", 50)));
         AudioManager audio = getContext().getSystemService(AudioManager.class);
         try {
             int level = Math.round(audio.getStreamMaxVolume(type) * percent / 100f);
             audio.setStreamVolume(type, level, AudioManager.FLAG_SHOW_UI);
             call.resolve();
-        } catch (SecurityException err) {
+        } catch (RuntimeException err) {
             call.reject("Android won't let apps change that while Do Not Disturb is on.");
         }
     }

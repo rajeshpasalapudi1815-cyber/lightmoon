@@ -23,6 +23,9 @@ import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -98,7 +101,7 @@ final class Briefings {
 
         List<String> parts = new ArrayList<>();
         parts.add((morning ? "Good morning, " : "Good evening, ") + address + ".");
-        String weather = weather(context, morning ? 0 : 1, when);
+        String weather = withinSeconds(12, () -> weather(context, morning ? 0 : 1, when)); // slow network: skip it
         if (weather != null) parts.add(weather);
         parts.add(meetings(context, from, dayEnd, when));
         String reminders = reminders(context, from, dayEnd, when);
@@ -112,6 +115,20 @@ final class Briefings {
         parts.add(morning ? "Have a good day." : "Sleep well.");
         parts.removeIf(String::isEmpty);
         return String.join(" ", parts);
+    }
+
+    // The answer, or null if it takes longer (a DNS lookup has no time limit of its own).
+    private static String withinSeconds(int seconds, Callable<String> work) {
+        FutureTask<String> task = new FutureTask<>(work);
+        Thread thread = new Thread(task, "lightmoon-briefing");
+        thread.setDaemon(true);
+        thread.start();
+        try {
+            return task.get(seconds, TimeUnit.SECONDS);
+        } catch (Exception err) {
+            task.cancel(true);
+            return null;
+        }
     }
 
     private static long startOf(Calendar day) {

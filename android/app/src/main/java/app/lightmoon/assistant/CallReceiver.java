@@ -17,7 +17,11 @@ public class CallReceiver extends BroadcastReceiver {
     @SuppressWarnings("deprecation") // EXTRA_INCOMING_NUMBER is still how a non-dialer app learns the number
     public void onReceive(Context context, Intent intent) {
         if (!TelephonyManager.ACTION_PHONE_STATE_CHANGED.equals(intent.getAction())) return;
-        if (!TelephonyManager.EXTRA_STATE_RINGING.equals(intent.getStringExtra(TelephonyManager.EXTRA_STATE))) return;
+        String state = intent.getStringExtra(TelephonyManager.EXTRA_STATE);
+        if (!TelephonyManager.EXTRA_STATE_RINGING.equals(state)) {
+            Voice.stopAll(); // answered or hung up: stop talking (and drop waiting message announcements)
+            return;
+        }
         String number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER);
         if (number == null || !PhonePrefs.announceCalls(context)) return;
         long now = System.currentTimeMillis();

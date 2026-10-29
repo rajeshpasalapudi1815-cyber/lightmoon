@@ -14,6 +14,7 @@ import android.net.Uri;
 import android.provider.CalendarContract;
 import androidx.core.content.ContextCompat;
 import java.text.DateFormat;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.TimeZone;
@@ -42,12 +43,14 @@ final class Meetings {
     }
 
     // [{ id, title, start, end, allDay, location, calendar }] between two times (ms), soonest first.
+    // All-day events are stored at UTC midnight; they're moved to the phone's own midnight, so in India
+    // tomorrow's all-day event isn't read out as today's (or the other way round).
     static JSONArray events(Context context, long from, long to) throws JSONException {
         JSONArray result = new JSONArray();
         if (!canRead(context)) return result;
         Uri.Builder range = CalendarContract.Instances.CONTENT_URI.buildUpon();
-        ContentUris.appendId(range, from);
-        ContentUris.appendId(range, to);
+        ContentUris.appendId(range, from - 86_400_000L); // a day either side for all-day events, filtered below
+        ContentUris.appendId(range, to + 86_400_000L);
         String[] columns = {
             CalendarContract.Instances.EVENT_ID,
             CalendarContract.Instances.TITLE,
@@ -62,17 +65,31 @@ final class Meetings {
         try (Cursor cursor = context.getContentResolver().query(range.build(), columns, visible, null, CalendarContract.Instances.BEGIN + " ASC")) {
             while (cursor != null && cursor.moveToNext()) {
                 if (cursor.getInt(7) == CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED) continue;
+                boolean allDay = cursor.getInt(4) == 1;
+                long start = allDay ? localMidnightOf(cursor.getLong(2)) : cursor.getLong(2);
+                long end = allDay ? localMidnightOf(cursor.getLong(3)) : cursor.getLong(3);
+                if (end <= from || start >= to) continue;
                 result.put(new JSONObject()
                     .put("id", cursor.getLong(0))
                     .put("title", cursor.isNull(1) ? "(no title)" : cursor.getString(1))
-                    .put("start", cursor.getLong(2))
-                    .put("end", cursor.getLong(3))
-                    .put("allDay", cursor.getInt(4) == 1)
+                    .put("start", start)
+                    .put("end", end)
+                    .put("allDay", allDay)
                     .put("location", cursor.isNull(5) ? "" : cursor.getString(5))
                     .put("calendar", cursor.isNull(6) ? "" : cursor.getString(6)));
             }
         }
         return result;
+    }
+
+    // The phone's own midnight of the date an all-day event's UTC-midnight time stands for.
+    private static long localMidnightOf(long utcMidnight) {
+        Calendar utc = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+        utc.setTimeInMillis(utcMidnight);
+        Calendar local = Calendar.getInstance();
+        local.clear();
+        local.set(utc.get(Calendar.YEAR), utc.get(Calendar.MONTH), utc.get(Calendar.DAY_OF_MONTH), 0, 0, 0);
+        return local.getTimeInMillis();
     }
 
     // Adds an event to the user's main calendar, with the phone's own reminder too. Returns its id.
@@ -157,13 +174,14 @@ final class Meetings {
             + (location.isEmpty() ? "" : ", in " + location) + ".";
     }
 
+    // A plain exact alarm, not an "alarm clock" one: those show an alarm icon and replace the user's real
+    // wake-up alarm on the lock screen. If Android then won't start the speaking service, MeetingReceiver
+    // says the meeting itself.
     private static void setAlarm(Context context, AlarmManager alarms, String id, long at) {
         PendingIntent operation = alarmIntent(context, id);
         try {
             if (ReminderStore.canUseExactAlarms(context)) {
-                Intent open = new Intent(context, MainActivity.class);
-                PendingIntent show = PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_IMMUTABLE);
-                alarms.setAlarmClock(new AlarmManager.AlarmClockInfo(at, show), operation);
+                alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, operation);
             } else {
                 alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, operation);
             }

@@ -37,7 +37,9 @@ Only in the Android app:
   and works the flashlight, volume and ringer (full silence needs *Allow full silence*). Before calling or sending
   anything it reads back who and what and waits for your yes. Calls and messages are spoken only when the phone
   isn't on silent; one-time codes are never read out or sent to the AI. Meetings added or moved in the calendar are
-  picked up within about a minute.
+  picked up within about a minute. If Android greys out LightMoon on the notification access screen ("restricted
+  setting", for apps installed outside the Play Store), open phone Settings → Apps → LightMoon → ⋮ → *Allow
+  restricted settings* first.
 - **Spoken briefings:** Settings → *Phone* → *Spoken morning briefing* (and *Evening preview of tomorrow*): at that
   time the phone says the weather for your weather city, the day's meetings and reminders, and in the morning the
   calls and messages you missed overnight, even with LightMoon closed. *Hear it now* plays it straight away.
