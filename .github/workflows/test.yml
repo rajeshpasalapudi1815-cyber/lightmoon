@@ -1,0 +1,26 @@
+# On every push and pull request: the logic tests, a syntax check of every script, and the version guard
+# (a change to the app must bump VERSION, or installed copies keep the old files).
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check
+        run: |
+          for f in docs/app.js docs/sw.js docs/js/*.js; do node --check "$f"; done
+      - name: Logic tests
+        run: npm test
+      - name: Version guard
+        run: node tests/version-guard.mjs "${{ github.event.pull_request.base.sha || github.event.before }}" "${{ github.sha }}"

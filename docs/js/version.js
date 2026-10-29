@@ -1,0 +1,42 @@
+// One place for the app's version and the files that make it up. The service worker caches them under this
+// version (sw.js), and the running app reads this file from the server to notice a new version (updates.js).
+// Bump VERSION with every release; `npm test` and the GitHub check refuse a change to docs/ without it.
+export const VERSION = 'v27';
+
+export const APP_FILES = [
+  './',
+  './index.html',
+  './styles.css',
+  './app.js',
+  './js/version.js',
+  './js/updates.js',
+  './js/problems.js',
+  './js/store.js',
+  './js/brain.js',
+  './js/learning.js',
+  './js/tools.js',
+  './js/prompt.js',
+  './js/time.js',
+  './js/speech.js',
+  './js/orders.js',
+  './js/weather.js',
+  './js/lock.js',
+  './js/idb.js',
+  './js/vault.js',
+  './js/cloud.js',
+  './js/notifier.js',
+  './js/announce.js',
+  './js/native.js',
+  './js/lifelevelling.js',
+  './js/phone.js',
+  './js/knowledge.js',
+  './js/qr.js',
+  './js/rhythm.js',
+  './js/offline.js',
+  './js/vendor/qrcode.js',
+  './js/desktop.js',
+  './manifest.webmanifest',
+  './icons/icon.svg',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+];

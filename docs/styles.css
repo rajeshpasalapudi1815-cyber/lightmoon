@@ -646,3 +646,19 @@ body:not(.show-chat) .reactor:not(.reactor-lg) { width: 200px; height: 200px; }
 .say-as-empty { color: var(--muted); }
 .say-as-add { flex-wrap: wrap; }
 .say-as-add input { flex: 1 1 140px; min-width: 0; }
+
+/* A new version is ready while the app is in use (js/updates.js). */
+.update-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; margin: 8px auto 0; padding: 8px 14px; max-width: 32em; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-solid); font-size: 14px; color: var(--text); }
+.update-bar .btn-ghost { padding: 5px 14px; font-size: 13px; color: var(--cyan); border-color: var(--cyan-dim); }
+
+/* Settings → Is everything working? */
+.health-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; font-size: 14px; }
+.health-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 2px; align-items: center; }
+.health-row.checking { display: block; color: var(--muted); }
+.health-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); grid-row: 1 / span 2; }
+.health-row.ok .health-dot { background: var(--ok); }
+.health-row.warn .health-dot { background: var(--amber); }
+.health-row.bad .health-dot { background: var(--danger); }
+.health-title { grid-column: 2; font-weight: 500; }
+.health-detail { grid-column: 2; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.health-row .btn-ghost { grid-column: 3; grid-row: 1 / span 2; padding: 4px 12px; font-size: 13px; white-space: nowrap; }

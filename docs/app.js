@@ -15,6 +15,8 @@ import { chat, briefing, weeklyLetter } from './js/brain.js';
 import { wireLearning } from './js/learning.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 import { speechChunks, lastSentenceEnd } from './js/speech.js';
+import * as updates from './js/updates.js';
+import * as problems from './js/problems.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -413,6 +415,7 @@ const speaker = {
     utterance.rate = entry.rate;
     utterance.onend = utterance.onerror = event => {
       if (entry.dropped || entry.generation !== this.generation) return;
+      if (event?.type === 'error' && !['interrupted', 'canceled'].includes(event.error)) problems.report('voice', `${chosen?.name ?? 'the voice'}: ${event.error}`);
       this.queue = this.queue.filter(other => other !== entry);
       if (CONNECTION_ERRORS.includes(event?.error) && isOnlineVoice(chosen)) return this.sayOffline(entry);
       if (!this.queue.length) this.finish();
@@ -1050,6 +1053,7 @@ function openSettings() {
   paintCloudSettings();
   paintRhythm();
   paintSayAs();
+  paintHealth();
   paintOfflineBrain();
   paintPhoneSettings();
   paintWakeSettings();
@@ -1137,6 +1141,113 @@ function paintSyncStatus(status = cloud.syncStatus()) {
 }
 
 // The Android app speaks reminders with the phone's own alarms instead of web notifications.
+// ---------- Is everything working? (Settings → Health) ----------
+
+const DAY_MS = 86_400_000;
+
+// One list of what LightMoon needs to do its job, each checked now: green, amber (works, with a catch) or red
+// (broken), with a button where a tap can put it right.
+async function paintHealth() {
+  const list = $('#healthList');
+  list.replaceChildren(el('li', 'health-row checking', 'Checking…'));
+  const rows = [];
+  const row = (kind, title, detail, fix = null) => rows.push({ kind, title, detail, fix });
+  const alarms = nativeAlarms ? await nativeAlarms.status().catch(() => null) : null;
+  const phoneState = phone ? await phone.status().catch(() => null) : null;
+
+  row(state.ai.ready ? 'ok' : 'bad', 'AI', state.ai.ready ? `Ready (${state.ai.model})` : 'No API key yet',
+    state.ai.ready ? null : ['Add key', () => openSettingsPage('ai')]);
+  row(navigator.onLine === false ? 'warn' : 'ok', 'Internet',
+    navigator.onLine === false ? 'Offline: reminders still ring, and the offline brain answers if downloaded' : 'Connected');
+
+  const voice = speaker.pickVoice();
+  row(speaker.voices.length ? 'ok' : 'warn', 'Voice', speaker.voices.length ? (voice ? voiceLabel(voice) : 'The device\'s own voice') : 'No voices found yet',
+    ['Test', () => sayInChosenVoice(`This is ${assistantName()}.`)]);
+  const mic = await microphoneState();
+  row(mic === 'denied' ? 'bad' : mic === 'granted' ? 'ok' : 'warn', 'Microphone',
+    { granted: 'Allowed', denied: 'Blocked: allow it in the phone or browser settings for LightMoon', prompt: 'Asked for the first time you tap the moon', unknown: 'Unknown' }[mic]);
+
+  if (isNativeApp) {
+    if (alarms) {
+      row(alarms.notifications ? 'ok' : 'bad', 'Notifications', alarms.notifications ? 'Allowed' : 'Blocked: reminders are only spoken',
+        alarms.notifications ? null : ['Allow', allowPhoneNotifications]);
+      row(alarms.exactAlarms ? 'ok' : 'warn', 'Reminder alarms',
+        alarms.exactAlarms ? `On time, ${alarms.upcoming} coming up` : 'May ring a few minutes late (exact alarms are off)');
+      row(alarms.batteryUnrestricted ? 'ok' : 'bad', 'Battery',
+        alarms.batteryUnrestricted ? 'Unrestricted' : 'The phone may stop LightMoon in the background',
+        alarms.batteryUnrestricted ? null : ['Fix', () => nativeAlarms.openBatterySettings().catch(() => {})]);
+      row(alarms.backgroundSync ? 'ok' : 'warn', 'Background sync', alarms.backgroundSync ? 'Every 15 minutes' : 'Off until sync is set up');
+    }
+    if (phoneState) {
+      const wantsMessages = phoneState.readMessages !== 'off';
+      row(!wantsMessages || phoneState.messages ? 'ok' : 'bad', 'Message reading',
+        !wantsMessages ? 'Off' : phoneState.messages ? 'Connected' : 'Notification access is off',
+        wantsMessages && !phoneState.messages ? ['Fix', () => phone.openMessageAccess().catch(() => {})] : null);
+      row(phoneState.announceCalls && !phoneState.calls ? 'warn' : 'ok', 'Calls',
+        !phoneState.announceCalls ? 'Not announced' : phoneState.calls ? 'Announced' : 'Announcing is on, but calls aren\'t allowed',
+        phoneState.announceCalls && !phoneState.calls ? ['Allow', () => phone.requestCalls().then(paintHealth).catch(() => {})] : null);
+    }
+  } else {
+    const permission = 'Notification' in window ? Notification.permission : 'unsupported';
+    row(permission === 'granted' ? 'ok' : permission === 'denied' ? 'bad' : 'warn', 'Notifications',
+      { granted: 'Allowed', denied: 'Blocked in the browser', default: 'Not asked yet', unsupported: 'Not available in this browser' }[permission],
+      permission === 'default' ? ['Allow', () => Notification.requestPermission().then(paintHealth)] : null);
+    const persisted = await navigator.storage?.persisted?.().catch(() => false);
+    row(persisted ? 'ok' : 'warn', 'Storage', persisted ? 'Protected from browser clean-ups' : 'The browser may clear it when space runs low',
+      persisted ? null : ['Protect', () => navigator.storage.persist().then(paintHealth)]);
+  }
+
+  const sync = cloud.syncStatus();
+  if (!cloud.syncCode()) row('ok', 'Sync', 'Off (this device only)');
+  else if (sync.error) row('bad', 'Sync', sync.error, ['Sync now', () => cloudAction(() => cloud.syncNow({ required: true })).then(paintHealth)]);
+  else row(sync.lastSync && Date.now() - sync.lastSync > DAY_MS ? 'warn' : 'ok', 'Sync', sync.lastSync ? `Last synced ${describeAgo(sync.lastSync)}` : 'On');
+
+  if (isNativeApp && offlineAvailable()) {
+    const brain = await offlineStatus().catch(() => null);
+    if (brain) row('ok', 'Offline brain', { ready: 'Downloaded and ready', downloading: 'Downloading…' }[brain.state] ?? 'Not downloaded (optional)');
+  }
+
+  const recent = problems.since(Date.now() - DAY_MS);
+  row(recent ? 'warn' : 'ok', 'Problems in the last 24 hours', recent ? `${recent}, listed below` : 'None');
+  const newer = updates.waitingVersion();
+  row('ok', 'Version', newer ? `${updates.current}; ${newer} is ready` : updates.current, newer ? ['Restart', () => updates.restart()] : null);
+
+  list.replaceChildren(...rows.map(({ kind, title, detail, fix }) => {
+    const item = el('li', `health-row ${kind}`);
+    item.append(el('span', 'health-dot'), el('span', 'health-title', title), el('span', 'health-detail', detail));
+    if (fix) {
+      const button = el('button', 'btn-ghost', fix[0]);
+      button.type = 'button';
+      button.addEventListener('click', fix[1]);
+      item.append(button);
+    }
+    return item;
+  }));
+  paintProblems();
+}
+
+async function microphoneState() {
+  try {
+    if (isNativeApp) {
+      const { speechRecognition } = await window.Capacitor.Plugins.SpeechRecognition.checkPermissions();
+      return speechRecognition === 'granted' ? 'granted' : speechRecognition === 'denied' ? 'denied' : 'prompt';
+    }
+    return (await navigator.permissions.query({ name: 'microphone' })).state;
+  } catch {
+    return 'unknown';
+  }
+}
+
+function paintProblems() {
+  const items = problems.list();
+  const when = at => new Date(at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  $('#problemList').replaceChildren(...(items.length
+    ? items.slice(0, 20).map(p => el('li', '', `${when(p.at)} · ${p.area}: ${p.message}${p.count > 1 ? ` (×${p.count})` : ''}`))
+    : [el('li', 'say-as-empty', 'Nothing has gone wrong lately.')]));
+  $('#problemsCopy').hidden = !items.length;
+  $('#problemsClear').hidden = !items.length;
+}
+
 async function paintPhoneSettings() {
   $('#phoneBox').hidden = !nativeAlarms;
   $('#notifyBox').hidden = isNativeApp;
@@ -1745,6 +1856,20 @@ function wireUp() {
   $('#importBtn').addEventListener('click', () => $('#importFile').click());
   $('#importFile').addEventListener('change', restoreBackup);
   $('#testVoice').addEventListener('click', () => sayInChosenVoice(`At your service, ${addressWord()}.`));
+  $('#updateNow').addEventListener('click', () => updates.restart());
+  $('#healthAgain').addEventListener('click', paintHealth);
+  $('#problemsCopy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(problems.describe());
+      note('Copied. Paste it to whoever is helping you.');
+    } catch {
+      $('#settingsError').textContent = "Couldn't copy here. Take a screenshot of the list instead.";
+    }
+  });
+  $('#problemsClear').addEventListener('click', () => {
+    problems.clear();
+    paintProblems();
+  });
   $('#sayAsAdd').addEventListener('click', () => {
     const word = $('#sayAsWord').value.trim();
     const sound = $('#sayAsSound').value.trim();
@@ -1955,6 +2080,7 @@ function completeSetup(event) {
 function start({ auto = false } = {}) {
   if (started) return;
   started = true;
+  if (updates.justUpdated()) setTimeout(() => note(`Updated to the newest version (${updates.current}).`), 1500);
   try {
     audioCtx ??= new AudioContext();
   } catch {
@@ -2040,6 +2166,28 @@ function soundAllowedWithoutTap() {
   return false;
 }
 
+// ---------- Staying up to date (js/updates.js) ----------
+
+let lastTouch = Date.now();
+for (const type of ['pointerdown', 'keydown']) {
+  addEventListener(type, () => { lastTouch = Date.now(); }, { passive: true, capture: true });
+}
+
+// Nothing a restart would cut off: no reply coming or being spoken, nothing half-typed, Settings closed, and the
+// app untouched for a minute (or in the background).
+function quietForRestart() {
+  const field = document.activeElement;
+  const typing = ['INPUT', 'TEXTAREA'].includes(field?.tagName) && field.value;
+  return !busy && !speaker.active && !listener.capturing && !typing && !$('#settings').open
+    && (document.hidden || Date.now() - lastTouch > 60_000);
+}
+
+// A new version is ready while the app is in use: a small bar with a Restart button, until the quiet moment comes.
+function offerRestart() {
+  $('#updateBar .update-text').textContent = `A new version of ${assistantName()} is ready.`;
+  $('#updateBar').hidden = false;
+}
+
 function boot() {
   // The Android app has its own alarms and voice, so it skips the web's notification worker and the
   // always-on wake word (the phone's microphone beeps every few seconds when kept listening).
@@ -2048,16 +2196,21 @@ function boot() {
     $('#handsFreeBtn').hidden = true;
   }
   if ('serviceWorker' in navigator && !isNativeApp) {
-    navigator.serviceWorker.register('./sw.js', { type: 'module' }).catch(() => {});
+    // updateViaCache none: a new version is noticed as soon as it's published, not after the browser's cache expires.
+    navigator.serviceWorker.register('./sw.js', { type: 'module', updateViaCache: 'none' }).catch(() => {});
     // A cloud reminder arrived while the app is open: announce it here instead of as a notification.
     navigator.serviceWorker.addEventListener('message', event => {
       // ...or "Done" or "Snooze" was tapped on a notification: apply it now.
       if (['reminders-due', 'reminder-action'].includes(event.data?.type) && started) pollReminders();
       // A reminder notification was tapped while the app was already running in the background.
       if (event.data?.type === 'speak-reminder' && started && !locked) announceReminder(event.data.id);
+      // The worker has installed a new version: restart into it at a quiet moment.
+      if (event.data?.type === 'updated') updates.noticed(event.data.version);
     });
   }
   navigator.storage?.persist?.().catch(() => {});
+  problems.install();
+  updates.start({ isQuiet: quietForRestart, onReady: offerRestart });
   wireUp();
   applyState();
   if (!state.profile.userName || !state.ai.ready) {

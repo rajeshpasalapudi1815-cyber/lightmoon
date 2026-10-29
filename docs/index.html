@@ -83,6 +83,10 @@
           <button id="core" class="reactor" aria-label="Tap to talk"><i></i><i></i><i></i><b></b></button>
           <p id="status" class="status" aria-live="polite">Standing by</p>
           <p id="caption" class="caption" aria-live="polite"></p>
+          <div id="updateBar" class="update-bar" hidden>
+            <span class="update-text">A new version of LightMoon is ready.</span>
+            <button type="button" id="updateNow" class="btn-ghost">Restart</button>
+          </div>
         </div>
         <div id="transcript" class="transcript" aria-live="polite"></div>
         <form id="composer" class="composer">
@@ -127,6 +131,11 @@
           <div class="menu-section">
             <h3 class="menu-heading">LightMoon</h3>
             <div class="menu-group">
+              <button type="button" class="menu-item" data-page="health">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="3 12 7 12 10 5 14 19 17 12 21 12"/></svg></span>
+                <span class="menu-text"><span class="menu-title">Is everything working?</span><span class="menu-sub">Permissions, alarms, sync and recent problems</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
               <button type="button" class="menu-item" data-page="you">
                 <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
                 <span class="menu-text"><span class="menu-title">You and LightMoon</span><span class="menu-sub">Your name and how it addresses you</span></span>
@@ -639,6 +648,28 @@
         </section>
 
         <!-- ---------- Backup ---------- -->
+        <!-- ---------- Is everything working? ---------- -->
+        <section class="settings-page" data-page="health" data-title="Is everything working?" hidden>
+          <div class="set-card">
+            <h3 class="card-title">Right now</h3>
+            <ul id="healthList" class="health-list"></ul>
+            <span class="row actions"><button type="button" id="healthAgain" class="btn-ghost">Check again</button></span>
+          </div>
+
+          <div class="set-card">
+            <h3 class="card-title">What went wrong lately</h3>
+            <ul id="problemList" class="learned-list"></ul>
+            <span class="row actions">
+              <button type="button" id="problemsCopy" class="btn-ghost">Copy for a report</button>
+              <button type="button" id="problemsClear" class="btn-ghost">Clear</button>
+            </span>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>Only what failed and when, kept on this device: never your conversation, your messages or your key. If something keeps going wrong, copy this list and paste it to whoever is helping you.</p>
+            </details>
+          </div>
+        </section>
+
         <section class="settings-page" data-page="backup" data-title="Backup" hidden>
           <div class="set-card">
             <h3 class="card-title">Your data</h3>

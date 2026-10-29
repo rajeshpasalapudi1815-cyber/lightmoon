@@ -3,6 +3,7 @@
 import { aiConfig, messages } from './store.js';
 import { buildSystemPrompt } from './prompt.js';
 import { currentTools, runTool } from './tools.js';
+import { report } from './problems.js';
 import { weatherSummary } from './weather.js';
 import { refresh as refreshLifeLevelling } from './lifelevelling.js';
 import { refresh as refreshPhone } from './phone.js';
@@ -162,6 +163,7 @@ function finish(content, actions) {
 
 function failure(err, actions = []) {
   console.error(`[brain] ${err.message}`);
+  report('ai', err.message);
   return { reply: FRIENDLY_ERRORS[err.kind] ?? FRIENDLY_ERRORS.api, actions, error: true, detail: err.message };
 }
 

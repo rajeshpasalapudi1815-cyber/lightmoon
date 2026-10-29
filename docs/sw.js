@@ -2,52 +2,29 @@
 // notifications, including when the cloud wakes it at a reminder's time while the app is closed.
 import { showDueReminders, openReminder, answerReminder } from './js/notifier.js';
 
-const CACHE = 'lightmoon-v26';
-const APP_FILES = [
-  './',
-  './index.html',
-  './styles.css',
-  './app.js',
-  './js/store.js',
-  './js/brain.js',
-  './js/learning.js',
-  './js/tools.js',
-  './js/prompt.js',
-  './js/time.js',
-  './js/speech.js',
-  './js/orders.js',
-  './js/weather.js',
-  './js/lock.js',
-  './js/idb.js',
-  './js/vault.js',
-  './js/cloud.js',
-  './js/notifier.js',
-  './js/announce.js',
-  './js/native.js',
-  './js/lifelevelling.js',
-  './js/phone.js',
-  './js/knowledge.js',
-  './js/qr.js',
-  './js/rhythm.js',
-  './js/offline.js',
-  './js/vendor/qrcode.js',
-  './js/desktop.js',
-  './manifest.webmanifest',
-  './icons/icon.svg',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-];
+import { VERSION, APP_FILES } from './js/version.js';
+
+const CACHE = `lightmoon-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 
+// Fresh copies (past the browser's HTTP cache, which GitHub Pages fills for ten minutes), so a new version never
+// caches the old files.
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_FILES)).then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches.open(CACHE)
+      .then(cache => cache.addAll(APP_FILES.map(file => new Request(file, { cache: 'reload' }))))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
       .then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))
-      .then(() => self.clients.claim()),
+      .then(() => self.clients.claim())
+      // The open app restarts into this version at a quiet moment (js/updates.js).
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then(clients => clients.forEach(client => client.postMessage({ type: 'updated', version: VERSION }))),
   );
 });
 

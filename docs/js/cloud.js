@@ -6,6 +6,7 @@ import * as lock from './lock.js';
 import { idbGet, idbSet } from './idb.js';
 import { nativeAlarms } from './native.js';
 import { newSyncCode, normalizeCode, spaceIdFor, keyFor, encryptJson, decryptJson } from './vault.js';
+import { report } from './problems.js';
 
 export const DEFAULT_CLOUD_URL = 'https://lightmoon-cloud.lightmoon-cloud.workers.dev';
 const CONFIG_KEY = 'assistant.cloud';
@@ -230,6 +231,7 @@ async function runSync({ required = false } = {}) {
     if (merged) handlers.onSynced({ messagesAdded });
   } catch (err) {
     setStatus({ syncing: false, error: err.message });
+    if (navigator.onLine !== false) report('sync', err.message); // being offline isn't a problem worth noting
     shareWithWorker().catch(() => {}); // offline: still set this device's own reminders
     if (required) throw err;
   }

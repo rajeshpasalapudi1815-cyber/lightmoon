@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node serve.js",
-    "open": "node serve.js --open"
+    "open": "node serve.js --open",
+    "test": "node tests/run.mjs"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",
