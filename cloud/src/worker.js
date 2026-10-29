@@ -2,7 +2,8 @@
 // push notifications at that moment. It never sees what anyone wrote: sync data arrives already
 // encrypted with the user's sync code, and reminders are only an id and a time.
 // Connected apps (Life Levelling) use the same space: a "feed" is their encrypted summary for LightMoon,
-// and an "inbox" holds LightMoon's encrypted requests for them. Both are encrypted with the sync code too.
+// and an "inbox" holds LightMoon's encrypted requests for them. Both are encrypted with the sync code too. A "turn"
+// says which of an app's devices does the requests, when it runs on more than one (a phone and a computer).
 // Life Levelling's phone app also keeps its backup here (/backups): encrypted on the phone with a key from
 // the user's email and password. The cloud only checks a second, separate key to allow reading or replacing it.
 
@@ -38,6 +39,12 @@ const SCHEMA = [
      blob       TEXT NOT NULL,
      created_at INTEGER NOT NULL,
      PRIMARY KEY (space_id, box, item_id))`,
+  `CREATE TABLE IF NOT EXISTS turns (
+     space_id  TEXT NOT NULL,
+     app       TEXT NOT NULL,
+     device_id TEXT NOT NULL,
+     until     INTEGER NOT NULL,
+     PRIMARY KEY (space_id, app))`,
   `CREATE TABLE IF NOT EXISTS backups (
      id           TEXT PRIMARY KEY,
      auth_hash    TEXT NOT NULL,
@@ -63,6 +70,7 @@ const MAX_BLOB_CHARS = 1_500_000;
 const MAX_FEED_CHARS = 300_000;
 const MAX_REQUEST_CHARS = 20_000;
 const MAX_INBOX_ITEMS = 100;
+const TURN_MS = 3 * 60_000; // a device asks every minute while it runs, so its turn passes on soon after it stops
 const BACKUP_ID = /^[0-9a-f]{64}$/;           // SHA-256 of the email, made on the phone
 const BACKUP_KEY = /^[A-Za-z0-9_-]{43}$/;      // 32 bytes, base64url
 const MAX_BACKUP_BODY_BYTES = 25_000_000;
@@ -177,6 +185,7 @@ async function route(request, env) {
     if (!item && method === 'POST') return addToInbox(env, space, name, await readJson(request));
     if (ITEM_ID.test(item ?? '') && method === 'DELETE') return removeFromInbox(env, space, name, item);
   }
+  if (part === 'turns' && APP_NAME.test(name ?? '') && !item && method === 'PUT') return takeTurn(env, space, name, await readJson(request));
   throw new HttpError(404, 'Not found');
 }
 
@@ -293,9 +302,27 @@ async function addToInbox(env, space, box, { id, blob }) {
   return noContent();
 }
 
+// { removed }: false when it was already gone. Life Levelling can be linked on a phone and a computer at once, so
+// each removes a request before doing it, and only the one whose removal took it out does it: never twice.
 async function removeFromInbox(env, space, box, item) {
-  await env.DB.prepare('DELETE FROM inbox WHERE space_id = ? AND box = ? AND item_id = ?').bind(space, box, item).run();
-  return noContent();
+  const result = await env.DB.prepare('DELETE FROM inbox WHERE space_id = ? AND box = ? AND item_id = ?').bind(space, box, item).run();
+  return json({ removed: (result.meta?.changes ?? 0) > 0 });
+}
+
+// { device }: which device does an app's requests, for an app on more than one device sharing one copy of its data
+// (Life Levelling on a phone and a computer), so their copies never split. A device keeps the turn while it keeps
+// asking; once it has stopped for TURN_MS, the next device to ask gets it. Answers { device, until }: whose turn it is.
+async function takeTurn(env, space, app, { device }) {
+  if (typeof device !== 'string' || !DEVICE_ID.test(device)) throw new HttpError(400, 'Bad device');
+  const now = Date.now();
+  const taken = await env.DB.prepare(
+    `INSERT INTO turns (space_id, app, device_id, until) VALUES (?1, ?2, ?3, ?4)
+     ON CONFLICT (space_id, app) DO UPDATE SET device_id = excluded.device_id, until = excluded.until
+       WHERE turns.device_id = excluded.device_id OR turns.until < ?5
+     RETURNING device_id, until`,
+  ).bind(space, app, device, now + TURN_MS, now).first();
+  const turn = taken ?? await env.DB.prepare('SELECT device_id, until FROM turns WHERE space_id = ? AND app = ?').bind(space, app).first();
+  return json({ device: turn.device_id, until: turn.until });
 }
 
 // ---------- Encrypted sync data: one blob per space, with a version to catch conflicting writes ----------

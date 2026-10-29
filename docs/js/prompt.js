@@ -30,8 +30,8 @@ export function buildSystemPrompt() {
 
   const doneToday = tasks.doneToday().map(t => t.title);
   const lifeLevelling = lifeLevellingSection();
-  const lifeWhen = lifeLevellingSummary()?.runsOn === 'phone'
-    ? 'Life Levelling is an app on their phone: it applies what you send the next time it is open (within a minute if it is open now)'
+  const lifeWhen = ['phone', 'desktop'].includes(lifeLevellingSummary()?.runsOn)
+    ? 'Life Levelling is an app on their phone and computer: it applies what you send the next time one of them is open (within a minute if one is open now)'
     : 'Life Levelling applies what you send within a minute, while their computer is on';
   const lifeGuidance = lifeLevelling ? `
 - Life Levelling is connected (see below). Coach from it: match how hard you push to their readiness, point to the top of today's plan, their weakest area, an unfinished quest or the boss, and raise the Mirror's patterns when relevant (remember lasting, useful ones).

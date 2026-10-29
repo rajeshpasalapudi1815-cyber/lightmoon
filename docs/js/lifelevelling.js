@@ -3,7 +3,7 @@
 // Levelling → Settings → LightMoon, with this device's sync code), it leaves an encrypted summary of their
 // day in LightMoon's cloud every few minutes and applies the requests LightMoon leaves there: log water,
 // tick off a task... So LightMoon can coach from their real numbers and act on them from anywhere.
-// The phone app only does this while it is open (the summary says runsOn: 'phone').
+// Its phone app and its computer app only do this while open (the summary says runsOn: 'phone' or 'desktop').
 import { readFeed, sendRequest, syncCode } from './cloud.js';
 import { localStamp } from './time.js';
 
@@ -41,7 +41,8 @@ export function summary() {
 
 export const isConnected = () => Boolean(summary());
 
-const onPhone = (latest = state?.summary) => latest?.runsOn === 'phone';
+// The phone app or the computer app (both only work while open), rather than the always-on server.
+const inApp = (latest = state?.summary) => latest?.runsOn === 'phone' || latest?.runsOn === 'desktop';
 
 // Fetches a fresh summary (at most every couple of minutes, and never holding a reply up for long).
 export async function refresh({ force = false } = {}) {
@@ -67,7 +68,7 @@ export function describe() {
   if (latest.disconnected) return 'Disconnected in Life Levelling.';
   const minutes = Math.round((Date.now() - latest.generatedAt) / 60_000);
   const age = minutes < 1 ? 'just now' : minutes < 120 ? `${minutes} min ago` : `${Math.round(minutes / 60)} hours ago`;
-  const tooOld = onPhone(latest) ? ' (too old to use; open Life Levelling to refresh it)' : ' (too old to use; is the computer on?)';
+  const tooOld = inApp(latest) ? ' (too old to use; open Life Levelling to refresh it)' : ' (too old to use; is the computer on?)';
   return `Connected${latest.you?.name ? ` as ${latest.you.name}` : ''}, updated ${age}${summary() ? '' : tooOld}.`;
 }
 
@@ -149,7 +150,7 @@ export function promptSection() {
     s.habits?.length && `Habits today: ${s.habits.map((h, i) => `[H${i + 1}] ${h.name} ${habitProgress(h)}`).join('; ')}`,
     s.actions?.length && `Recent requests you sent: ${s.actions.slice(0, 5).map(a => `${a.ok ? 'done' : 'FAILED'}: ${a.message}`).join('; ')}`,
   ];
-  const where = onPhone(s) ? '; it is an app on their phone and only updates while it is open' : '';
+  const where = inApp(s) ? '; it is an app on their phone and computer and only updates while one of them is open' : '';
   return `LIFE LEVELLING (their game-style growth app; data from ${ago(s.generatedAt)}${where})
 ${lines.filter(Boolean).join('\n')}`;
 }
@@ -251,8 +252,8 @@ export const LIFE_TOOLS = [
 
 async function send(type, fields, chip) {
   await sendRequest(APP, { type, ...fields, at: Date.now(), date: localStamp().slice(0, 10) });
-  const when = onPhone()
-    ? 'Life Levelling applies it the next time its app is open on their phone (within a minute if it is open now).'
+  const when = inApp()
+    ? 'Life Levelling applies it the next time its app is open on their phone or computer (usually within a minute if it is open now).'
     : 'Life Levelling applies it within a minute (while their computer is on).';
   return { text: chip, result: `${chip}. ${when}` };
 }
