@@ -210,7 +210,12 @@ export function phoneTools() {
     }));
   }
   tools.push(
-    tool('phone_open_app', 'Open an app by name.', { name: { type: 'string' } }, ['name']),
+    tool('phone_number_info', "Who a number is: its contact name if saved, and your calls with it. show_in also opens it in Truecaller "
+      + "or the dialer, without calling, so its caller ID shows on screen; you can't see what Truecaller shows.", {
+      number: { type: 'string' },
+      show_in: { type: 'string', enum: ['truecaller', 'dialer'] },
+    }, ['number']),
+    tool('phone_open_app', 'Open an app by name (to look up a number in Truecaller, use phone_number_info).', { name: { type: 'string' } }, ['name']),
     tool('phone_alarm', 'Set an alarm (time) or a timer (minutes, seconds).', {
       time: { type: 'string', description: 'HH:MM, 24-hour.' },
       days: { type: 'array', items: { type: 'string', enum: DAYS }, description: 'Repeat (alarm only).' },
@@ -291,6 +296,27 @@ export const phoneHandlers = {
       text: 'Checked recent calls',
       result: list.length ? list.map(c => `${c.type} ${who(c)}, ${dayWord(c.at).toLowerCase()} ${clock(c.at)}${c.seconds ? `, ${Math.round(c.seconds / 60)} min` : ''}`).join('\n') : 'No calls then.',
     };
+  },
+
+  async phone_number_info({ number, show_in }) {
+    const wanted = String(number ?? '').trim();
+    if (!looksLikeNumber(wanted)) throw new Error('Give the number itself, e.g. from the missed calls.');
+    if (!phone.numberInfo) throw new Error('This needs LightMoon app 1.4.3 or later; tell the user to update it from the releases page.');
+    const info = await call(phone.numberInfo({ number: wanted }));
+    const lines = [info.name ? `Saved in their contacts as ${info.name}.` : 'Not in their contacts.'];
+    if (!info.callHistory) lines.push('Call history access is off.');
+    else if (!info.calls.length) lines.push('No calls with it in the last 90 days.');
+    else {
+      const calls = info.calls.map(c => `${c.type} ${dayWord(c.at).toLowerCase()} ${clock(c.at)}${c.seconds ? ` (${Math.round(c.seconds / 60)} min)` : ''}`);
+      lines.push(`Calls with it in the last 90 days, newest first: ${calls.join('; ')}.`);
+    }
+    if (show_in) {
+      const shown = await call(phone.showNumber({ number: wanted, app: show_in }));
+      lines.push(shown.shownIn === 'truecaller'
+        ? "Opened in Truecaller, which shows its caller ID on their screen now (you can't see it)."
+        : `Opened in the phone's dialer, without calling.${shown.note ? ` ${shown.note}` : ''}`);
+    }
+    return { text: show_in === 'truecaller' ? 'Opened the number in Truecaller' : 'Looked up the number', result: lines.join(' ') };
   },
 
   async phone_message({ text, reply_to, to, via = 'sms', confirm_id }) {

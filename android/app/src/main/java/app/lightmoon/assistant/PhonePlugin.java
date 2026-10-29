@@ -24,6 +24,7 @@ import android.os.Build;
 import android.provider.AlarmClock;
 import android.provider.CallLog;
 import android.provider.Settings;
+import android.telephony.PhoneNumberUtils;
 import android.telephony.SmsManager;
 import android.view.KeyEvent;
 import androidx.core.content.ContextCompat;
@@ -310,6 +311,74 @@ public class PhonePlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("calls", list);
         call.resolve(result);
+    }
+
+    // { number } -> { name ("" when not a contact), calls: [{ type, at, seconds }] }: who a number is, as far as
+    // this phone knows, and the calls with it over the last 90 days (newest first, at most 20).
+    @PluginMethod
+    public void numberInfo(PluginCall call) {
+        String number = call.getString("number", "").trim();
+        if (number.isEmpty()) {
+            call.reject("Which number?");
+            return;
+        }
+        try {
+            String name = Contacts.nameFor(getContext(), number);
+            JSArray calls = new JSArray();
+            if (has(Manifest.permission.READ_CALL_LOG)) {
+                String[] columns = { CallLog.Calls.NUMBER, CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.DURATION };
+                String since = String.valueOf(System.currentTimeMillis() - 90L * 86_400_000L);
+                try (Cursor cursor = getContext().getContentResolver().query(
+                    CallLog.Calls.CONTENT_URI, columns, CallLog.Calls.DATE + " >= ?", new String[] { since }, CallLog.Calls.DATE + " DESC")) {
+                    while (cursor != null && cursor.moveToNext() && calls.length() < 20) {
+                        if (!PhoneNumberUtils.compare(number, cursor.getString(0))) continue;
+                        JSObject item = new JSObject();
+                        item.put("type", callType(cursor.getInt(1)));
+                        item.put("at", cursor.getLong(2));
+                        item.put("seconds", cursor.getLong(3));
+                        calls.put(item);
+                    }
+                }
+            }
+            JSObject result = new JSObject();
+            result.put("name", name == null ? "" : name);
+            result.put("calls", calls);
+            result.put("callHistory", has(Manifest.permission.READ_CALL_LOG));
+            call.resolve(result);
+        } catch (RuntimeException err) {
+            call.reject("Couldn't look up that number.");
+        }
+    }
+
+    // { number, app?: "truecaller" }: shows the number in Truecaller's dialer (or the phone's own) without
+    // calling it, so its caller ID appears on screen. Other apps never share what they know about a number.
+    @PluginMethod
+    public void showNumber(PluginCall call) {
+        String number = call.getString("number", "").trim();
+        if (number.isEmpty()) {
+            call.reject("Which number?");
+            return;
+        }
+        Intent dial = new Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        boolean truecaller = "truecaller".equals(call.getString("app"));
+        JSObject result = new JSObject();
+        try {
+            if (truecaller) {
+                try {
+                    getActivity().startActivity(new Intent(dial).setPackage("com.truecaller"));
+                    result.put("shownIn", "truecaller");
+                    call.resolve(result);
+                    return;
+                } catch (RuntimeException notInstalled) {
+                    result.put("note", "Truecaller isn't installed, so it opened in the phone's dialer.");
+                }
+            }
+            getActivity().startActivity(dial);
+            result.put("shownIn", "dialer");
+            call.resolve(result);
+        } catch (RuntimeException err) {
+            call.reject("Couldn't open the dialer.");
+        }
     }
 
     private static String callType(int type) {

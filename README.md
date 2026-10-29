@@ -32,7 +32,8 @@ Only in the Android app:
 - **Your phone:** Settings → *Phone*, allow what you want: *calendar* (it says each meeting out loud a few minutes
   before, even when closed, and can add meetings), *calls* (says who's calling, calls people, knows missed calls),
   *texts* (sends SMS) and *reading messages* (Android's notification access: it notices new WhatsApp, SMS, Telegram
-  and Signal messages, says who they're from or reads them out, and replies in the chat). It also opens apps, plays,
+  and Signal messages, says who they're from or reads them out, and replies in the chat). It looks up who a number is (your contacts and your calls with it) and shows it in Truecaller's
+  caller ID. It also opens apps, plays,
   pauses and skips music, starts Google Maps directions, searches Google, YouTube or Maps, sets alarms and timers,
   and works the flashlight, volume and ringer (full silence needs *Allow full silence*). Before calling or sending
   anything it reads back who and what and waits for your yes. Calls and messages are spoken only when the phone
@@ -101,7 +102,7 @@ Things to try:
 - "When I say good night, set an alarm for 6, turn the volume down and tell me tomorrow's first meeting."
   Later, just say "Good night." Routines are listed under *Memory*, and sync like the rest.
 - On the Android phone: "Play the next song", "Navigate to the airport", "Search YouTube for lofi music",
-  "Put my phone on vibrate", "Call Mom", "Any messages?", "What's on tomorrow?"
+  "Put my phone on vibrate", "Call Mom", "Any messages?", "What's on tomorrow?", "Who was that missed call? Show it in Truecaller."
 
 ## Good to know
 
