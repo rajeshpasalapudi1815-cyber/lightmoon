@@ -41,6 +41,11 @@ Only in the Android app:
   picked up within about a minute. If Android greys out LightMoon on the notification access screen ("restricted
   setting", for apps installed outside the Play Store), open phone Settings → Apps → LightMoon → ⋮ → *Allow
   restricted settings* first.
+- **Messages and email:** Settings → *Messages and email* lists every app, email account and chat that has sent
+  something, each with a switch. An app switched off is ignored completely; email accounts are read only once you
+  switch them on (new ones start off), and then LightMoon sees each new email as it arrives (who from, the subject,
+  the first lines), never your older inbox and never out loud; a chat, group or person switched off is never read.
+  It's all decided on the phone, before anything is kept or sent to the AI.
 - **Spoken briefings:** Settings → *Phone* → *Spoken morning briefing* (and *Evening preview of tomorrow*): at that
   time the phone says the weather for your weather city, the day's meetings and reminders, and in the morning the
   calls and messages you missed overnight, even with LightMoon closed. *Hear it now* plays it straight away.

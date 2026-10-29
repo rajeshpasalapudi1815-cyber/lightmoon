@@ -163,6 +163,11 @@
                 <span class="menu-text"><span class="menu-title">Phone</span><span class="menu-sub">Calendar, calls, messages, announcements</span></span>
                 <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
               </button>
+              <button type="button" class="menu-item" data-page="reading">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22 6 12 13 2 6"/></svg></span>
+                <span class="menu-text"><span class="menu-title">Messages and email</span><span class="menu-sub">Which apps, email IDs and chats it reads</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
             </div>
           </div>
 
@@ -423,6 +428,40 @@
               <summary>What else it can do on the phone</summary>
               <p>You can ask LightMoon about your meetings, missed calls and messages, and have it call or text people, reply on WhatsApp or SMS, add meetings, open apps, play or skip music, navigate, search, set alarms and timers, and work the flashlight, volume and ringer. It always reads back and waits for your yes before calling or sending anything. Calls and messages are only spoken when the phone isn't on silent.</p>
               <p>When you talk to LightMoon, your upcoming meetings, recent calls and the last few messages go to the AI service along with the conversation.</p>
+            </details>
+          </div>
+        </section>
+
+        <!-- ---------- Messages and email: what LightMoon may read ---------- -->
+        <section class="settings-page" data-page="reading" data-title="Messages and email" hidden>
+          <div class="set-card" id="readingBox" hidden>
+            <p id="readingNote" class="card-note"></p>
+          </div>
+
+          <div class="set-card" id="readAppsBox" hidden>
+            <h3 class="card-title">Apps</h3>
+            <div id="readApps" class="perm-list"></div>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>An app switched off is ignored completely: LightMoon doesn't keep, say or share anything from it, and forgets what it had. Apps appear here after their first message or email arrives.</p>
+            </details>
+          </div>
+
+          <div class="set-card" id="readAccountsBox" hidden>
+            <h3 class="card-title">Email accounts</h3>
+            <div id="readAccounts" class="perm-list"></div>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>LightMoon reads only the accounts switched on here, and new accounts start off. It sees each new email as it arrives (who it's from, the subject and the first lines), not your older inbox, and it never reads emails out loud.</p>
+            </details>
+          </div>
+
+          <div class="set-card" id="readChatsBox" hidden>
+            <h3 class="card-title">Chats and people</h3>
+            <div id="readChats" class="perm-list"></div>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>Switch off a chat, group or person and LightMoon never reads it again, and forgets what it had from them. A person switched off is skipped in groups too. The 40 most recent chats are listed.</p>
             </details>
           </div>
         </section>

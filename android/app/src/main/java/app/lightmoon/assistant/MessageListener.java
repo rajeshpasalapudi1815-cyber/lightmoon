@@ -3,9 +3,11 @@ package app.lightmoon.assistant;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -14,6 +16,7 @@ import android.os.Looper;
 import android.provider.Telephony;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
+import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.app.Person;
@@ -29,16 +32,18 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-// New messages (SMS, WhatsApp, Telegram, Signal and other chat apps), seen through their notifications once
-// the user gives LightMoon notification access. LightMoon keeps the last two days of them on this phone,
-// says new ones out loud (as chosen in Settings), and can answer through the notification's own reply box.
+// New messages (SMS, WhatsApp, Telegram, Signal, Teams and other chat apps) and new emails, seen through their
+// notifications once the user gives LightMoon notification access. Only what ReadRules allows is kept: apps
+// switched off, email accounts not switched on and chats switched off are dropped here, before anything is
+// stored or said. LightMoon keeps the last two days on this phone, says new chat messages out loud (as chosen
+// in Settings), and can answer chats through the notification's own reply box. Emails are never said out loud.
 public class MessageListener extends NotificationListenerService {
 
     private static final Set<String> CHAT_APPS = new HashSet<>(Arrays.asList(
         "com.whatsapp", "com.whatsapp.w4b", "org.telegram.messenger", "org.thoughtcrime.securesms",
         "com.google.android.apps.messaging", "com.samsung.android.messaging"));
     private static final String PREFS = "lightmoon.messages";
-    private static final int KEEP = 80;
+    private static final int KEEP = 120;
     private static final long KEEP_MS = 2 * 86_400_000L;
     // One-time codes and security messages are never read out loud (only who sent them): a security word and
     // a code-like number. Same rule as docs/js/phone.js; "pin code" alone is a postal code in India.
@@ -47,11 +52,13 @@ public class MessageListener extends NotificationListenerService {
         Pattern.CASE_INSENSITIVE);
     private static final Pattern CODE_NUMBER = Pattern.compile("\\d{4,8}|\\d{3}[- ]\\d{3}");
     private static final long GATHER_MS = 2_500; // a burst of messages is announced once
+    private static final String TAG = "LightMoonReader"; // in the phone's log (adb logcat), never with message text
 
     // Reply actions by conversation, while their notification is showing (they can't be saved), and which
     // conversation each notification answers, to forget the action when the notification goes.
     private static final Map<String, Notification.Action> replies = new ConcurrentHashMap<>();
     private static final Map<String, String> conversationOf = new ConcurrentHashMap<>();
+    private static volatile MessageListener running; // while Android has the listener connected
     private final Handler main = new Handler(Looper.getMainLooper());
     private final List<JSONObject> toAnnounce = new ArrayList<>(); // main thread only
 
@@ -63,14 +70,55 @@ public class MessageListener extends NotificationListenerService {
         return NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.getPackageName());
     }
 
+    // After an app update some phones don't reconnect the listener until a restart: LightMoon would quietly stop
+    // noticing messages. Ask Android to reconnect it whenever it should be running and isn't.
+    static void reconnectIfNeeded(Context context) {
+        if (running != null || !isEnabled(context) || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return;
+        try {
+            requestRebind(new ComponentName(context, MessageListener.class));
+            Log.i(TAG, "asked Android to reconnect");
+        } catch (RuntimeException err) {
+            Log.w(TAG, "couldn't ask Android to reconnect", err);
+        }
+    }
+
     @Override
     public void onListenerConnected() {
-        // What's already on screen is old news: remember it without announcing it.
+        running = this;
+        Log.i(TAG, "connected");
+        readShowing();
+    }
+
+    @Override
+    public void onListenerDisconnected() {
+        if (running == this) running = null;
+    }
+
+    // What's already on screen is old news: remember it without announcing it.
+    private void readShowing() {
         try {
-            for (StatusBarNotification sbn : getActiveNotifications()) record(sbn, false);
-        } catch (RuntimeException ignored) {
+            StatusBarNotification[] showing = getActiveNotifications();
+            int skipped = 0;
+            for (StatusBarNotification sbn : showing) {
+                try {
+                    record(sbn, false);
+                } catch (RuntimeException err) {
+                    skipped++; // one odd notification doesn't stop the rest
+                    Log.w(TAG, "skipped a notification from " + sbn.getPackageName(), err);
+                }
+            }
+            Log.i(TAG, "read " + showing.length + " showing notifications, " + skipped + " skipped");
+        } catch (RuntimeException err) {
             // Not ready yet; new messages still come through onNotificationPosted.
+            Log.w(TAG, "couldn't read the notifications showing", err);
         }
+    }
+
+    // The reading rules changed: drop what's no longer allowed, and pick up what now is from the notifications showing.
+    static void rulesChanged(Context context) {
+        purge(context);
+        MessageListener listener = running;
+        if (listener != null) listener.readShowing();
     }
 
     @Override
@@ -79,6 +127,7 @@ public class MessageListener extends NotificationListenerService {
             record(sbn, true);
         } catch (RuntimeException err) {
             // Another app's odd notification must never take LightMoon down; skip it.
+            Log.w(TAG, "skipped a notification from " + sbn.getPackageName(), err);
         }
     }
 
@@ -88,25 +137,37 @@ public class MessageListener extends NotificationListenerService {
         if (conversation != null) replies.remove(conversation);
     }
 
-    private boolean isChat(StatusBarNotification sbn) {
+    // "chat", "email", or null for anything else.
+    private String kindOf(StatusBarNotification sbn) {
         String app = sbn.getPackageName();
-        if (app.equals(getPackageName()) || sbn.isOngoing()) return false;
+        if (app.equals(getPackageName()) || sbn.isOngoing()) return null;
         Notification n = sbn.getNotification();
-        if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return false;
-        return CHAT_APPS.contains(app) || app.equals(Telephony.Sms.getDefaultSmsPackage(this)) || Notification.CATEGORY_MESSAGE.equals(n.category);
+        if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return null;
+        if (Notification.CATEGORY_EMAIL.equals(n.category)) return "email";
+        boolean chat = CHAT_APPS.contains(app) || app.equals(Telephony.Sms.getDefaultSmsPackage(this)) || Notification.CATEGORY_MESSAGE.equals(n.category);
+        return chat ? "chat" : null;
     }
 
     private void record(StatusBarNotification sbn, boolean announce) {
-        if (!isChat(sbn)) return;
+        String kind = kindOf(sbn);
+        if (kind == null) return;
         Notification n = sbn.getNotification();
         String app = sbn.getPackageName();
-        String appName = appLabel(app);
+        String appName = appLabel(sbn);
+        ReadRules.sawApp(this, app, appName, kind);
+        if (!ReadRules.appAllowed(this, app)) return;
+        if ("email".equals(kind)) {
+            recordEmail(n, app, appName);
+            return;
+        }
         Bundle extras = n.extras;
         String title = text(extras.getCharSequence(Notification.EXTRA_TITLE));
 
         List<JSONObject> found = new ArrayList<>();
         NotificationCompat.MessagingStyle style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(n);
         String chat = style != null && style.getConversationTitle() != null ? text(style.getConversationTitle()) : title;
+        ReadRules.sawChat(this, app, appName, chat);
+        if (!ReadRules.chatAllowed(this, app, chat)) return;
         try {
             if (style != null && !style.getMessages().isEmpty()) {
                 for (NotificationCompat.MessagingStyle.Message m : style.getMessages()) {
@@ -114,6 +175,7 @@ public class MessageListener extends NotificationListenerService {
                     if (person == null) continue; // written by the user
                     String from = person.getName() == null ? chat : text(person.getName());
                     String body = text(m.getText());
+                    if (!ReadRules.chatAllowed(this, app, from)) continue; // a person switched off, even in a group
                     found.add(message(app, appName, chat, from, body.isEmpty() ? "(a photo, voice note or file)" : body, m.getTimestamp()));
                 }
             } else {
@@ -141,6 +203,31 @@ public class MessageListener extends NotificationListenerService {
         }
     }
 
+    // An email: who from, the subject and the first lines, kept only for an account switched on. Never said out loud.
+    private void recordEmail(Notification n, String app, String appName) {
+        Bundle extras = n.extras;
+        String account = text(extras.getCharSequence(Notification.EXTRA_SUB_TEXT));
+        if (!account.contains("@")) account = text(extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT));
+        if (!account.contains("@")) account = "";
+        ReadRules.sawAccount(this, account, app, appName);
+        if (!ReadRules.accountAllowed(this, ReadRules.accountKey(app, account))) return;
+        String from = text(extras.getCharSequence(Notification.EXTRA_TITLE));
+        String body = text(extras.getCharSequence(Notification.EXTRA_BIG_TEXT));
+        if (body.isEmpty()) body = text(extras.getCharSequence(Notification.EXTRA_TEXT));
+        if (from.isEmpty() || body.isEmpty()) return;
+        body = body.replaceFirst("\\s*\\n\\s*", " — ").replaceAll("\\s+", " ");
+        if (body.length() > 300) body = body.substring(0, 300) + "...";
+        try {
+            JSONObject mail = message(app, appName, account, from, body, n.when)
+                .put("kind", "email")
+                .put("account", account)
+                .put("conversation", app + "|" + ReadRules.accountKey(app, account) + "|" + from);
+            remember(this, java.util.Collections.singletonList(mail));
+        } catch (JSONException ignored) {
+            // Skip it.
+        }
+    }
+
     private void announceGathered() {
         List<JSONObject> batch = new ArrayList<>(toAnnounce);
         toAnnounce.clear();
@@ -149,6 +236,7 @@ public class MessageListener extends NotificationListenerService {
 
     private static JSONObject message(String app, String appName, String chat, String from, String body, long at) throws JSONException {
         return new JSONObject()
+            .put("pkg", app)
             .put("conversation", app + "|" + chat)
             .put("app", appName)
             .put("chat", chat)
@@ -205,16 +293,38 @@ public class MessageListener extends NotificationListenerService {
         return fresh;
     }
 
-    // Messages since a time (ms), oldest first, each with canReply while its notification is showing.
+    // Messages since a time (ms), oldest first, each with canReply while its notification is showing (chats only).
     static synchronized JSONArray recent(Context context, long since) throws JSONException {
         JSONArray all = load(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE));
         JSONArray result = new JSONArray();
         for (int i = 0; i < all.length(); i++) {
             JSONObject m = all.optJSONObject(i);
-            if (m == null || m.optLong("at") < since) continue;
-            result.put(new JSONObject(m.toString()).put("canReply", replies.containsKey(m.optString("conversation"))));
+            if (m == null || m.optLong("at") < since || !allowed(context, m)) continue;
+            boolean email = "email".equals(m.optString("kind"));
+            result.put(new JSONObject(m.toString()).put("canReply", !email && replies.containsKey(m.optString("conversation"))));
         }
         return result;
+    }
+
+    // Whether a kept message is still allowed by the reading rules (they may have changed since).
+    private static boolean allowed(Context context, JSONObject m) {
+        String conversation = m.optString("conversation");
+        String app = m.optString("pkg", conversation.contains("|") ? conversation.substring(0, conversation.indexOf('|')) : "");
+        if (!ReadRules.appAllowed(context, app)) return false;
+        if ("email".equals(m.optString("kind"))) return ReadRules.accountAllowed(context, ReadRules.accountKey(app, m.optString("account")));
+        return ReadRules.chatAllowed(context, app, m.optString("chat")) && ReadRules.chatAllowed(context, app, m.optString("from"));
+    }
+
+    // Forgets kept messages the rules no longer allow.
+    static synchronized void purge(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        JSONArray all = load(prefs);
+        JSONArray kept = new JSONArray();
+        for (int i = 0; i < all.length(); i++) {
+            JSONObject m = all.optJSONObject(i);
+            if (m != null && allowed(context, m)) kept.put(m);
+        }
+        if (kept.length() != all.length()) prefs.edit().putString("list", kept.toString()).apply();
     }
 
     // Answers a conversation through its notification's reply box. False if that notification is gone.
@@ -248,13 +358,18 @@ public class MessageListener extends NotificationListenerService {
         return any;
     }
 
-    private String appLabel(String app) {
+    // The app's name, from the notification itself (Android 11+ hides other apps' details unless they're listed).
+    @SuppressWarnings("deprecation")
+    private String appLabel(StatusBarNotification sbn) {
+        String app = sbn.getPackageName();
         if (app.equals(Telephony.Sms.getDefaultSmsPackage(this)) || app.equals("com.google.android.apps.messaging")) return "text";
+        PackageManager pm = getPackageManager();
+        Object info = sbn.getNotification().extras.get("android.appInfo");
+        if (info instanceof ApplicationInfo) return String.valueOf(pm.getApplicationLabel((ApplicationInfo) info));
         try {
-            PackageManager pm = getPackageManager();
             return String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(app, 0)));
         } catch (PackageManager.NameNotFoundException err) {
-            return "chat";
+            return app.substring(app.lastIndexOf('.') + 1);
         }
     }
 

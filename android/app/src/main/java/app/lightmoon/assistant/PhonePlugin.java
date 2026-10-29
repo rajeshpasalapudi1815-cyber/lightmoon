@@ -65,6 +65,7 @@ public class PhonePlugin extends Plugin {
     @Override
     public void load() {
         active = this;
+        MessageListener.reconnectIfNeeded(getContext());
         Briefings.scheduleAll(getContext());
         if (Meetings.canRead(getContext())) {
             Meetings.reschedule(getContext());
@@ -498,6 +499,40 @@ public class PhonePlugin extends Plugin {
             call.resolve(result);
         } catch (JSONException err) {
             call.reject("Couldn't read the messages.");
+        }
+    }
+
+    // What LightMoon may read (see ReadRules) -> { apps, accounts, chats }, each with allowed.
+    @PluginMethod
+    public void readingSources(PluginCall call) {
+        MessageListener.reconnectIfNeeded(getContext());
+        try {
+            call.resolve(JSObject.fromJSONObject(ReadRules.sources(getContext())));
+        } catch (JSONException | RuntimeException err) {
+            call.reject("Couldn't read the reading settings.");
+        }
+    }
+
+    // { app, allowed } for a whole app; { account, app, allowed } for an email account ("" = the app's unnamed one);
+    // { app, chat, allowed } for a chat or person. -> the updated { apps, accounts, chats }
+    @PluginMethod
+    public void setReading(PluginCall call) {
+        Boolean allowed = call.getBoolean("allowed");
+        String app = call.getString("app", "");
+        String account = call.getString("account");
+        String chat = call.getString("chat");
+        if (allowed == null || app.isEmpty()) {
+            call.reject("Say which app, and on or off.");
+            return;
+        }
+        try {
+            if (account != null) ReadRules.allowAccount(getContext(), ReadRules.accountKey(app, account), allowed);
+            else if (chat != null) ReadRules.allowChat(getContext(), app, chat, allowed);
+            else ReadRules.allowApp(getContext(), app, allowed);
+            MessageListener.rulesChanged(getContext());
+            call.resolve(JSObject.fromJSONObject(ReadRules.sources(getContext())));
+        } catch (JSONException | RuntimeException err) {
+            call.reject("Couldn't change that.");
         }
     }
 

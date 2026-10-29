@@ -869,6 +869,7 @@ function openSettings() {
   paintPhoneSettings();
   paintWakeSettings();
   paintPhonePowers();
+  paintReading();
   showSettingsPage(null);
   hideEmptySettings();
   $('#settings').showModal();
@@ -1048,6 +1049,62 @@ async function paintPhonePowers(message) {
   const briefings = typeof status.briefingMorning === 'string';
   $('#briefingBox').hidden = !briefings;
   if (briefings) for (const kind of ['briefingMorning', 'briefingEvening']) $(`#${kind}`).value = status[kind];
+}
+
+// ---------- Messages and email: what LightMoon may read (the rules live on the phone, in ReadRules.java) ----------
+
+async function paintReading() {
+  const supported = Boolean(phone?.readingSources); // app 1.5 and later
+  for (const box of ['#readingBox', '#readAppsBox', '#readAccountsBox', '#readChatsBox']) $(box).hidden = !supported;
+  if (!supported) return;
+  const [status, sources] = await Promise.all([phone.status().catch(() => null), phone.readingSources().catch(() => null)]);
+  $('#readingNote').textContent = status?.messages
+    ? 'Switch off anything LightMoon should never read. Email accounts start off until you switch them on.'
+    : "LightMoon can't read messages or email yet: first allow Reading messages on the Phone page.";
+  if (sources) renderReading(sources);
+}
+
+function renderReading({ apps, accounts, chats }) {
+  const kinds = { chat: 'messages', email: 'email', 'chat,email': 'messages and email' };
+  fillReading('#readApps', apps, a => ({ name: a.label, note: kinds[a.kind] ?? a.kind, rule: { app: a.app } }),
+    'Apps appear here after their first message or email.');
+  fillReading('#readAccounts', accounts, a => ({ name: a.account || `${a.label} (account not shown)`, note: a.label, rule: { app: a.app, account: a.account } }),
+    'Email accounts appear here after their first new email.');
+  fillReading('#readChats', chats, c => ({ name: c.chat, note: c.label, rule: { app: c.app, chat: c.chat } }),
+    'Chats appear here as messages arrive.');
+}
+
+// One switch per app, account or chat; each change applies at once (no Save needed).
+function fillReading(selector, items, describe, empty) {
+  const list = $(selector);
+  list.replaceChildren();
+  if (!items.length) return void list.append(el('p', 'card-note', empty));
+  for (const item of items) {
+    const { name, note, rule } = describe(item);
+    const text = el('span', 'perm-text');
+    text.append(el('span', 'perm-name', name), el('small', '', note));
+    const toggle = el('input');
+    toggle.type = 'checkbox';
+    toggle.checked = item.allowed;
+    toggle.setAttribute('aria-label', `Read ${name}`);
+    toggle.addEventListener('change', () => setReading(rule, toggle));
+    const row = el('label', 'switch-row perm-row');
+    row.append(text, toggle);
+    list.append(row);
+  }
+}
+
+async function setReading(rule, toggle) {
+  $('#settingsError').textContent = '';
+  toggle.disabled = true;
+  try {
+    renderReading(await phone.setReading({ ...rule, allowed: toggle.checked }));
+    refreshPhone({ force: true }); // what the AI sees follows straight away
+  } catch (err) {
+    toggle.checked = !toggle.checked;
+    toggle.disabled = false;
+    $('#settingsError').textContent = err.message;
+  }
 }
 
 // Asks Android for one of the phone permissions; a "no" there can only be undone in the phone's settings.
@@ -1512,6 +1569,7 @@ function wireUp() {
       paintPhoneSettings();
       paintWakeSettings();
       paintPhonePowers();
+      paintReading();
       refreshPhone({ force: true });
     }
     if (!document.hidden) listenAfterWake();

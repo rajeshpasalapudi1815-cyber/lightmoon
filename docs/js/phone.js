@@ -66,6 +66,11 @@ const shareable = text => (SECURITY_WORDS.test(text) && CODE_NUMBER.test(text) ?
 // Recent messages get short references (M1, M2...) the AI uses to reply.
 const messageRefs = () => seen.messages.slice(-MAX_MESSAGES).map((m, i) => ({ ...m, ref: `M${i + 1}` }));
 
+// "WhatsApp, Asha in "Family"" or "email to me@work.com from Asha" (emails only from accounts switched on).
+const source = m => (m.kind === 'email'
+  ? `email to ${m.account || m.app} from ${m.from}`
+  : `${m.app}, ${m.from}${m.chat && m.chat !== m.from ? ` in "${m.chat}"` : ''}`);
+
 export function promptSection() {
   if (!allowed) return '';
   const lines = [];
@@ -81,14 +86,14 @@ export function promptSection() {
   }
   if (allowed.messages) {
     const refs = messageRefs();
-    lines.push(refs.length ? 'Recent messages (oldest first):' : 'No new messages in the last 12 hours.');
-    lines.push(...refs.map(m => `  [${m.ref}] ${m.app}, ${m.from}${m.chat && m.chat !== m.from ? ` in "${m.chat}"` : ''}, ${clock(m.at)}: "${shareable(m.text)}"${m.canReply ? '' : ' (no reply from here)'}`));
+    lines.push(refs.length ? 'Recent messages and emails (oldest first; only what they chose to share):' : 'No new messages in the last 12 hours.');
+    lines.push(...refs.map(m => `  [${m.ref}] ${source(m)}, ${clock(m.at)}: "${shareable(m.text)}"${m.canReply ? '' : ' (no reply from here)'}`));
   }
   const can = [
     allowed.calendar && 'read and add calendar events',
     allowed.calls && 'call people',
     allowed.texts && 'send texts',
-    allowed.messages && 'reply to the messages above',
+    allowed.messages && 'reply to the chat messages above',
     'open apps, control music, navigate, search the web or YouTube, set alarms and timers, the flashlight, volume and ringer',
   ].filter(Boolean);
   return `PHONE (this phone, now; you can ${can.join(', ')})\n${lines.join('\n')}`;
@@ -205,7 +210,7 @@ export function phoneTools() {
     ));
   }
   if (allowed.messages) {
-    tools.push(tool('phone_messages', 'Messages beyond the ones in your context.', {
+    tools.push(tool('phone_messages', 'Messages and emails beyond the ones in your context.', {
       hours: { type: 'integer', minimum: 1, maximum: 48, description: 'Default 12.' },
     }));
   }
@@ -349,7 +354,7 @@ export const phoneHandlers = {
     const { messages } = await call(phone.messages({ since }));
     return {
       text: 'Checked messages',
-      result: messages.length ? messages.map(m => `${m.app}, ${m.from}, ${dayWord(m.at).toLowerCase()} ${clock(m.at)}: "${shareable(m.text)}"`).join('\n') : 'No messages then.',
+      result: messages.length ? messages.map(m => `${source(m)}, ${dayWord(m.at).toLowerCase()} ${clock(m.at)}: "${shareable(m.text)}"`).join('\n') : 'No messages then.',
     };
   },
 
