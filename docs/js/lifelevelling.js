@@ -157,99 +157,93 @@ ${lines.filter(Boolean).join('\n')}`;
 // ---------- Tools: requests Life Levelling applies within a minute (on the phone: when its app is open) ----------
 
 function tool(name, description, properties, required = []) {
-  return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
+  return { type: 'function', function: { name, description, parameters: { type: 'object', properties, ...(required.length && { required }) } } };
 }
 
-const TASK_REF = { type: 'string', description: 'The Life Levelling task reference shown as [L3], without brackets, e.g. "L3".' };
+const TASK_REF = { type: 'string', description: 'The task reference, e.g. "L3".' };
+const PRIORITY_ARG = { type: 'integer', minimum: 1, maximum: 5, description: '1 urgent, 2 high, 3 medium, 4 low, 5 minimal.' };
 
 export const LIFE_TOOLS = [
   tool(
     'life_log_health',
-    'Log health in Life Levelling when the user reports it: water drunk, last night\'s sleep, their mood, or exercise.',
+    'Log water, last night\'s sleep, mood or exercise in Life Levelling.',
     {
       kind: { type: 'string', enum: ['water', 'sleep', 'mood', 'exercise'] },
-      ml: { type: 'integer', minimum: 100, maximum: 3000, description: 'water: millilitres (a glass is about 250).' },
-      hours: { type: 'number', description: 'sleep: hours slept, e.g. 7.5.' },
-      quality: { type: 'integer', minimum: 1, maximum: 5, description: 'sleep: optional quality, 1 (awful) to 5 (great).' },
-      mood: { type: 'integer', minimum: 1, maximum: 5, description: 'mood: 1 (very low) to 5 (great).' },
-      note: { type: 'string', description: 'mood: optional short note in their words.' },
-      activity: { type: 'string', description: 'exercise: e.g. "walk", "gym", "yoga".' },
-      minutes: { type: 'integer', minimum: 1, maximum: 600, description: 'exercise: minutes.' },
+      ml: { type: 'integer', minimum: 100, maximum: 3000, description: 'water (a glass is about 250).' },
+      hours: { type: 'number', description: 'sleep.' },
+      quality: { type: 'integer', minimum: 1, maximum: 5, description: 'sleep, optional.' },
+      mood: { type: 'integer', minimum: 1, maximum: 5, description: 'mood, 5 = great.' },
+      note: { type: 'string', description: 'mood, optional, their words.' },
+      activity: { type: 'string', description: 'exercise, e.g. "walk".' },
+      minutes: { type: 'integer', minimum: 1, maximum: 600, description: 'exercise.' },
     },
     ['kind'],
   ),
-  tool('life_complete_task', 'Tick off a Life Levelling task the user says they finished. It earns them XP and gold.', { task: TASK_REF }, ['task']),
+  tool('life_complete_task', 'Tick off a Life Levelling task they finished (earns XP).', { task: TASK_REF }, ['task']),
   tool(
     'life_update_task',
-    'Change a Life Levelling task: rename it, edit its notes, change its priority, move or clear its due date and time, start it, '
-      + 'pause it, or reopen one finished today by mistake. Send only what changes.',
+    'Change a Life Levelling task: title, notes, priority, due date or time, start, pause, or reopen. Send only what changes.',
     {
       task: TASK_REF,
-      title: { type: 'string', description: 'New title.' },
-      notes: { type: 'string', description: 'New notes (replaces the old ones); an empty string clears them.' },
-      priority: { type: 'integer', minimum: 1, maximum: 5, description: '1 urgent, 2 high, 3 medium, 4 low, 5 minimal.' },
-      due_date: { type: 'string', description: 'New due date, YYYY-MM-DD.' },
-      due_time: { type: 'string', description: 'New due time, HH:MM.' },
-      clear_due: { type: 'boolean', description: 'true to remove the due date and time ("someday").' },
-      status: { type: 'string', enum: ['in_progress', 'pending'], description: 'in_progress to start it; pending to pause it or reopen a finished one.' },
+      title: { type: 'string' },
+      notes: { type: 'string', description: 'Replaces the old notes; empty clears them.' },
+      priority: PRIORITY_ARG,
+      due_date: { type: 'string', description: 'YYYY-MM-DD' },
+      due_time: { type: 'string', description: 'HH:MM' },
+      clear_due: { type: 'boolean', description: 'Remove the due date ("someday").' },
+      status: { type: 'string', enum: ['in_progress', 'pending'], description: 'in_progress starts it; pending pauses or reopens it.' },
     },
     ['task'],
   ),
   tool(
     'life_delete_task',
-    'Delete a Life Levelling task for good. Only when the user clearly asks to delete or remove it; if they finished it, use life_complete_task.',
+    'Delete a Life Levelling task, only when they clearly ask to delete it (finished ones: life_complete_task).',
     { task: TASK_REF },
     ['task'],
   ),
   tool(
     'life_add_task',
-    'Add a task to Life Levelling (their main to-do list, where finishing earns XP).',
-    {
-      title: { type: 'string', description: 'Short task title.' },
-      priority: { type: 'integer', minimum: 1, maximum: 5, description: '1 urgent, 2 high, 3 medium (default), 4 low, 5 minimal.' },
-      due_date: { type: 'string', description: 'Optional, YYYY-MM-DD.' },
-      due_time: { type: 'string', description: 'Optional, HH:MM.' },
-    },
+    'Add a task to Life Levelling, their main to-do list.',
+    { title: { type: 'string' }, priority: PRIORITY_ARG, due_date: { type: 'string', description: 'YYYY-MM-DD' }, due_time: { type: 'string', description: 'HH:MM' } },
     ['title'],
   ),
   tool(
     'life_set_intention',
-    "Set today's morning intention in Life Levelling's Mirror: the one thing that would make today a win.",
+    "Set today's morning intention in the Mirror: the one thing that would make today a win.",
     {
-      intention: { type: 'string', description: 'In their words, under 140 characters.' },
-      why: { type: 'string', description: 'Optional: why it matters.' },
-      if_then: { type: 'string', description: 'Optional: "If <obstacle>, then I will <action>."' },
+      intention: { type: 'string', description: 'Their words, under 140 characters.' },
+      why: { type: 'string' },
+      if_then: { type: 'string', description: '"If <obstacle>, then I will <action>."' },
     },
     ['intention'],
   ),
   tool(
     'life_log_habit',
-    'Tick off or count a Life Levelling habit the user says they did ("I meditated", "two more glasses of water", "took my vitamins").',
+    'Tick off or count a habit they did.',
     {
-      habit: { type: 'string', description: 'The habit reference shown as [H2], without brackets, e.g. "H2".' },
-      amount: { type: 'number', description: 'For counted habits: how much (cups, minutes, steps...). Leave out for a simple tick.' },
-      note: { type: 'string', description: 'Optional short note.' },
+      habit: { type: 'string', description: 'The habit reference, e.g. "H2".' },
+      amount: { type: 'number', description: 'For counted habits; leave out for a tick.' },
+      note: { type: 'string' },
     },
     ['habit'],
   ),
   tool(
     'life_close_day',
-    "Close the day in Life Levelling's Mirror (the evening reflection): whether today's intention happened, a win, a lesson, and a 1-5 rating. "
-      + 'Ask them in the evening, then log what they said; leave out what they did not say.',
+    "Close the day in the Mirror with what they told you; leave out what they didn't say.",
     {
-      outcome: { type: 'string', enum: ['done', 'partly', 'missed'], description: "Did the morning intention happen?" },
-      win: { type: 'string', description: 'The best thing about today, in their words.' },
-      lesson: { type: 'string', description: 'What they learned or would do differently.' },
-      rating: { type: 'integer', minimum: 1, maximum: 5, description: 'How the day felt, 1 to 5.' },
+      outcome: { type: 'string', enum: ['done', 'partly', 'missed'], description: 'Did the morning intention happen?' },
+      win: { type: 'string' },
+      lesson: { type: 'string' },
+      rating: { type: 'integer', minimum: 1, maximum: 5, description: 'How the day felt.' },
     },
   ),
   tool(
     'life_log_expense',
-    'Record money the user spent, in Life Levelling.',
+    'Record money they spent.',
     {
-      amount: { type: 'number', description: 'How much, as a plain number.' },
-      category: { type: 'string', description: 'e.g. Food, Transport, Shopping, Rent, Utilities, Health, Entertainment.' },
-      note: { type: 'string', description: 'Optional: what it was.' },
+      amount: { type: 'number' },
+      category: { type: 'string', description: 'e.g. Food, Transport, Shopping, Rent, Health.' },
+      note: { type: 'string' },
     },
     ['amount', 'category'],
   ),

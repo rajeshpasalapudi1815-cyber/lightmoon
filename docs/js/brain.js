@@ -7,7 +7,9 @@ import { weatherSummary } from './weather.js';
 import { refresh as refreshLifeLevelling } from './lifelevelling.js';
 import { refresh as refreshPhone } from './phone.js';
 
-const HISTORY_LIMIT = 16;
+const HISTORY_LIMIT = 10;
+const OLD_MESSAGE_CHARS = 600; // older messages are cut short: every request counts against the free tier's tokens per minute
+const MAX_WAIT_SECONDS = 30; // a second round right after the first can wait 10-25 s for the per-minute limit
 const MAX_TOOL_ROUNDS = 8; // a routine can take several steps
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -25,6 +27,7 @@ const FRIENDLY_ERRORS = {
   'rate-limit': "I've hit the free usage limit for the moment. Give me a minute, or try again a bit later.",
   network: "I can't reach the AI service. Please check your internet connection.",
   api: 'The AI service had trouble with that request. Please try again in a moment.',
+  'too-large': "That needed more than the free AI service takes at once. Ask again in a minute, or in fewer words.",
 };
 
 // Some models (gpt-oss especially) were trained with a web-search tool and occasionally try to call it,
@@ -33,11 +36,12 @@ const FRIENDLY_ERRORS = {
 const TOOL_REMINDER = 'Reminder: you cannot browse the web. Only call the tools you were given, with valid JSON arguments. For weather, call get_weather; for facts, call look_up.';
 
 class BrainError extends Error {
-  constructor(kind, detail = '', { retryable = false, badToolCall = false } = {}) {
+  constructor(kind, detail = '', { retryable = false, badToolCall = false, waitSeconds = null } = {}) {
     super(`${kind}${detail ? `: ${detail}` : ''}`);
     this.kind = kind;
     this.retryable = retryable || badToolCall;
     this.badToolCall = badToolCall;
+    this.waitSeconds = waitSeconds; // the service said when to try again (its per-minute limit)
   }
 }
 
@@ -54,7 +58,7 @@ export async function chat(text, { onText } = {}) {
   };
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const reply = await complete(convo, currentTools(), emit);
+      const reply = await complete(convo, currentTools(), emit, { onWait: () => onText?.('One moment. ') });
       if (!reply.tool_calls?.length) return finish(written.join(''), actions);
 
       convo.push({ role: 'assistant', content: reply.content || null, tool_calls: reply.tool_calls });
@@ -87,7 +91,27 @@ export async function briefing({ onText } = {}) {
 }
 
 const systemMessage = () => ({ role: 'system', content: buildSystemPrompt() });
-const recentHistory = () => messages.recent(HISTORY_LIMIT).map(({ role, content }) => ({ role, content }));
+const recentHistory = () => messages.recent(HISTORY_LIMIT).map(({ role, content }, i, all) => ({
+  role,
+  content: i < all.length - 2 && content.length > OLD_MESSAGE_CHARS ? `${content.slice(0, OLD_MESSAGE_CHARS)}...` : content,
+}));
+
+// For a request too large for the free tier: only the system prompt and this turn, plus the exchange before it.
+function shorten(convo) {
+  const lastUser = convo.findLastIndex(m => m.role === 'user');
+  const from = Math.max(1, lastUser - 2);
+  return from > 1 ? [convo[0], ...convo.slice(from)] : convo;
+}
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Groq's per-minute limit: the retry-after header when the browser may read it, else "Please try again in 7.66s" (or "1m2.5s").
+function secondsToWait(res, detail) {
+  const header = Number(res.headers.get('retry-after'));
+  if (header > 0) return header;
+  const match = /try again in (?:(\d+)m)?([\d.]+)s/i.exec(detail);
+  return match ? Number(match[1] ?? 0) * 60 + Number(match[2]) : null;
+}
 
 function finish(content, actions) {
   const reply = String(content ?? '').trim() || (actions.length ? 'Done.' : "I'm not quite sure what to say to that.");
@@ -100,9 +124,11 @@ function failure(err, actions = []) {
   return { reply: FRIENDLY_ERRORS[err.kind] ?? FRIENDLY_ERRORS.api, actions, error: true, detail: err.message };
 }
 
-// Tries the main model (twice if it garbled a tool call), then the backup model if the main one is
-// rate-limited or failing, but never after part of a reply has already been shown and spoken.
-async function complete(convo, tools, onText) {
+// Tries the main model, then the backup model if the main one is failing, but never after part of a reply has
+// already been shown and spoken. On the main model: once more with a reminder if it garbled a tool call, once
+// more after a short wait if the per-minute limit was hit (the backup model's limit is smaller), and with less
+// history if the request was too large.
+async function complete(convo, tools, onText, { onWait } = {}) {
   const ai = aiConfig();
   if (!ai.ready) throw new BrainError('no-key');
   const models = [...new Set([ai.model, ai.fallbackModel].filter(Boolean))];
@@ -112,15 +138,28 @@ async function complete(convo, tools, onText) {
     onText?.(delta);
   };
   let lastError;
+  let waited = false;
   for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const messages = attempt ? [...convo, { role: 'system', content: TOOL_REMINDER }] : convo;
+    let messages = convo;
+    let reminded = false;
+    for (;;) {
       try {
         return await request(ai, model, messages, tools, relay);
       } catch (err) {
         lastError = err;
         if (!err.retryable || emitted) throw err;
-        if (!err.badToolCall) break; // rate limits and outages: go straight to the backup model
+        if (err.badToolCall && !reminded) {
+          reminded = true;
+          messages = [...messages, { role: 'system', content: TOOL_REMINDER }];
+        } else if (err.kind === 'too-large' && shorten(messages) !== messages) {
+          messages = shorten(messages);
+        } else if (err.waitSeconds !== null && err.waitSeconds <= MAX_WAIT_SECONDS && !waited) {
+          waited = true;
+          onWait?.();
+          await sleep(err.waitSeconds * 1000 + 500);
+        } else {
+          break; // on to the backup model
+        }
       }
     }
   }
@@ -146,10 +185,13 @@ async function request(ai, model, convo, tools, onText) {
 
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 400);
-    const kind = res.status === 401 || res.status === 403 ? 'auth' : res.status === 429 ? 'rate-limit' : 'api';
+    // 413: one request bigger than the free tier's tokens per minute; 429: the minute's tokens are used up.
+    const tooLarge = res.status === 413 || /request too large|reduce your message size/i.test(detail);
+    const kind = res.status === 401 || res.status === 403 ? 'auth' : tooLarge ? 'too-large' : res.status === 429 ? 'rate-limit' : 'api';
     throw new BrainError(kind, `${model} ${res.status} ${detail}`, {
-      retryable: res.status === 429 || res.status >= 500,
+      retryable: res.status === 429 || res.status >= 500 || tooLarge,
       badToolCall: detail.includes('tool_use_failed'),
+      waitSeconds: res.status === 429 ? secondsToWait(res, detail) : null,
     });
   }
 

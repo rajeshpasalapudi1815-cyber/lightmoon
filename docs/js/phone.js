@@ -153,26 +153,28 @@ function withCountryCode(number) {
 // ---------- Tools ----------
 
 function tool(name, description, properties, required = []) {
-  return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
+  return { type: 'function', function: { name, description, parameters: { type: 'object', properties, ...(required.length && { required }) } } };
 }
 
-const CONFIRM = { type: 'string', description: 'Only after the user said yes to your read-back: the confirm_id you were given.' };
+const CONFIRM = { type: 'string', description: 'Only after they said yes to your read-back: the confirm_id you were given.' };
 const STAMP = 'local time, YYYY-MM-DDTHH:MM';
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const WHO = { type: 'string', description: 'A contact name or a number.' };
 
+// Kept short: every request carries all the tools, and the free AI tier counts every word.
 export function phoneTools() {
   if (!phone || !allowed) return [];
   const tools = [];
   if (allowed.calendar) {
     tools.push(
-      tool('phone_calendar', 'List calendar events for a day or a few days (today and tomorrow are already in your context).', {
+      tool('phone_calendar', 'Calendar events beyond today and tomorrow (those are in your context).', {
         date: { type: 'string', description: 'First day, YYYY-MM-DD. Default today.' },
-        days: { type: 'integer', minimum: 1, maximum: 14, description: 'How many days. Default 1.' },
+        days: { type: 'integer', minimum: 1, maximum: 14 },
       }),
-      tool('phone_add_event', "Add a meeting or event to the phone's calendar.", {
+      tool('phone_add_event', 'Add an event to the calendar.', {
         title: { type: 'string' },
-        start: { type: 'string', description: `Start, ${STAMP}.` },
-        minutes: { type: 'integer', minimum: 5, maximum: 1440, description: 'How long. Default 60.' },
+        start: { type: 'string' },
+        minutes: { type: 'integer', minimum: 5, maximum: 1440, description: 'Default 60.' },
         location: { type: 'string' },
         notes: { type: 'string' },
       }, ['title', 'start']),
@@ -180,11 +182,8 @@ export function phoneTools() {
   }
   if (allowed.calls) {
     tools.push(
-      tool('phone_call', 'Call someone. The first call only reads back who; call again with confirm_id after the user says yes.', {
-        who: { type: 'string', description: 'A contact name or a phone number.' },
-        confirm_id: CONFIRM,
-      }, ['who']),
-      tool('phone_recent_calls', 'Recent calls (missed, incoming, outgoing).', {
+      tool('phone_call', 'Call someone. The first call reads back who; call again with confirm_id after their yes.', { who: WHO, confirm_id: CONFIRM }, ['who']),
+      tool('phone_recent_calls', 'All recent calls (your context lists only missed calls from the last 24 h).', {
         hours: { type: 'integer', minimum: 1, maximum: 168, description: 'How far back. Default 24.' },
         missed_only: { type: 'boolean' },
       }),
@@ -193,49 +192,48 @@ export function phoneTools() {
   if (allowed.texts || allowed.messages) {
     tools.push(tool(
       'phone_message',
-      'Send a message. reply_to answers a message from your context (WhatsApp, SMS...) in its own chat; to + via "sms" sends a text; '
-        + 'to + via "whatsapp" opens WhatsApp with it written in, for the user to tap send. The first call only reads it back; '
-        + 'call again with confirm_id after the user says yes (not needed for whatsapp, where they tap send themselves).',
+      'Send a message: reply_to answers one from your context in its own chat; to + via sends a new one. The first call reads it back; '
+        + 'call again with confirm_id after their yes (not for whatsapp, where they tap send).',
       {
-        text: { type: 'string', description: 'The message, in the words the user wants.' },
-        reply_to: { type: 'string', description: 'A message reference like "M3".' },
-        to: { type: 'string', description: 'A contact name or a phone number.' },
-        via: { type: 'string', enum: ['sms', 'whatsapp'], description: 'For a new message (with to). Default sms.' },
+        text: { type: 'string' },
+        reply_to: { type: 'string', description: 'e.g. "M3"' },
+        to: WHO,
+        via: { type: 'string', enum: ['sms', 'whatsapp'] },
         confirm_id: CONFIRM,
       },
       ['text'],
     ));
   }
   if (allowed.messages) {
-    tools.push(tool('phone_messages', 'Recent messages from chat apps and SMS, beyond the ones in your context.', {
-      hours: { type: 'integer', minimum: 1, maximum: 48, description: 'How far back. Default 12.' },
+    tools.push(tool('phone_messages', 'Messages beyond the ones in your context.', {
+      hours: { type: 'integer', minimum: 1, maximum: 48, description: 'Default 12.' },
     }));
   }
   tools.push(
-    tool('phone_open_app', 'Open an app on the phone by its name, e.g. "YouTube", "Maps", "WhatsApp".', { name: { type: 'string' } }, ['name']),
-    tool('phone_alarm', "Set an alarm (time) or a timer (minutes/seconds) in the phone's clock app.", {
-      time: { type: 'string', description: 'Alarm time, HH:MM (24-hour).' },
-      days: { type: 'array', items: { type: 'string', enum: DAYS }, description: 'Repeat on these days (alarm only).' },
-      minutes: { type: 'integer', minimum: 0, maximum: 1440, description: 'Timer length in minutes.' },
-      seconds: { type: 'integer', minimum: 0, maximum: 3600, description: 'Timer: extra seconds.' },
+    tool('phone_open_app', 'Open an app by name.', { name: { type: 'string' } }, ['name']),
+    tool('phone_alarm', 'Set an alarm (time) or a timer (minutes, seconds).', {
+      time: { type: 'string', description: 'HH:MM, 24-hour.' },
+      days: { type: 'array', items: { type: 'string', enum: DAYS }, description: 'Repeat (alarm only).' },
+      minutes: { type: 'integer', minimum: 0, maximum: 1440 },
+      seconds: { type: 'integer', minimum: 0, maximum: 3600 },
       label: { type: 'string' },
     }),
-    tool('phone_device', 'Turn the flashlight on or off, set a volume, or switch the ringer to normal, vibrate or silent.', {
-      flashlight: { type: 'boolean', description: 'true = on, false = off.' },
-      volume: { type: 'integer', minimum: 0, maximum: 100, description: 'Volume in percent.' },
-      stream: { type: 'string', enum: ['media', 'ring', 'alarm'], description: 'Which volume. Default media.' },
+    tool('phone_device', 'Flashlight, volume or ringer.', {
+      flashlight: { type: 'boolean' },
+      volume: { type: 'integer', minimum: 0, maximum: 100, description: 'Percent.' },
+      stream: { type: 'string', enum: ['media', 'ring', 'alarm'], description: 'Default media.' },
       ringer: { type: 'string', enum: ['normal', 'vibrate', 'silent'] },
     }),
-    tool('phone_media', 'Control the music or video playing on the phone (Spotify, YouTube Music...).', {
+    tool('phone_media', 'Control the music or video playing.', {
       action: { type: 'string', enum: ['play', 'pause', 'toggle', 'next', 'previous'] },
     }, ['action']),
-    tool('phone_navigate', 'Start turn-by-turn directions in Google Maps to a place or address.', {
-      destination: { type: 'string', description: 'A place, address or "home"/"work" if saved in Maps.' },
-      mode: { type: 'string', enum: ['drive', 'walk', 'bike', 'transit'], description: 'Default drive.' },
+    tool('phone_navigate', 'Directions in Google Maps.', {
+      destination: { type: 'string' },
+      mode: { type: 'string', enum: ['drive', 'walk', 'bike', 'transit'] },
     }, ['destination']),
-    tool('phone_search', 'Open a search on the phone: the web (Google), YouTube, or Maps (places nearby, e.g. "coffee near me").', {
+    tool('phone_search', 'Open a search: web, YouTube, or Maps (e.g. "coffee near me").', {
       query: { type: 'string' },
-      where: { type: 'string', enum: ['web', 'youtube', 'maps'], description: 'Default web.' },
+      where: { type: 'string', enum: ['web', 'youtube', 'maps'] },
     }, ['query']),
   );
   return tools;

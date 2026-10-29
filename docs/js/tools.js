@@ -10,95 +10,72 @@ import { lookUp, headlines } from './knowledge.js';
 const MEANS_HERE = /^(here|local|nearby)$|\b(my|current|this|our)\s+(location|city|place|area|town)\b|where i am/i;
 
 function tool(name, description, properties, required = []) {
-  return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
+  return { type: 'function', function: { name, description, parameters: { type: 'object', properties, ...(required.length && { required }) } } };
 }
 
-const ID = { type: 'string', description: 'The id shown as [#id] in your context, without the #, e.g. "k3x9q2".' };
+const ID = { type: 'string', description: 'The [#id] from your context, without the #.' };
 
 export const TOOLS = [
   tool(
     'remember',
-    'Save a lasting fact about the user: a preference, a person in their life, a routine, an ambition or an important detail. Skip small talk and facts you already have.',
+    'Save a lasting fact about the user (a preference, a person, a routine, an ambition). Not small talk or facts you have.',
     {
-      content: { type: 'string', description: 'The fact as a short third-person sentence, e.g. "Prefers to work out in the morning."' },
+      content: { type: 'string', description: 'A short third-person sentence, e.g. "Prefers morning workouts."' },
       category: { type: 'string', enum: MEMORY_CATEGORIES },
     },
     ['content', 'category'],
   ),
-  tool('forget', 'Delete a saved fact that is wrong or that the user asks you to forget.', { id: ID }, ['id']),
+  tool('forget', 'Delete a saved fact that is wrong or that they ask you to forget.', { id: ID }, ['id']),
   tool(
     'add_task',
-    'Add a to-do. Set remind_at when the user wants to be reminded at a particular time, and then also write announcement.',
+    'Add a to-do. With remind_at, also write announcement.',
     {
-      title: { type: 'string', description: 'Short task title, e.g. "Call Mom".' },
-      due_at: { type: 'string', description: 'Optional due date (YYYY-MM-DD) or time (YYYY-MM-DDTHH:MM), local time.' },
-      remind_at: { type: 'string', description: 'Optional reminder time, local, format YYYY-MM-DDTHH:MM.' },
+      title: { type: 'string' },
+      due_at: { type: 'string', description: 'Date or date and time.' },
+      remind_at: { type: 'string', description: 'When to remind them.' },
       announcement: {
         type: 'string',
-        description: 'With remind_at: the one short sentence you will say out loud when the reminder goes off, addressing the user as they like, '
-          + 'e.g. "Boss, you have a meeting at 5 o\'clock." or "Sir, time to call your mom." Speak as at that moment, not as now.',
+        description: 'What you will say when the reminder goes off, as at that moment, e.g. "Boss, you have a meeting at 5 o\'clock."',
       },
     },
     ['title'],
   ),
-  tool('complete_task', 'Mark a task as done.', { id: ID }, ['id']),
-  tool('delete_task', 'Delete a task the user no longer wants.', { id: ID }, ['id']),
+  tool('complete_task', 'Mark a task done.', { id: ID }, ['id']),
+  tool('delete_task', 'Delete a task they no longer want.', { id: ID }, ['id']),
   tool(
     'add_goal',
-    'Start tracking a goal the user wants to achieve.',
-    {
-      title: { type: 'string', description: 'The goal, e.g. "Run 5 km without stopping".' },
-      why: { type: 'string', description: 'Why it matters to them, if they said.' },
-      target_date: { type: 'string', description: 'Optional target date, YYYY-MM-DD.' },
-    },
+    'Start tracking a goal.',
+    { title: { type: 'string' }, why: { type: 'string', description: 'Why it matters, if they said.' }, target_date: { type: 'string' } },
     ['title'],
   ),
   tool(
     'log_goal_progress',
-    'Record a check-in when the user reports progress, effort or a setback on one of their goals.',
-    {
-      goal_id: ID,
-      note: { type: 'string', description: 'What happened, briefly.' },
-      rating: { type: 'integer', minimum: 1, maximum: 5, description: 'Optional: how it went, from 1 (badly) to 5 (great).' },
-    },
+    'Log progress, effort or a setback on a goal.',
+    { goal_id: ID, note: { type: 'string' }, rating: { type: 'integer', minimum: 1, maximum: 5, description: 'Optional, 5 = great.' } },
     ['goal_id', 'note'],
   ),
   tool(
     'set_goal_status',
-    'Mark a goal achieved or dropped, or make it active again.',
+    'Mark a goal achieved or dropped, or active again.',
     { goal_id: ID, status: { type: 'string', enum: GOAL_STATUSES } },
     ['goal_id', 'status'],
   ),
-  tool(
-    'get_weather',
-    "Get today's weather: now, the day's range, and when rain is likely. Uses the user's saved place unless they name a city.",
-    { city: { type: 'string', description: 'Optional city, e.g. "Hyderabad".' } },
-  ),
-  tool(
-    'set_weather_place',
-    'Save the city used for weather in daily briefings, when the user tells you where they are.',
-    { city: { type: 'string', description: 'The city, e.g. "Hyderabad".' } },
-    ['city'],
-  ),
+  tool('get_weather', "Today's weather: now, the range, and when rain is likely. The saved place unless they name a city.", { city: { type: 'string' } }),
+  tool('set_weather_place', 'Save their city for the weather.', { city: { type: 'string' } }, ['city']),
   tool(
     'look_up',
-    'Look something up on Wikipedia: a person, place, thing, event, idea or fact you are not sure of or that may have changed. '
-      + 'Pass a short topic, e.g. "Prime Minister of India" or "Charminar", not a whole question.',
+    'Search Wikipedia for a fact you are unsure of or that may have changed. Pass a short topic ("Charminar"), not a question.',
     { topic: { type: 'string' } },
     ['topic'],
   ),
-  tool('news_headlines', "Today's top world news (Wikipedia's In the news).", {}),
+  tool('news_headlines', "Today's top world news.", {}),
   tool(
     'save_routine',
-    'Save a routine the user asks for: a phrase, and what to do when they say it ("when I say good night, set an alarm for 6 '
-      + 'and tell me tomorrow\'s meetings"). Saving the same phrase again replaces its steps.',
-    {
-      trigger: { type: 'string', description: 'The phrase, short, e.g. "good night".' },
-      steps: { type: 'string', description: 'What to do, in order, in plain words, as the user described it.' },
-    },
+    'Save a routine: a phrase, and what to do when they say it. The same phrase again replaces it.',
+    { trigger: { type: 'string', description: 'e.g. "good night"' }, steps: { type: 'string', description: 'In order, in plain words.' } },
     ['trigger', 'steps'],
   ),
-  tool('delete_routine', 'Delete a routine the user no longer wants.', { id: ID }, ['id']),
+  tool('delete_routine', 'Delete a routine.', { id: ID }, ['id']),
 ];
 
 // The Life Levelling tools are offered only while Life Levelling is connected, the phone tools only in the
