@@ -7,6 +7,7 @@ import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
 import * as cloud from './js/cloud.js';
 import * as lifeLevelling from './js/lifelevelling.js';
+import * as desktop from './js/desktop.js';
 import { reminderLine, checkInLine, parseAlertId } from './js/announce.js';
 import { chat, briefing } from './js/brain.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
@@ -1715,6 +1716,8 @@ function start({ auto = false } = {}) {
     },
     onStatus: paintSyncStatus,
   });
+  // Done and Snooze pressed on the Windows desktop orb.
+  desktop.start({ onAnswer: (taskId, action, options) => { const reply = answerReminder(taskId, action, options); if (reply) note(reply); } });
 
   if (phone) {
     phone.addListener('meetingDue', onPhoneSay);
