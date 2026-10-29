@@ -3,7 +3,6 @@
 // reminder titles and the code itself never leave the device.
 import * as store from './store.js';
 import * as lock from './lock.js';
-import { reminderLine } from './announce.js';
 import { idbGet, idbSet } from './idb.js';
 import { nativeAlarms } from './native.js';
 import { newSyncCode, normalizeCode, spaceIdFor, keyFor, encryptJson, decryptJson } from './vault.js';
@@ -87,11 +86,10 @@ async function api(method, path, body) {
 // The service worker shows notifications while the app is closed, so it needs the reminder titles
 // (kept on this device) and, with sync, the means to read reminders made on other devices.
 // With the app lock on, notifications keep the reminder's words off the lock screen.
+// Each reminder comes with its check-ins (announce.js), as alerts of their own.
 async function shareWithWorker() {
   await idbSet('cloud', { url: cloudUrl(), spaceId: config.spaceId, key: await getSyncKey(), private: lock.isEnabled() });
-  const { address, userName } = store.profile();
-  const reminders = store.tasks.remindersSince(Date.now() - KEEP_RECENT_REMINDERS_MS)
-    .map(r => ({ ...r, say: reminderLine(r, { address, user_name: userName }) }));
+  const reminders = store.tasks.alertsSince(Date.now() - KEEP_RECENT_REMINDERS_MS);
   await idbSet('reminders', reminders);
   await scheduleOnPhone(reminders);
 }
@@ -112,7 +110,7 @@ export const refreshNotificationPrivacy = () => shareWithWorker().catch(() => {}
 // the cloud has pushed them, even if an open device already announced them.
 async function uploadReminders() {
   if (!usesCloud()) return;
-  const reminders = store.tasks.remindersSince(Date.now() - KEEP_RECENT_REMINDERS_MS).map(({ id, at }) => ({ id, at }));
+  const reminders = store.tasks.alertsSince(Date.now() - KEEP_RECENT_REMINDERS_MS).map(({ id, at }) => ({ id, at }));
   await api('PUT', `/spaces/${config.spaceId}/reminders`, { reminders });
 }
 
@@ -294,4 +292,11 @@ export function init(callbacks) {
 // Reminders the service worker already showed as notifications (so the app doesn't announce them again).
 export async function notifiedReminders() {
   return (await idbGet('notified').catch(() => null)) ?? {};
+}
+
+// "Done" and "Snooze" tapped on notifications since the app last looked: [{ id, action, at, until }], once each.
+export async function takeReminderActions() {
+  const actions = (await idbGet('reminderActions').catch(() => null)) ?? [];
+  if (actions.length) await idbSet('reminderActions', []);
+  return actions;
 }

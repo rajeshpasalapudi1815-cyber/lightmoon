@@ -15,7 +15,8 @@ const REQUEST_TIMEOUT_MS = 60_000;
 
 const briefingRequest = weather =>
   '(Automatic message: I just opened the app. Give me a short spoken briefing, under 70 words. Greet me for the time of day. '
-  + 'Mention anything overdue or due today and any upcoming reminders. Nudge one of my goals or ask how it is going. '
+  + 'Mention anything overdue or due today and any upcoming reminders. If a reminder is waiting for my answer, ask whether I got it done. '
+  + 'Nudge one of my goals or ask how it is going. '
   + 'If Life Levelling data is in your context, use it: how ready I am today, the top of my plan, and a quest or the boss worth chasing. '
   + 'If phone data is in your context, mention my next meetings today, and any missed calls or messages that look important. '
   + 'End with one useful suggestion. If you know little about me yet, introduce yourself in one sentence and ask what I am working towards. '

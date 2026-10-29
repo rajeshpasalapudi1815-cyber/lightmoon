@@ -7,7 +7,7 @@ import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
 import * as cloud from './js/cloud.js';
 import * as lifeLevelling from './js/lifelevelling.js';
-import { reminderLine } from './js/announce.js';
+import { reminderLine, checkInLine, parseAlertId } from './js/announce.js';
 import { chat, briefing } from './js/brain.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 
@@ -34,6 +34,7 @@ const PREFS_KEY = 'assistant.prefs';
 const ASKED_NOTIFICATIONS_KEY = 'assistant.askedNotifications';
 const REMINDER_POLL_MS = 15_000;
 const LATE_REMINDER_MINUTES = 5;
+const SNOOZE_MINUTES = 10;
 const RELOCK_AFTER_MS = 3 * 60_000; // with the app lock on, ask again after this long in the background
 const MAX_SHARED_CHARS = 6000;
 const FIRST_WORDS_WAIT_MS = 8000; // stop listening if nothing is said for this long
@@ -660,14 +661,23 @@ async function runBriefing(force = false) {
 }
 
 async function pollReminders() {
+  await takeAnswers();
   if (nativeAlarms) {
-    // In the Android app, the phone's alarms say reminders while LightMoon is in the background or closed.
+    // In the Android app, the phone's alarms say reminders (and check-ins) while LightMoon is in the
+    // background or closed.
     const { ids, visible } = await nativeAlarms.takeSpoken().catch(() => ({ ids: [], visible: true }));
     for (const id of ids) {
-      const task = store.tasks.get(id);
-      if (!task || task.reminded) continue;
-      store.tasks.markReminded(id);
-      addMessage('reminder', sayReminder(task));
+      const { taskId, n } = parseAlertId(id);
+      const task = store.tasks.get(taskId);
+      if (!task || task.done) continue;
+      if (n) {
+        if ((task.checked_in ?? 0) >= n) continue;
+        store.tasks.markCheckedIn(taskId, n);
+        addReminderMessage(task, checkInLine(task, store.settings.all(), n));
+      } else if (!task.reminded) {
+        store.tasks.markReminded(taskId);
+        addReminderMessage(task, sayReminder(task));
+      }
     }
     if (!visible) return;
   }
@@ -675,43 +685,105 @@ async function pollReminders() {
   // It is announced at the next check, a few seconds after they finish.
   if (listener.capturing) return;
   const due = store.tasks.takeDueReminders();
-  if (!due.length) return;
-  const notified = await cloud.notifiedReminders(); // already shown as a phone notification while closed
+  const checkIns = store.tasks.takeDueCheckIns();
+  if (!due.length && !checkIns.length) return;
+  const notified = await cloud.notifiedReminders(); // already shown as a notification while closed
   for (const reminder of due.filter(r => !notified[r.id])) {
     const minutesLate = (Date.now() - toDate(reminder.remind_at).getTime()) / 60_000;
     const line = sayReminder(reminder);
     if (minutesLate > LATE_REMINDER_MINUTES) {
-      addMessage('reminder', `Missed reminder (${formatWhen(reminder.remind_at)}): ${reminder.title}`);
+      addReminderMessage(reminder, `Missed reminder (${formatWhen(reminder.remind_at)}): ${reminder.title}`);
       speaker.speak(`${addressWord()}, you missed a reminder from ${formatWhen(reminder.remind_at)}. ${line}`, { force: true });
     } else {
-      addMessage('reminder', line);
+      addReminderMessage(reminder, line);
       speaker.speak(line, { force: true });
     }
     if (document.hidden) notify(`${assistantName()} reminder`, line);
+  }
+  for (const check of checkIns.filter(c => !notified[c.id])) {
+    addReminderMessage(check.task, check.say);
+    speaker.speak(check.say, { force: true });
+    if (document.hidden) notify(`${assistantName()} is checking in`, check.say);
   }
   applyState();
 }
 
 const sayReminder = task => reminderLine(task, { address: state.profile.address, user_name: state.profile.userName });
 
-// Opened from a reminder notification: say the reminder out loud.
+// A reminder or check-in in the conversation, with buttons to answer it there and then.
+function addReminderMessage(task, line) {
+  const node = addMessage('reminder', line);
+  const row = el('div', 'actions reminder-answers');
+  const answer = (action, label) => {
+    const button = el('button', 'action-chip chip-button', label);
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      for (const other of row.querySelectorAll('button')) other.disabled = true;
+      const reply = answerReminder(task.id, action);
+      if (reply) row.replaceChildren(el('span', 'action-chip', reply));
+    });
+    row.append(button);
+  };
+  answer('done', 'Done');
+  answer('snooze', `Snooze ${SNOOZE_MINUTES} min`);
+  answer('stop', 'Stop asking');
+  node.append(row);
+}
+
+// Done, snooze or "stop asking" for a reminder: from its buttons, a notification or the phone. Returns what
+// happened, for the conversation, or null if the task is gone or already done.
+function answerReminder(taskId, action, { until = null } = {}) {
+  const task = store.tasks.get(taskId);
+  if (!task || task.done) return null;
+  let reply = null;
+  if (action === 'done' && store.tasks.complete(taskId)) reply = `Done: ${task.title}`;
+  if (action === 'snooze') {
+    const at = localStamp(new Date(until ?? Date.now() + SNOOZE_MINUTES * 60_000));
+    if (store.tasks.snooze(taskId, at)) reply = `Snoozed until ${formatWhen(at)}: ${task.title}`;
+  }
+  if (action === 'stop' && store.tasks.stopCheckingIn(taskId)) reply = `Won't ask again: ${task.title}`;
+  applyState();
+  return reply;
+}
+
+// Answers given on notifications (this computer's, or the phone's) while LightMoon wasn't looking.
+async function takeAnswers() {
+  const answers = [
+    ...(await cloud.takeReminderActions()),
+    ...(nativeAlarms ? (await nativeAlarms.takeActions().catch(() => ({ actions: [] }))).actions ?? [] : []),
+  ];
+  for (const { id, action, until } of answers) {
+    const reply = answerReminder(parseAlertId(id).taskId, action, { until });
+    if (reply) note(reply);
+  }
+}
+
+// Opened from a reminder notification (or one of its check-ins): say it out loud.
 async function announceReminder(id) {
-  let task = store.tasks.get(id);
+  const { taskId, n } = parseAlertId(id);
+  let task = store.tasks.get(taskId);
   if (!task) {
     await cloud.syncNow(); // it may have been set on another device
-    task = store.tasks.get(id);
+    task = store.tasks.get(taskId);
   }
-  const line = task ? sayReminder(task) : `${addressWord()}, you have a reminder.`;
-  if (task) store.tasks.markReminded(task.id);
-  addMessage('reminder', line);
+  if (!task) {
+    const line = `${addressWord()}, you have a reminder.`;
+    addMessage('reminder', line);
+    return speaker.speak(line, { force: true });
+  }
+  const line = n ? checkInLine(task, store.settings.all(), n) : sayReminder(task);
+  if (n) store.tasks.markCheckedIn(task.id, n);
+  else store.tasks.markReminded(task.id);
+  addReminderMessage(task, line);
   speaker.speak(line, { force: true });
   applyState();
 }
 
 // A reminder's alarm went off while LightMoon is on screen: announce it here, in the conversation.
 async function onReminderAlarm({ id, say }) {
-  if (!store.tasks.get(id)) await cloud.syncNow(); // set on another device and not synced here yet
-  if (store.tasks.get(id)) return pollReminders();
+  const { taskId } = parseAlertId(id);
+  if (!store.tasks.get(taskId)) await cloud.syncNow(); // set on another device and not synced here yet
+  if (store.tasks.get(taskId)) return pollReminders();
   addMessage('reminder', say); // e.g. the test from Settings
   speaker.speak(say, { force: true });
 }
@@ -857,6 +929,7 @@ function openSettings() {
   fields.sendAfter.value = String(prefs.sendAfterMs);
   fields.listenOnOpen.checked = prefs.listenOnOpen;
   fields.followUp.value = prefs.followUp;
+  fields.reminderChecks.value = store.settings.get('reminder_checks', 'on');
   fields.lang.value = prefs.lang;
   fields.apiKey.value = '';
   fillAiFields(fields, store.aiConfig());
@@ -1354,6 +1427,8 @@ function saveSettings(event) {
     lang: fields.lang.value,
   });
   savePrefs();
+  // Synced, so every device (and the phone's alarms) checks in the same way.
+  if (fields.reminderChecks.value !== store.settings.get('reminder_checks', 'on')) store.settings.set('reminder_checks', fields.reminderChecks.value);
   store.saveProfile({ userName: fields.userName.value, address: fields.address.value, assistantName: fields.assistantName.value });
   tellPhoneAddress();
   store.saveAiConfig({
@@ -1707,7 +1782,8 @@ function boot() {
     navigator.serviceWorker.register('./sw.js', { type: 'module' }).catch(() => {});
     // A cloud reminder arrived while the app is open: announce it here instead of as a notification.
     navigator.serviceWorker.addEventListener('message', event => {
-      if (event.data?.type === 'reminders-due' && started) pollReminders();
+      // ...or "Done" or "Snooze" was tapped on a notification: apply it now.
+      if (['reminders-due', 'reminder-action'].includes(event.data?.type) && started) pollReminders();
       // A reminder notification was tapped while the app was already running in the background.
       if (event.data?.type === 'speak-reminder' && started && !locked) announceReminder(event.data.id);
     });

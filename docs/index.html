@@ -278,6 +278,20 @@
 
         <!-- ---------- Reminders ---------- -->
         <section class="settings-page" data-page="reminders" data-title="Reminders" hidden>
+          <div class="set-card">
+            <h3 class="card-title">Checking in</h3>
+            <label>After a reminder goes off
+              <select name="reminderChecks">
+                <option value="on">ask until I answer (after 15, 45 and 90 minutes)</option>
+                <option value="off">say it once, then leave it</option>
+              </select>
+            </label>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>When a reminder needs doing, LightMoon checks back until you tell it it's done, say "later" (it asks again in 10 minutes) or say "stop asking". You can answer out loud, with the buttons under the reminder, or with Done and Snooze on the notification. It never checks in between 11 pm and 7 am, and not for a plain heads-up like a meeting starting.</p>
+            </details>
+          </div>
+
           <div class="set-card cloud-box" id="notifyBox">
             <div class="card-head"><h3 class="card-title">Reminder notifications</h3><span id="notifyStatus" class="card-status"></span></div>
             <span class="row actions">

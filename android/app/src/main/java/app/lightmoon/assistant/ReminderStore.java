@@ -49,7 +49,18 @@ final class ReminderStore {
     private static final String KEY_LIST = "reminders";
     private static final String KEY_HIDE_TEXT = "hideText";
     private static final String KEY_SPOKEN = "spoken";
+    private static final String KEY_ANSWERS = "answers";
     private static final String ACTION = "app.lightmoon.assistant.REMINDER";
+    private static final long FORGET_ANSWERS_MS = 2 * 86_400_000L;
+
+    // A task's reminder has the task's id; its check-ins add "-c1", "-c2"... (docs/js/announce.js).
+    static String taskIdOf(String alertId) {
+        return alertId == null ? "" : alertId.replaceFirst("-c\\d+$", "");
+    }
+
+    static boolean isTaskAlert(String alertId) {
+        return alertId != null && alertId.matches("[a-z0-9]+(-c\\d+)?");
+    }
 
     private ReminderStore() {}
 
@@ -117,6 +128,73 @@ final class ReminderStore {
         List<String> spoken = new ArrayList<>(prefs(context).getStringSet(KEY_SPOKEN, new HashSet<>()));
         prefs(context).edit().remove(KEY_SPOKEN).apply();
         return spoken;
+    }
+
+    // ---------- Answers given on a notification: Done, Snooze, Stop asking ----------
+    // Kept for the app (it applies them to the task when it next runs) and for SyncWorker (it writes them into
+    // the synced copy at once, so the user's other devices stop asking too). { id, action, at, until, uploaded }
+
+    static synchronized void addAnswer(Context context, String taskId, String action, long at, long until) {
+        JSONArray answers = answers(context);
+        try {
+            answers.put(new JSONObject().put("id", taskId).put("action", action).put("at", at).put("until", until).put("uploaded", false));
+        } catch (JSONException ignored) {
+            return;
+        }
+        prefs(context).edit().putString(KEY_ANSWERS, answers.toString()).apply();
+    }
+
+    // All answers the app hasn't applied yet, newest last.
+    static synchronized JSONArray answers(Context context) {
+        try {
+            return new JSONArray(prefs(context).getString(KEY_ANSWERS, "[]"));
+        } catch (JSONException err) {
+            return new JSONArray();
+        }
+    }
+
+    // For the app: every answer, once. Ones the app never collected are dropped after a couple of days.
+    static synchronized JSONArray takeAnswers(Context context) {
+        JSONArray answers = answers(context);
+        prefs(context).edit().remove(KEY_ANSWERS).apply();
+        return answers;
+    }
+
+    // Answers not yet written into the synced copy.
+    static synchronized JSONArray answersToUpload(Context context) {
+        JSONArray answers = answers(context);
+        JSONArray waiting = new JSONArray();
+        for (int i = 0; i < answers.length(); i++) {
+            JSONObject answer = answers.optJSONObject(i);
+            if (answer != null && !answer.optBoolean("uploaded")) waiting.put(answer);
+        }
+        return waiting;
+    }
+
+    // The answers given up to `upTo` are in the synced copy now (one given meanwhile waits for the next run).
+    static synchronized void markAnswersUploaded(Context context, long upTo) {
+        JSONArray answers = answers(context);
+        JSONArray kept = new JSONArray();
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < answers.length(); i++) {
+            JSONObject answer = answers.optJSONObject(i);
+            if (answer == null || answer.optLong("at") < now - FORGET_ANSWERS_MS) continue;
+            try {
+                kept.put(answer.optLong("at") <= upTo ? answer.put("uploaded", true) : answer);
+            } catch (JSONException ignored) {
+                // Leave it out.
+            }
+        }
+        prefs(context).edit().putString(KEY_ANSWERS, kept.toString()).apply();
+    }
+
+    // No more alarms for a task: its reminder and check-ins (it was answered).
+    static synchronized void dropTask(Context context, String taskId) {
+        List<Reminder> left = new ArrayList<>();
+        for (Reminder reminder : load(context).values()) {
+            if (!taskIdOf(reminder.id).equals(taskId)) left.add(reminder);
+        }
+        replaceAll(context, left, hideText(context));
     }
 
     private static Map<String, Reminder> load(Context context) {

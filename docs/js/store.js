@@ -2,6 +2,7 @@
 // Nothing here leaves the device except the conversation sent to the AI service, and, if sync is on,
 // an encrypted copy (see cloud.js). Records carry random ids and change times so devices can merge.
 import { localStamp, today } from './time.js';
+import { reminderLine, checkInsOf, checkInLine, checksIn } from './announce.js';
 
 export const MEMORY_CATEGORIES = ['preference', 'person', 'routine', 'goal', 'health', 'work', 'fact', 'other'];
 export const GOAL_STATUSES = ['active', 'achieved', 'dropped'];
@@ -171,6 +172,7 @@ export function onExternalChange(callback) {
 
 export const settings = {
   get: (key, fallback = '') => data.settings[key] ?? fallback,
+  all: () => ({ ...data.settings }),
   set(key, value) {
     data.settings[key] = String(value);
     if (!LOCAL_SETTINGS.has(key)) data.settingsAt[key] = Date.now();
@@ -237,25 +239,55 @@ export const memories = {
 };
 
 const whenOf = task => task.remind_at ?? task.due_at ?? '9999';
+const LATE_CHECK_IN_MS = 20 * 60_000; // a check-in missed by more than this (the device was off) is skipped
+const WAITING_FOR_MS = 12 * 3600_000; // how long a reminder nobody answered stays on the AI's mind
 
 export const tasks = {
   open: () => live('tasks').filter(t => !t.done).sort((a, b) => whenOf(a).localeCompare(whenOf(b)) || byCreated(a, b)),
   doneToday: () =>
     live('tasks').filter(t => t.done && t.done_at?.startsWith(today())).sort((a, b) => b.done_at.localeCompare(a.done_at)),
   get: id => find('tasks', id),
-  // `announce` is what to say out loud when the reminder goes off.
-  add({ title, dueAt = null, remindAt = null, announce = null }) {
+  // `announce` is what to say out loud when the reminder goes off. `checkIn` is the question to ask afterwards
+  // until they answer (null: a plain one), or false for a heads-up that needs no answer.
+  add({ title, dueAt = null, remindAt = null, announce = null, checkIn = null }) {
     data.tasks.push({
-      id: newId(), title, due_at: dueAt, remind_at: remindAt, announce,
+      id: newId(), title, due_at: dueAt, remind_at: remindAt, announce, check_in: checkIn,
       done: false, reminded: false, done_at: null, created_at: localStamp(), updated_at: Date.now(),
     });
+    save();
+  },
+  // "Later": the reminder goes off again at `remindAt`, and the check-ins start over from then.
+  snooze(id, remindAt) {
+    const task = tasks.get(id);
+    if (!task || task.done) return false;
+    Object.assign(task, { remind_at: remindAt, reminded: false, checked_in: 0, answered: false });
+    touch(task);
+    save();
+    return true;
+  },
+  // "Stop asking": no more check-ins, though it isn't done.
+  stopCheckingIn(id) {
+    const task = tasks.get(id);
+    if (!task || task.answered) return false;
+    task.answered = true;
+    touch(task);
+    save();
+    return true;
+  },
+  // Saying a reminder or a check-in is bookkeeping, not a change: it keeps the task's change time, so it can't
+  // win over a real change made on another device meanwhile (Done tapped on the phone as the computer checks
+  // in). Merging keeps what was said on either device (mergeIn).
+  // A check-in was said (here, or by the phone or a notification while LightMoon was closed).
+  markCheckedIn(id, n) {
+    const task = tasks.get(id);
+    if (!task || (task.checked_in ?? 0) >= n) return;
+    task.checked_in = n;
     save();
   },
   markReminded(id) {
     const task = tasks.get(id);
     if (!task || task.reminded) return;
     task.reminded = true;
-    touch(task);
     save();
   },
   complete(id) {
@@ -269,24 +301,56 @@ export const tasks = {
   },
   remove: id => remove('tasks', id),
 
-  // Reminders on unfinished tasks due at or after `since` (ms), for notifications. This includes ones
-  // already announced on this device, so the user's other devices still get notified.
-  remindersSince: since =>
-    tasks.open()
-      .filter(t => t.remind_at)
-      .map(t => ({ id: t.id, title: t.title, announce: t.announce ?? null, at: Date.parse(t.remind_at), updated: t.updated_at }))
-      .filter(r => Number.isFinite(r.at) && r.at >= since),
+  // Everything to alert at or after `since` (ms), for notifications and the phone's alarms: each unfinished
+  // task's reminder and its check-ins, with the words to say. This includes ones already announced on this
+  // device, so the user's other devices still get them.
+  alertsSince(since) {
+    const words = data.settings;
+    const alerts = [];
+    for (const task of tasks.open().filter(t => t.remind_at)) {
+      const base = { title: task.title, updated: task.updated_at };
+      alerts.push({ ...base, id: task.id, at: Date.parse(task.remind_at), say: reminderLine(task, words) });
+      for (const check of checkInsOf(task, words)) alerts.push({ ...base, id: check.id, at: check.at, say: checkInLine(task, words, check.n) });
+    }
+    return alerts.filter(alert => Number.isFinite(alert.at) && alert.at >= since);
+  },
 
-  // Returns reminders that are due and marks them delivered, so each one fires once.
+  // Returns reminders that are due and marks them delivered, so each one fires once. Check-ins that fell
+  // due meanwhile (the app was closed) are counted as said: the reminder is announced instead.
   takeDueReminders() {
     const now = localStamp();
     const due = live('tasks').filter(t => !t.done && !t.reminded && t.remind_at && t.remind_at <= now);
     for (const task of due) {
       task.reminded = true;
-      touch(task);
+      const passed = checkInsOf(task, data.settings).filter(check => check.at <= Date.now());
+      if (passed.length) task.checked_in = passed.at(-1).n;
     }
     if (due.length) save();
     return due.map(({ id, title, remind_at, announce }) => ({ id, title, remind_at, announce }));
+  },
+
+  // Check-ins due now for reminders that went off and got no answer: the latest one per task, with its words.
+  // Ones missed by a long way are skipped quietly (marked said), so opening the app doesn't bring a pile of them.
+  takeDueCheckIns() {
+    const now = Date.now();
+    const due = [];
+    let changed = false;
+    for (const task of live('tasks').filter(t => t.reminded)) {
+      const passed = checkInsOf(task, data.settings).filter(check => check.at <= now);
+      if (!passed.length) continue;
+      const latest = passed.at(-1);
+      task.checked_in = latest.n;
+      changed = true;
+      if (now - latest.at <= LATE_CHECK_IN_MS) due.push({ id: latest.id, task, n: latest.n, say: checkInLine(task, data.settings, latest.n) });
+    }
+    if (changed) save();
+    return due;
+  },
+
+  // Reminders that went off in the last few hours with no answer yet, so the AI can ask how it went.
+  waitingForAnswer() {
+    const since = localStamp(new Date(Date.now() - WAITING_FOR_MS));
+    return live('tasks').filter(t => t.reminded && checksIn(t, data.settings) && t.remind_at >= since && t.remind_at <= localStamp());
   },
 };
 
@@ -361,13 +425,23 @@ export const syncableOf = remote => syncableData(normalize(remote));
 
 // Merges another device's copy in: for each record the most recent change wins, chats are combined.
 // Returns how many chat messages were new here.
+// A reminder (and its check-ins) said on either device counts as said, for the same reminder time (see markReminded).
+function keepWhatWasSaid(task, other) {
+  if (task.deleted || other.deleted || task.remind_at !== other.remind_at) return;
+  if (other.reminded) task.reminded = true;
+  if ((other.checked_in ?? 0) > (task.checked_in ?? 0)) task.checked_in = other.checked_in;
+}
+
 export function mergeIn(remote) {
   const theirs = normalize(remote);
   for (const name of COLLECTIONS) {
     const merged = new Map(data[name].map(record => [record.id, record]));
     for (const record of theirs[name]) {
       const mine = merged.get(record.id);
-      if (!mine || (record.updated_at ?? 0) > (mine.updated_at ?? 0)) merged.set(record.id, record);
+      const newer = !mine || (record.updated_at ?? 0) > (mine.updated_at ?? 0);
+      const winner = newer ? { ...record } : mine;
+      if (name === 'tasks' && mine) keepWhatWasSaid(winner, newer ? mine : record);
+      if (newer) merged.set(record.id, winner);
     }
     data[name] = [...merged.values()];
   }

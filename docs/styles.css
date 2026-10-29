@@ -349,6 +349,10 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
 .stage { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
 .chip-link { text-decoration: none; border-style: dashed; }
 .chip-link:hover { background: rgba(63, 216, 255, 0.2); }
+/* Answering a reminder in the conversation: Done, Snooze, Stop asking. */
+.chip-button { font: inherit; font-size: 13px; padding: 6px 14px; cursor: pointer; }
+.chip-button:hover:not(:disabled) { background: rgba(63, 216, 255, 0.2); }
+.chip-button:disabled { opacity: 0.5; cursor: default; }
 .mini.cal { font-size: 12px; text-decoration: none; padding: 3px 6px; color: var(--cyan); white-space: nowrap; }
 
 @media (max-width: 860px) {

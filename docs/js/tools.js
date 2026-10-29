@@ -28,7 +28,7 @@ export const TOOLS = [
   tool('forget', 'Delete a saved fact that is wrong or that they ask you to forget.', { id: ID }, ['id']),
   tool(
     'add_task',
-    'Add a to-do. With remind_at, also write announcement.',
+    'Add a to-do. With remind_at, also write announcement and check_in.',
     {
       title: { type: 'string' },
       due_at: { type: 'string', description: 'Date or date and time.' },
@@ -37,10 +37,22 @@ export const TOOLS = [
         type: 'string',
         description: 'What you will say when the reminder goes off, as at that moment, e.g. "Boss, you have a meeting at 5 o\'clock."',
       },
+      check_in: {
+        type: 'string',
+        description: 'If they haven\'t said it\'s done, you check in after 15, 45 and 90 minutes with this question, e.g. "did you take your tablets?". '
+          + 'Use "none" for a heads-up that needs no answer (a meeting starting, leaving soon).',
+      },
     },
     ['title'],
   ),
-  tool('complete_task', 'Mark a task done.', { id: ID }, ['id']),
+  tool('complete_task', 'Mark a task done (also stops the check-ins on its reminder).', { id: ID }, ['id']),
+  tool(
+    'snooze_reminder',
+    'They can\'t do a reminder yet ("later", "in 20 minutes"): remind them again then, and check in from then on.',
+    { id: ID, minutes: { type: 'integer', minimum: 1, maximum: 720, description: 'Default 10.' } },
+    ['id'],
+  ),
+  tool('stop_checking_in', 'Stop checking in about a reminder (they don\'t want to be asked again), without marking it done.', { id: ID }, ['id']),
   tool('delete_task', 'Delete a task they no longer want.', { id: ID }, ['id']),
   tool(
     'add_goal',
@@ -127,14 +139,16 @@ const handlers = {
     return 'Forgot a saved fact';
   },
 
-  add_task({ title, due_at, remind_at, announcement }) {
+  add_task({ title, due_at, remind_at, announcement, check_in }) {
     const name = toText(title, 'title', 200);
     const remindAt = toTime(remind_at, 'remind_at', { requireTime: true });
     if (remindAt && remindAt < localStamp()) {
       throw new Error(`remind_at ${remindAt} is in the past; it is now ${localStamp()}.`);
     }
     const announce = remindAt && announcement ? String(announcement).trim().slice(0, 200) || null : null;
-    tasks.add({ title: name, dueAt: toTime(due_at, 'due_at'), remindAt, announce });
+    const question = String(check_in ?? '').trim().slice(0, 160);
+    const checkIn = !remindAt || !question ? null : /^(none|no|false)$/i.test(question) ? false : question;
+    tasks.add({ title: name, dueAt: toTime(due_at, 'due_at'), remindAt, announce, checkIn });
     if (!remindAt) return `Task added: ${name}`;
     return { text: `Reminder set: ${name}, ${prettyTime(remindAt)}`, calendar: { title: name, at: remindAt } };
   },
@@ -143,6 +157,20 @@ const handlers = {
     const task = findTask(id);
     tasks.complete(task.id);
     return `Done: ${task.title}`;
+  },
+
+  snooze_reminder({ id, minutes }) {
+    const task = findTask(id);
+    const wait = Number.isInteger(Number(minutes)) && minutes >= 1 && minutes <= 720 ? Number(minutes) : 10;
+    const at = localStamp(new Date(Date.now() + wait * 60_000));
+    tasks.snooze(task.id, at);
+    return `Snoozed until ${prettyTime(at)}: ${task.title}`;
+  },
+
+  stop_checking_in({ id }) {
+    const task = findTask(id);
+    tasks.stopCheckingIn(task.id);
+    return `Won't ask again: ${task.title}`;
   },
 
   delete_task({ id }) {

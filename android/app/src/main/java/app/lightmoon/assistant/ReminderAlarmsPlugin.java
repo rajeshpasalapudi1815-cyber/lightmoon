@@ -100,6 +100,18 @@ public class ReminderAlarmsPlugin extends Plugin {
         call.resolve(result);
     }
 
+    // Done, Snooze and Stop asking tapped on notifications since the app last asked: { actions: [{ id, action, at, until }] }.
+    @PluginMethod
+    public void takeActions(PluginCall call) {
+        JSObject result = new JSObject();
+        try {
+            result.put("actions", new JSArray(ReminderStore.takeAnswers(getContext()).toString()));
+        } catch (JSONException err) {
+            result.put("actions", new JSArray());
+        }
+        call.resolve(result);
+    }
+
     // Says something in a minute, so the user can lock the phone and hear that it works.
     @PluginMethod
     public void test(PluginCall call) {
