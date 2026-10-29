@@ -19,6 +19,9 @@ export const wakeWord = isNativeApp ? plugins.WakeWord ?? null : null;
 // Saves a file through Android's "Save to" screen; the app's web view can't download (FileSaverPlugin.java).
 export const fileSaver = isNativeApp ? plugins.FileSaver ?? null : null;
 
+// The phone itself: calendar, calls, texts and chat messages, apps, alarms, flashlight (PhonePlugin.java).
+export const phone = isNativeApp ? plugins.Phone ?? null : null;
+
 // ---------- Talking: a speechSynthesis stand-in on Android text-to-speech ----------
 
 class NativeUtterance {

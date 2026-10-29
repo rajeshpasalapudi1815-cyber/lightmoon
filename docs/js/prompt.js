@@ -3,6 +3,7 @@ import { profile, memories, tasks, goals } from './store.js';
 import { isPast, describeAgo } from './time.js';
 import { savedPlace } from './weather.js';
 import { promptSection as lifeLevellingSection, summary as lifeLevellingSummary } from './lifelevelling.js';
+import { promptSection as phoneSection } from './phone.js';
 
 const MAX_MEMORIES = 80;
 const MAX_TASKS = 40;
@@ -39,6 +40,12 @@ export function buildSystemPrompt() {
 - Some of your own to-dos and reminders were set from Life Levelling; treat them like any other.
 - ${lifeWhen}; say "done" or "logged", not "it will take a while", unless they ask.` : '';
 
+  const phone = phoneSection();
+  const phoneGuidance = phone ? `
+- You are on their phone (see PHONE below): answer "what's on today", "did anyone call", "any messages" from it, and use the phone_* tools to add calendar events, call, message, open apps, set alarms or timers, and work the flashlight and volume.
+- Calling or sending a message needs their yes: the tool gives you a question to read back (who and what). Ask it, end your reply, and only call again with the confirm_id if their answer is yes. Never send or call on a guess; if a name matches several people, ask which.
+- Meetings in the phone's calendar are said out loud before they start on their own, so don't add reminders for them unless asked.` : '';
+
   const goalLines = goals.active().map(g => {
     const parts = [`- [#${g.id}] ${g.title}`];
     if (g.why) parts.push(`why: ${g.why}`);
@@ -66,7 +73,7 @@ WHAT YOU DO
 - For any question about weather, temperature or rain, call get_weather. It knows where the user is, so "my location" needs no city.
 - You cannot browse the internet and have no tools other than the ones provided. If you don't know something current, say so.
 - After using a tool, confirm in a few words, e.g. "Done. I'll remind you at six."
-- Never invent tasks, memories or facts. If a request is ambiguous, ask.${lifeGuidance}
+- Never invent tasks, memories or facts. If a request is ambiguous, ask.${lifeGuidance}${phoneGuidance}
 
 CURRENT TIME: ${clock} (${timeZone}). Tool times use local time in the format YYYY-MM-DDTHH:MM.
 WEATHER PLACE: ${savedPlace()?.name ?? 'not set (if they mention their city, save it with set_weather_place)'}.
@@ -79,5 +86,5 @@ ${taskLines.join('\n') || '- None.'}
 ${doneToday.length ? `Completed today: ${doneToday.join('; ')}` : ''}
 
 GOALS
-${goalLines.join('\n') || '- None set yet.'}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}`;
+${goalLines.join('\n') || '- None set yet.'}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}${phone ? `\n\n${phone}` : ''}`;
 }

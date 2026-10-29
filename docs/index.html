@@ -197,6 +197,39 @@
         <small>With the app closed, say "LightMoon", wait for the chime, then speak. It opens ready to listen; on a locked phone it asks for your fingerprint first. It listens only for its name, entirely on this phone (the first time, it downloads a 41 MB offline voice model). It uses some battery, and Android shows a microphone dot while it listens.</small>
       </div>
 
+      <div class="data-box" id="phonePowersBox" hidden>
+        <span class="field-label">Phone: <span id="phonePowersStatus" class="status-value"></span></span>
+        <span class="row">
+          <button type="button" id="allowCalendar" class="btn-ghost">Allow calendar</button>
+          <button type="button" id="allowCalls" class="btn-ghost">Allow calls</button>
+          <button type="button" id="allowTexts" class="btn-ghost">Allow texts</button>
+          <button type="button" id="allowMessages" class="btn-ghost">Allow reading messages</button>
+        </span>
+        <label>Say meetings out loud
+          <select id="meetingLead">
+            <option value="0">no</option>
+            <option value="5">5 minutes before</option>
+            <option value="10">10 minutes before</option>
+            <option value="15">15 minutes before</option>
+            <option value="30">30 minutes before</option>
+          </select>
+        </label>
+        <label>When a call comes in
+          <select id="announceCalls">
+            <option value="true">say who's calling</option>
+            <option value="false">stay quiet</option>
+          </select>
+        </label>
+        <label>When a message arrives
+          <select id="readMessages">
+            <option value="sender">say who it's from</option>
+            <option value="full">read it out</option>
+            <option value="off">stay quiet</option>
+          </select>
+        </label>
+        <small>Then you can ask LightMoon about your meetings, missed calls and messages, and have it call or text people, reply on WhatsApp or SMS, add meetings, open apps, set alarms and timers, and work the flashlight and volume. It always reads back and waits for your yes before calling or sending anything. Calls and messages are only spoken when the phone isn't on silent. When you talk to LightMoon, your upcoming meetings, recent calls and the last few messages go to the AI service along with the conversation.</small>
+      </div>
+
       <div class="data-box cloud-box">
         <span class="field-label">Sync between devices: <span id="syncStatus" class="status-value"></span></span>
         <div id="syncOffBox" class="sync-box">

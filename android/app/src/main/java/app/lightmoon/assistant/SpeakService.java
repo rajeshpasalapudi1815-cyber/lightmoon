@@ -61,6 +61,13 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
 
         String id = intent == null ? null : intent.getStringExtra("id");
         ReminderStore.Reminder reminder = id == null ? null : ReminderStore.get(this, id);
+        // Or a line to say that isn't a stored reminder (a meeting about to start, from MeetingReceiver).
+        String say = intent == null ? null : intent.getStringExtra("say");
+        if (reminder == null && say != null && !say.isEmpty()) {
+            String sayId = intent.getStringExtra("sayId");
+            long now = System.currentTimeMillis();
+            reminder = new ReminderStore.Reminder(sayId != null ? sayId : "say-" + now, intent.getStringExtra("title"), say, now, 0);
+        }
         if (reminder == null) {
             if (queue.isEmpty() && tts == null) finish();
             return START_NOT_STICKY;

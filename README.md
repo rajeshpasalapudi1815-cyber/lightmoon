@@ -29,6 +29,13 @@ Only in the Android app:
   only for its name, on the phone. On a locked phone it asks for your fingerprint first. After a restart, open
   LightMoon once to switch it back on (Android doesn't let it start listening by itself).
 - **Fingerprint unlock:** Settings → *App lock* → *Add fingerprint* uses Android's own fingerprint or face prompt.
+- **Your phone:** Settings → *Phone*, allow what you want: *calendar* (it says each meeting out loud a few minutes
+  before, even when closed, and can add meetings), *calls* (says who's calling, calls people, knows missed calls),
+  *texts* (sends SMS) and *reading messages* (Android's notification access: it notices new WhatsApp, SMS, Telegram
+  and Signal messages, says who they're from or reads them out, and replies in the chat). It also opens apps, sets
+  alarms and timers, and works the flashlight and volume. Before calling or sending anything it reads back who and
+  what and waits for your yes. Calls and messages are spoken only when the phone isn't on silent; one-time codes are
+  never read out or sent to the AI.
 
 ## Life Levelling
 
@@ -124,6 +131,7 @@ docs/                 the app (GitHub Pages publishes this folder)
   js/notifier.js      what the service worker shows when a reminder is due
   js/native.js        in the Android app: the phone's voice, listening and alarms
   js/lifelevelling.js the Life Levelling link: its summary for the AI, and requests back to it
+  js/phone.js         in the Android app: what the AI knows of the phone and its phone tools (asks before calls and sends)
   sw.js               lets it install, work offline and show notifications
 cloud/                the small cloud service (Cloudflare Worker + D1 database, free plan)
   src/worker.js       stores encrypted sync data and reminder times; sends the reminder pushes
@@ -139,6 +147,12 @@ android/              the Android app (Capacitor), which opens the live web app
     WakeWordPlugin.java         turns the wake word on and off, downloads its voice model
     UnlockActivity.java         on a locked phone, asks for the fingerprint before opening
     DeviceUnlockPlugin.java     Android's fingerprint / face prompt for the app lock
+    PhonePlugin.java            the phone for the web app: calendar, calls, texts, chat replies, apps, alarms, flashlight
+    Meetings.java               reads and adds calendar events; alarms that say meetings before they start
+    MeetingReceiver.java        says a meeting when its alarm goes off; MeetingWorker.java refreshes them every 15 min
+    CallReceiver.java           says who's calling
+    MessageListener.java        notices new chat messages (notification access), says them, replies through them
+    Contacts.java, Voice.java   contact lookup; a short spoken line; PhonePrefs.java holds the Phone settings
 scripts/android.mjs   `node scripts/android.mjs setup` once, then `node scripts/android.mjs build` for dist/LightMoon.apk
 serve.js              optional: run it on this computer at http://localhost:3000
 Start LightMoon.cmd   double-click to run serve.js and open the browser

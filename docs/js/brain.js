@@ -5,6 +5,7 @@ import { buildSystemPrompt } from './prompt.js';
 import { currentTools, runTool } from './tools.js';
 import { weatherSummary } from './weather.js';
 import { refresh as refreshLifeLevelling } from './lifelevelling.js';
+import { refresh as refreshPhone } from './phone.js';
 
 const HISTORY_LIMIT = 16;
 const MAX_TOOL_ROUNDS = 5;
@@ -14,6 +15,7 @@ const briefingRequest = weather =>
   '(Automatic message: I just opened the app. Give me a short spoken briefing, under 70 words. Greet me for the time of day. '
   + 'Mention anything overdue or due today and any upcoming reminders. Nudge one of my goals or ask how it is going. '
   + 'If Life Levelling data is in your context, use it: how ready I am today, the top of my plan, and a quest or the boss worth chasing. '
+  + 'If phone data is in your context, mention my next meetings today, and any missed calls or messages that look important. '
   + 'End with one useful suggestion. If you know little about me yet, introduce yourself in one sentence and ask what I am working towards. '
   + `Do not use tools.${weather ? ` Today's weather: ${weather} Mention it in a few words if it matters for my day, like rain, heat or cold.` : ''})`;
 
@@ -42,7 +44,7 @@ class BrainError extends Error {
 // onText receives the reply piece by piece as it arrives, so the app can show and speak it straight away.
 export async function chat(text, { onText } = {}) {
   messages.add('user', text);
-  await refreshLifeLevelling(); // quick, and only every couple of minutes
+  await Promise.all([refreshLifeLevelling(), refreshPhone()]); // quick, and only every minute or two
   const convo = [systemMessage(), ...recentHistory()];
   const actions = [];
   const written = [];
@@ -74,7 +76,7 @@ export async function chat(text, { onText } = {}) {
 }
 
 export async function briefing({ onText } = {}) {
-  const [weather] = await Promise.all([weatherSummary().catch(() => null), refreshLifeLevelling({ force: true })]);
+  const [weather] = await Promise.all([weatherSummary().catch(() => null), refreshLifeLevelling({ force: true }), refreshPhone({ force: true })]);
   const convo = [systemMessage(), ...recentHistory().slice(-6), { role: 'user', content: briefingRequest(weather) }];
   try {
     const reply = await complete(convo, null, onText);

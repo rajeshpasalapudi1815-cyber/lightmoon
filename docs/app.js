@@ -1,6 +1,7 @@
 // LightMoon app: runs entirely on this device. Chat, voice, memory, tasks, goals and reminders are all
 // handled here; the only thing sent over the internet is the conversation, to the AI service.
-import { isNativeApp, nativeAlarms, wakeWord, fileSaver } from './js/native.js'; // first: sets up voice in the Android app
+import { isNativeApp, nativeAlarms, wakeWord, fileSaver, phone } from './js/native.js'; // first: sets up voice in the Android app
+import { refresh as refreshPhone } from './js/phone.js';
 import * as store from './js/store.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
@@ -198,6 +199,7 @@ function addMessage(kind, text, actions = [], { fromHistory = false } = {}) {
 }
 
 function addActions(node, actions) {
+  actions = actions.filter(action => action.text); // e.g. "asked to confirm" steps have nothing to show
   if (!actions.length) return;
   const row = el('div', 'actions');
   for (const action of actions) {
@@ -845,6 +847,7 @@ function openSettings() {
   paintCloudSettings();
   paintPhoneSettings();
   paintWakeSettings();
+  paintPhonePowers();
   $('#settings').showModal();
 }
 
@@ -933,6 +936,60 @@ async function turnOnWakeWord() {
     $('#wakeOn').disabled = false;
     paintWakeSettings();
   }
+}
+
+// ---------- Phone (Android app): calendar, calls, texts and messages, apps, alarms (js/phone.js) ----------
+
+async function paintPhonePowers(message) {
+  $('#phonePowersBox').hidden = !phone;
+  if (!phone) return;
+  const status = await phone.status().catch(() => null);
+  if (!status) return void ($('#phonePowersStatus').textContent = 'Not available');
+  const allowed = [status.calendar && 'calendar', status.calls && 'calls', status.texts && 'texts', status.messages && 'messages'].filter(Boolean);
+  $('#phonePowersStatus').textContent = message ?? (allowed.length ? `Allowed: ${allowed.join(', ')}` : 'Nothing allowed yet');
+  $('#allowCalendar').hidden = status.calendar;
+  $('#allowCalls').hidden = status.calls || !status.telephony;
+  $('#allowTexts').hidden = status.texts || !status.telephony;
+  $('#allowMessages').hidden = status.messages;
+  $('#meetingLead').value = String(status.meetingLead);
+  $('#announceCalls').value = String(status.announceCalls);
+  $('#readMessages').value = status.readMessages;
+}
+
+// Asks Android for one of the phone permissions; a "no" there can only be undone in the phone's settings.
+async function allowPhone(request, what) {
+  $('#settingsError').textContent = '';
+  try {
+    const status = await request();
+    if (status && !status[what]) {
+      $('#settingsError').textContent = 'Android said no. To allow it later: phone Settings → Apps → LightMoon → Permissions.';
+    }
+  } catch (err) {
+    $('#settingsError').textContent = err.message;
+  }
+  paintPhonePowers();
+  refreshPhone({ force: true });
+}
+
+function savePhoneChoices() {
+  phone.configure({
+    meetingLead: Number($('#meetingLead').value),
+    announceCalls: $('#announceCalls').value === 'true',
+    readMessages: $('#readMessages').value,
+  }).catch(err => { $('#settingsError').textContent = err.message; }).finally(() => paintPhonePowers());
+}
+
+// The phone says meetings, callers and messages itself, so it needs to know how to address the user.
+function tellPhoneAddress() {
+  if (!phone) return;
+  const word = addressWord();
+  phone.configure({ address: `${word.charAt(0).toUpperCase()}${word.slice(1)}` }).catch(() => {});
+}
+
+// A meeting is starting soon, or a message came in, while LightMoon is on screen: say it here.
+function onPhoneSay({ say }) {
+  addMessage('reminder', say);
+  if (!listener.capturing) speaker.speak(say, { force: true }); // never talk over the user
 }
 
 // True when the app was opened (or brought back) because the phone heard "LightMoon".
@@ -1139,6 +1196,7 @@ function saveSettings(event) {
   });
   savePrefs();
   store.saveProfile({ userName: fields.userName.value, address: fields.address.value, assistantName: fields.assistantName.value });
+  tellPhoneAddress();
   store.saveAiConfig({
     baseUrl,
     model: fields.model.value.trim(),
@@ -1287,6 +1345,14 @@ function wireUp() {
   $('#wakeOn').addEventListener('click', turnOnWakeWord);
   $('#wakeOff').addEventListener('click', () => wakeWord.stop().finally(() => paintWakeSettings()));
   $('#wakeOpenSelf').addEventListener('click', () => wakeWord.openOverlaySettings().catch(() => {}));
+  if (phone) {
+    $('#allowCalendar').addEventListener('click', () => allowPhone(() => phone.requestCalendar(), 'calendar'));
+    $('#allowCalls').addEventListener('click', () => allowPhone(() => phone.requestCalls(), 'calls'));
+    $('#allowTexts').addEventListener('click', () => allowPhone(() => phone.requestTexts(), 'texts'));
+    // Notification access is granted on Android's own screen; the box repaints when the user comes back.
+    $('#allowMessages').addEventListener('click', () => phone.openMessageAccess().catch(err => { $('#settingsError').textContent = err.message; }));
+    for (const id of ['#meetingLead', '#announceCalls', '#readMessages']) $(id).addEventListener('change', savePhoneChoices);
+  }
 
   for (const tab of document.querySelectorAll('[role="tab"]')) {
     tab.addEventListener('click', () => {
@@ -1321,9 +1387,11 @@ function wireUp() {
   // and ask for the PIN or fingerprint again after a while away.
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && $('#settings').open) {
-      // back from the phone's battery or "display over other apps" settings
+      // back from the phone's battery, "display over other apps" or notification access settings
       paintPhoneSettings();
       paintWakeSettings();
+      paintPhonePowers();
+      refreshPhone({ force: true });
     }
     if (!document.hidden) listenAfterWake();
     if (!started) return;
@@ -1394,6 +1462,12 @@ function start({ auto = false } = {}) {
     onStatus: paintSyncStatus,
   });
 
+  if (phone) {
+    phone.addListener('meetingDue', onPhoneSay);
+    phone.addListener('messageArrived', onPhoneSay);
+    tellPhoneAddress();
+    refreshPhone({ force: true });
+  }
   if (nativeAlarms) {
     nativeAlarms.addListener('reminderDue', onReminderAlarm);
     (async () => {
