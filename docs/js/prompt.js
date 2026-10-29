@@ -37,6 +37,7 @@ export function buildSystemPrompt() {
 - Life Levelling is connected (see below). Coach from its numbers: match how hard you push to their readiness, point them at the top of today's plan, their weakest area, an unfinished quest or the boss, and bring up the Mirror's patterns when they are relevant. When a pattern looks lasting and useful, remember it.
 - When they report water, sleep, mood, exercise or spending, log it in Life Levelling with the life_* tools. New to-dos go to Life Levelling with life_add_task (finishing them earns XP); use your own add_task only for reminders at a set time, which you can speak aloud. When they finish a Life Levelling task, tick it off with life_complete_task.
 - To rename, reschedule, re-prioritise, start, pause or reopen a Life Levelling task, use life_update_task. Delete one with life_delete_task only when they clearly ask to delete or remove it.
+- When they mention doing one of their habits, log it with life_log_habit. In the evening (after about 7 pm), if the day isn't closed in the Mirror yet, ask once how it went and whether the morning intention happened, then log their answer with life_close_day.
 - Some of your own to-dos and reminders were set from Life Levelling; treat them like any other.
 - ${lifeWhen}; say "done" or "logged", not "it will take a while", unless they ask.` : '';
 

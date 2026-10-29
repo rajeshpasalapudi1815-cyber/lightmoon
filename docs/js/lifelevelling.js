@@ -80,6 +80,14 @@ function taskRefs(latest = summary()) {
   return list.map((task, index) => ({ ...task, ref: `L${index + 1}` }));
 }
 
+// "(done)", "(3/8 cups)", "(not yet)" for a habit in the summary.
+function habitProgress(h) {
+  if (h.status === 'done') return '(done)';
+  if (h.status === 'over') return '(over the limit)';
+  if (h.kind !== 'check' && h.goal) return `(${h.total}/${h.goal}${h.unit ? ` ${h.unit}` : ''})`;
+  return h.total ? `(${h.total}${h.unit ? ` ${h.unit}` : ''})` : '(not yet)';
+}
+
 // ---------- What the model is told ----------
 
 const PRIORITY = { 1: 'urgent', 2: 'high', 3: 'medium', 4: 'low', 5: 'minimal' };
@@ -121,6 +129,7 @@ export function promptSection() {
     s.quests?.boss && `Weekly boss: ${s.quests.boss.name}, ${s.quests.boss.defeated ? 'defeated' : `${s.quests.boss.hpLeft}/${s.quests.boss.hp} HP left`}`,
     s.mirror && join([
       s.mirror.intention ? `Morning intention: "${s.mirror.intention}"${s.mirror.why ? ` (why: ${s.mirror.why})` : ''}${s.mirror.ifThen ? `, plan: ${s.mirror.ifThen}` : ''}` : 'No morning intention set yet today',
+      s.mirror.eveningDone ? 'The day is closed in the Mirror' : 'The day is not closed in the Mirror yet',
       s.mirror.weeklyFocus && `weekly focus: ${s.mirror.weeklyFocus}`,
       s.mirror.read?.length && `Mirror says: ${s.mirror.read.join(' ')}`,
     ], '. '),
@@ -137,6 +146,7 @@ export function promptSection() {
       s.money.warnings?.length && `warnings: ${s.money.warnings.join('; ')}`,
     ], ', '),
     s.lessons?.dueCount ? `Lessons due for review: ${s.lessons.dueCount} (${(s.lessons.due ?? []).join(', ')})` : null,
+    s.habits?.length && `Habits today: ${s.habits.map((h, i) => `[H${i + 1}] ${h.name} ${habitProgress(h)}`).join('; ')}`,
     s.actions?.length && `Recent requests you sent: ${s.actions.slice(0, 5).map(a => `${a.ok ? 'done' : 'FAILED'}: ${a.message}`).join('; ')}`,
   ];
   const where = onPhone(s) ? '; it is an app on their phone and only updates while it is open' : '';
@@ -213,6 +223,27 @@ export const LIFE_TOOLS = [
     ['intention'],
   ),
   tool(
+    'life_log_habit',
+    'Tick off or count a Life Levelling habit the user says they did ("I meditated", "two more glasses of water", "took my vitamins").',
+    {
+      habit: { type: 'string', description: 'The habit reference shown as [H2], without brackets, e.g. "H2".' },
+      amount: { type: 'number', description: 'For counted habits: how much (cups, minutes, steps...). Leave out for a simple tick.' },
+      note: { type: 'string', description: 'Optional short note.' },
+    },
+    ['habit'],
+  ),
+  tool(
+    'life_close_day',
+    "Close the day in Life Levelling's Mirror (the evening reflection): whether today's intention happened, a win, a lesson, and a 1-5 rating. "
+      + 'Ask them in the evening, then log what they said; leave out what they did not say.',
+    {
+      outcome: { type: 'string', enum: ['done', 'partly', 'missed'], description: "Did the morning intention happen?" },
+      win: { type: 'string', description: 'The best thing about today, in their words.' },
+      lesson: { type: 'string', description: 'What they learned or would do differently.' },
+      rating: { type: 'integer', minimum: 1, maximum: 5, description: 'How the day felt, 1 to 5.' },
+    },
+  ),
+  tool(
     'life_log_expense',
     'Record money the user spent, in Life Levelling.',
     {
@@ -270,6 +301,20 @@ export const lifeHandlers = {
   life_delete_task({ task }) {
     const found = findTask(task);
     return send('delete_task', { taskId: found.id }, `Deleted from Life Levelling: ${found.title}`);
+  },
+  life_log_habit({ habit, amount, note }) {
+    const wanted = String(habit ?? '').trim().replace(/^\[|\]$/g, '').toUpperCase();
+    const index = /^H(\d+)$/.exec(wanted)?.[1];
+    const found = index && summary()?.habits?.[Number(index) - 1];
+    if (!found) throw new Error(`There is no Life Levelling habit ${habit}. Use a reference like H2 from your context.`);
+    const fields = { habitId: found.id, ...(amount != null && { amount: Number(amount) }), ...(note && { note }) };
+    return send('log_habit', fields, `Logged in Life Levelling: ${found.name}${amount != null ? ` ${amount}${found.unit ? ` ${found.unit}` : ''}` : ''}`);
+  },
+  life_close_day({ outcome, win, lesson, rating }) {
+    const fields = { outcome, win, lesson, rating };
+    for (const key of Object.keys(fields)) if (fields[key] == null || fields[key] === '') delete fields[key];
+    if (!Object.keys(fields).length) throw new Error('Ask how the day went first: outcome, a win, a lesson or a rating.');
+    return send('close_day', fields, 'Day closed in Life Levelling');
   },
   life_add_task({ title, priority, due_date, due_time }) {
     const name = String(required(title, 'title')).trim().slice(0, 200);

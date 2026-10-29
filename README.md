@@ -49,7 +49,9 @@ game-style growth app. In LightMoon turn on **Sync between devices** and copy th
 **Settings → LightMoon assistant** and paste it. From then on LightMoon knows your level, quests, today's plan,
 readiness, health, money and the Mirror's patterns, coaches from them, and can log water, sleep, mood, exercise,
 spending, tasks and your morning intention there ("I drank two glasses", "I finished the report"). It can also
-change your Life Levelling tasks: rename, reschedule, re-prioritise, start, pause, reopen or delete them.
+change your Life Levelling tasks (rename, reschedule, re-prioritise, start, pause, reopen or delete them), tick off
+your habits ("I took my vitamins", "meditated for 15 minutes"), and in the evening ask how the day went and close it
+in the Mirror (did the intention happen, your win, your lesson, a rating).
 Life Levelling sends its summary through LightMoon's cloud every few minutes, encrypted with the sync code,
 and applies LightMoon's requests within a minute (its phone app: when it's open).
 
