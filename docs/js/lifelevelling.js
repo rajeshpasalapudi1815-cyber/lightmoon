@@ -1,15 +1,16 @@
 // Life Levelling link. Life Levelling is the user's game-style growth app (level, quests, plan, health,
-// money, the Mirror), running on their computer. When they connect it (Life Levelling → Settings →
-// LightMoon, with this device's sync code), it leaves an encrypted summary of their day in LightMoon's
-// cloud every few minutes and applies the requests LightMoon leaves there: log water, tick off a task...
-// So LightMoon can coach from their real numbers and act on them from anywhere.
+// money, the Mirror), running on their computer or as its own phone app. When they connect it (Life
+// Levelling → Settings → LightMoon, with this device's sync code), it leaves an encrypted summary of their
+// day in LightMoon's cloud every few minutes and applies the requests LightMoon leaves there: log water,
+// tick off a task... So LightMoon can coach from their real numbers and act on them from anywhere.
+// The phone app only does this while it is open (the summary says runsOn: 'phone').
 import { readFeed, sendRequest, syncCode } from './cloud.js';
 import { localStamp } from './time.js';
 
 const APP = 'lifelevelling';
 const KEY = 'assistant.lifelevelling'; // this device only; always re-read from the cloud
 const REFRESH_AFTER_MS = 2 * 60_000;
-const STALE_AFTER_MS = 36 * 3_600_000; // the computer has been off for a long while: don't coach from it
+const STALE_AFTER_MS = 36 * 3_600_000; // not heard from in a long while: don't coach from it
 const FETCH_TIMEOUT_MS = 4000;
 
 let state = load();
@@ -40,6 +41,8 @@ export function summary() {
 
 export const isConnected = () => Boolean(summary());
 
+const onPhone = (latest = state?.summary) => latest?.runsOn === 'phone';
+
 // Fetches a fresh summary (at most every couple of minutes, and never holding a reply up for long).
 export async function refresh({ force = false } = {}) {
   if (!syncCode()) return null;
@@ -64,7 +67,8 @@ export function describe() {
   if (latest.disconnected) return 'Disconnected in Life Levelling.';
   const minutes = Math.round((Date.now() - latest.generatedAt) / 60_000);
   const age = minutes < 1 ? 'just now' : minutes < 120 ? `${minutes} min ago` : `${Math.round(minutes / 60)} hours ago`;
-  return `Connected${latest.you?.name ? ` as ${latest.you.name}` : ''}, updated ${age}${summary() ? '' : ' (too old to use; is the computer on?)'}.`;
+  const tooOld = onPhone(latest) ? ' (too old to use; open Life Levelling to refresh it)' : ' (too old to use; is the computer on?)';
+  return `Connected${latest.you?.name ? ` as ${latest.you.name}` : ''}, updated ${age}${summary() ? '' : tooOld}.`;
 }
 
 // Life Levelling task ids are long; the model sees short references (L1, L2...) instead.
@@ -131,11 +135,12 @@ export function promptSection() {
     s.lessons?.dueCount ? `Lessons due for review: ${s.lessons.dueCount} (${(s.lessons.due ?? []).join(', ')})` : null,
     s.actions?.length && `Recent requests you sent: ${s.actions.slice(0, 5).map(a => `${a.ok ? 'done' : 'FAILED'}: ${a.message}`).join('; ')}`,
   ];
-  return `LIFE LEVELLING (their game-style growth app; data from ${ago(s.generatedAt)})
+  const where = onPhone(s) ? '; it is an app on their phone and only updates while it is open' : '';
+  return `LIFE LEVELLING (their game-style growth app; data from ${ago(s.generatedAt)}${where})
 ${lines.filter(Boolean).join('\n')}`;
 }
 
-// ---------- Tools: requests Life Levelling applies within a minute ----------
+// ---------- Tools: requests Life Levelling applies within a minute (on the phone: when its app is open) ----------
 
 function tool(name, description, properties, required = []) {
   return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
@@ -195,7 +200,10 @@ export const LIFE_TOOLS = [
 
 async function send(type, fields, chip) {
   await sendRequest(APP, { type, ...fields, at: Date.now(), date: localStamp().slice(0, 10) });
-  return { text: chip, result: `${chip}. Life Levelling applies it within a minute (while their computer is on).` };
+  const when = onPhone()
+    ? 'Life Levelling applies it the next time its app is open on their phone (within a minute if it is open now).'
+    : 'Life Levelling applies it within a minute (while their computer is on).';
+  return { text: chip, result: `${chip}. ${when}` };
 }
 
 function findTask(ref) {
