@@ -16,8 +16,8 @@ model becomes the phone's offline brain.
    or a reply that says much the same. You never see or hear its answers. Settings shows how often it agrees,
    for each kind of request.
 4. **It takes over, bit by bit.** If you switch on *Let our model handle a kind once it's reliable*, a kind of
-   request it has got right at least 95 times in 100, over at least 50 tries, is answered by our model instead.
-   If it has any trouble, the big AI answers as before.
+   request it has got right at least 95 times in 100, over at least 50 tries, and answers within about 15
+   seconds, is answered by our model instead. If it has any trouble, the big AI answers as before.
 5. Repeat 2 to 4 now and then: more lessons make it better, and each new model is scored afresh.
 
 ## What you do
@@ -54,7 +54,10 @@ internet and the GPU. If Kaggle doesn't work for you,
 runs the same notebook (*Runtime* → *Change runtime type* → **T4 GPU**, then *Run all*).
 
 This laptop can't do the teaching itself: it has no graphics card that training tools can use. It runs the
-finished model fine.
+model, but slowly: reading LightMoon's long instructions takes it 10 seconds to 2 minutes per answer. That's
+fine for the comparison, which happens quietly in the background, but too slow to keep you waiting, so here our
+model won't take over any kind of request however reliable it gets (the card says "too slow to hand over").
+A faster computer, or the phone's own engine, can.
 
 ## What is kept, and what isn't
 

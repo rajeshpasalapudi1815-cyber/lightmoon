@@ -20,6 +20,7 @@ const SIMILAR_TEXT = 0.5; // the same, for a text argument such as a task's titl
 const MODEL_CHECK_MS = 5 * 60_000; // how long "our model is (not) running" is believed
 const SHADOW_TIMEOUT_MS = 180_000; // a laptop CPU reads a long prompt slowly, and nobody is waiting
 const ROUTE_TIMEOUT_MS = 30_000; // someone is waiting: past this, the big model answers instead
+const FAST_ENOUGH_SECONDS = 15; // a kind is handed over only if our model answers it this fast on average
 const MAX_STEPS = 4; // answers compared per exchange
 const MAX_QUEUE = 8;
 
@@ -206,11 +207,13 @@ export async function answerLocally(convo, tools, onText) {
   const model = await localModel();
   if (!model || !trustedKinds(model.id).length) return null;
   try {
+    const started = Date.now();
     const answer = await askLocal(model, convo, tools, ROUTE_TIMEOUT_MS);
+    const seconds = (Date.now() - started) / 1000;
     const kinds = kindsOf(answer, { tools, afterTool: convo.at(-1)?.role === 'tool', convo });
     const used = kinds.every(kind => trustedKinds(model.id).includes(kind));
     if (!tried.has(convo)) tried.set(convo, new Map());
-    tried.get(convo).set(convo.length, { modelId: model.id, answer, used });
+    tried.get(convo).set(convo.length, { modelId: model.id, answer, seconds, used });
     if (!used) return null;
     if (answer.content) onText?.(answer.content);
     return answer;
@@ -296,8 +299,11 @@ async function compareQueued() {
       }
       const { prefix, expected, tools, attempt } = queue.shift();
       try {
-        const answer = attempt?.modelId === model.id ? attempt.answer : await askLocal(model, prefix, tools, SHADOW_TIMEOUT_MS);
-        score(model.id, compare(expected, answer, { tools, afterTool: prefix.at(-1)?.role === 'tool', convo: prefix }));
+        const reuse = attempt?.modelId === model.id;
+        const started = Date.now();
+        const answer = reuse ? attempt.answer : await askLocal(model, prefix, tools, SHADOW_TIMEOUT_MS);
+        const seconds = reuse ? attempt.seconds : (Date.now() - started) / 1000;
+        score(model.id, compare(expected, answer, { tools, afterTool: prefix.at(-1)?.role === 'tool', convo: prefix }), seconds);
       } catch (err) {
         console.warn('[learning] shadow comparison skipped:', err.message);
         known = null; // check again whether it's running
@@ -382,13 +388,14 @@ function compare(expected, answer, context) {
   return { kinds, agree, similar };
 }
 
-function score(modelId, { kinds, agree, similar }) {
+function score(modelId, { kinds, agree, similar }, seconds) {
   const { scores } = prefs();
   // Scores start again for each new model: a new model's reliability is unknown.
   const mine = scores[modelId] ?? { since: today(), kinds: {} };
   for (const kind of kinds) {
-    const tally = (mine.kinds[kind] ??= { cases: 0, agreed: 0, similar: 0, talks: 0 });
+    const tally = (mine.kinds[kind] ??= { cases: 0, agreed: 0, similar: 0, talks: 0, seconds: 0 });
     tally.cases++;
+    tally.seconds = (tally.seconds ?? 0) + seconds;
     if (agree) tally.agreed++;
     if (similar !== null) {
       tally.similar += similar;
@@ -399,7 +406,10 @@ function score(modelId, { kinds, agree, similar }) {
   paintIfOpen();
 }
 
-const isTrusted = tally => tally.cases >= TRUST_CASES && tally.agreed / tally.cases >= TRUST_AGREEMENT;
+const averageSeconds = tally => (tally.seconds ?? Infinity) / tally.cases;
+const isReliable = tally => tally.cases >= TRUST_CASES && tally.agreed / tally.cases >= TRUST_AGREEMENT;
+// Handed over only when it is right and also quick enough for someone waiting (a slow computer never qualifies).
+const isTrusted = tally => isReliable(tally) && averageSeconds(tally) <= FAST_ENOUGH_SECONDS;
 
 export function trustedKinds(modelId) {
   const kinds = prefs().scores[modelId]?.kinds ?? {};
@@ -458,9 +468,11 @@ async function paint(message = '') {
     name.className = 'perm-name';
     name.textContent = kindName(kind);
     const detail = document.createElement('small');
-    const handles = settings.route && isTrusted(tally) ? ', so it answers these itself' : isTrusted(tally) ? ', reliable' : '';
+    const handles = !isReliable(tally) ? '' : !isTrusted(tally) ? '; reliable, but too slow to hand over'
+      : settings.route ? '; it answers these itself' : '; reliable';
     const wording = tally.talks ? `; replies ${Math.round((100 * tally.similar) / tally.talks)}% alike` : '';
-    detail.textContent = `agreed ${tally.agreed} of ${tally.cases}${wording}${handles}`;
+    const speed = Number.isFinite(averageSeconds(tally)) ? `; about ${Math.round(averageSeconds(tally))} s each` : '';
+    detail.textContent = `agreed ${tally.agreed} of ${tally.cases}${wording}${speed}${handles}`;
     text.append(name, detail);
     const share = document.createElement('span');
     share.className = 'card-status';
