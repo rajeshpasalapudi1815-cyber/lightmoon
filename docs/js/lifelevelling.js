@@ -75,7 +75,8 @@ export function describe() {
 function taskRefs(latest = summary()) {
   if (!latest) return [];
   const seen = new Set();
-  const list = [...(latest.plan?.today ?? []), ...(latest.tasks ?? [])].filter(t => t?.id && !seen.has(t.id) && seen.add(t.id));
+  const done = (latest.doneToday ?? []).map(t => ({ ...t, doneToday: true }));
+  const list = [...(latest.plan?.today ?? []), ...(latest.tasks ?? []), ...done].filter(t => t?.id && !seen.has(t.id) && seen.add(t.id));
   return list.map((task, index) => ({ ...task, ref: `L${index + 1}` }));
 }
 
@@ -94,7 +95,9 @@ export function promptSection() {
   const refs = taskRefs(s);
   const refOf = id => refs.find(t => t.id === id)?.ref;
   const planIds = new Set((s.plan?.today ?? []).map(t => t.id));
-  const taskLine = t => join([`[${refOf(t.id)}] ${t.title}`, PRIORITY[t.priority], t.due && `due ${t.due}`, t.reason], ' | ');
+  const taskLine = t => join([
+    `[${refOf(t.id)}] ${t.title}`, PRIORITY[t.priority], t.status === 'in_progress' && 'started', t.due && `due ${t.due}`, t.reason, t.notes && `notes: ${t.notes}`,
+  ], ' | ');
   const you = s.you ?? {};
   const h = s.health;
   const lines = [
@@ -111,8 +114,9 @@ export function promptSection() {
     s.plan && `Today's plan (they usually finish about ${s.plan.capacity}${s.plan.overloaded ? ', list is overloaded' : ''}): ${join(s.plan.message ?? [], ' ')}`,
     ...(s.plan?.today ?? []).map(t => `  ${taskLine(t)}`),
     s.plan?.stuck?.length && `Stuck: ${s.plan.stuck.map(t => `[${refOf(t.id)}] ${t.title} (${t.advice})`).join('; ')}`,
-    refs.some(t => !planIds.has(t.id)) && 'Other open tasks:',
-    ...refs.filter(t => !planIds.has(t.id)).slice(0, 15).map(t => `  ${taskLine(t)}`),
+    refs.some(t => !planIds.has(t.id) && !t.doneToday) && 'Other open tasks:',
+    ...refs.filter(t => !planIds.has(t.id) && !t.doneToday).slice(0, 15).map(t => `  ${taskLine(t)}`),
+    refs.some(t => t.doneToday) && `Finished today: ${refs.filter(t => t.doneToday).map(t => `[${t.ref}] ${t.title}`).join('; ')}`,
     s.quests?.daily?.length && `Daily quests: ${s.quests.daily.map(q => `${q.title} ${q.done ? 'done' : `${q.progress}/${q.target}${q.unit ? ` ${q.unit}` : ''}`}`).join('; ')}`,
     s.quests?.boss && `Weekly boss: ${s.quests.boss.name}, ${s.quests.boss.defeated ? 'defeated' : `${s.quests.boss.hpLeft}/${s.quests.boss.hp} HP left`}`,
     s.mirror && join([
@@ -165,6 +169,28 @@ export const LIFE_TOOLS = [
     ['kind'],
   ),
   tool('life_complete_task', 'Tick off a Life Levelling task the user says they finished. It earns them XP and gold.', { task: TASK_REF }, ['task']),
+  tool(
+    'life_update_task',
+    'Change a Life Levelling task: rename it, edit its notes, change its priority, move or clear its due date and time, start it, '
+      + 'pause it, or reopen one finished today by mistake. Send only what changes.',
+    {
+      task: TASK_REF,
+      title: { type: 'string', description: 'New title.' },
+      notes: { type: 'string', description: 'New notes (replaces the old ones); an empty string clears them.' },
+      priority: { type: 'integer', minimum: 1, maximum: 5, description: '1 urgent, 2 high, 3 medium, 4 low, 5 minimal.' },
+      due_date: { type: 'string', description: 'New due date, YYYY-MM-DD.' },
+      due_time: { type: 'string', description: 'New due time, HH:MM.' },
+      clear_due: { type: 'boolean', description: 'true to remove the due date and time ("someday").' },
+      status: { type: 'string', enum: ['in_progress', 'pending'], description: 'in_progress to start it; pending to pause it or reopen a finished one.' },
+    },
+    ['task'],
+  ),
+  tool(
+    'life_delete_task',
+    'Delete a Life Levelling task for good. Only when the user clearly asks to delete or remove it; if they finished it, use life_complete_task.',
+    { task: TASK_REF },
+    ['task'],
+  ),
   tool(
     'life_add_task',
     'Add a task to Life Levelling (their main to-do list, where finishing earns XP).',
@@ -232,6 +258,18 @@ export const lifeHandlers = {
   life_complete_task({ task }) {
     const found = findTask(task);
     return send('complete_task', { taskId: found.id }, `Ticked off in Life Levelling: ${found.title}`);
+  },
+  life_update_task({ task, title, notes, priority, due_date, due_time, clear_due, status }) {
+    const found = findTask(task);
+    const changes = { title, notes, priority, dueDate: due_date, dueTime: due_time, clearDue: clear_due === true || undefined, status };
+    for (const key of Object.keys(changes)) if (changes[key] === undefined || changes[key] === null) delete changes[key];
+    if (!Object.keys(changes).length) throw new Error('Say what to change: title, notes, priority, due_date, due_time, clear_due or status.');
+    const what = status === 'in_progress' ? 'Started' : status === 'pending' && found.doneToday ? 'Reopened' : 'Changed';
+    return send('update_task', { taskId: found.id, ...changes }, `${what} in Life Levelling: ${title ?? found.title}`);
+  },
+  life_delete_task({ task }) {
+    const found = findTask(task);
+    return send('delete_task', { taskId: found.id }, `Deleted from Life Levelling: ${found.title}`);
   },
   life_add_task({ title, priority, due_date, due_time }) {
     const name = String(required(title, 'title')).trim().slice(0, 200);

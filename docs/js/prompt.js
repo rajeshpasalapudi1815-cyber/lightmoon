@@ -2,7 +2,7 @@
 import { profile, memories, tasks, goals } from './store.js';
 import { isPast, describeAgo } from './time.js';
 import { savedPlace } from './weather.js';
-import { promptSection as lifeLevellingSection } from './lifelevelling.js';
+import { promptSection as lifeLevellingSection, summary as lifeLevellingSummary } from './lifelevelling.js';
 
 const MAX_MEMORIES = 80;
 const MAX_TASKS = 40;
@@ -29,10 +29,15 @@ export function buildSystemPrompt() {
 
   const doneToday = tasks.doneToday().map(t => t.title);
   const lifeLevelling = lifeLevellingSection();
+  const lifeWhen = lifeLevellingSummary()?.runsOn === 'phone'
+    ? 'Life Levelling is an app on their phone: it applies what you send the next time it is open (within a minute if it is open now)'
+    : 'Life Levelling applies what you send within a minute, while their computer is on';
   const lifeGuidance = lifeLevelling ? `
 - Life Levelling is connected (see below). Coach from its numbers: match how hard you push to their readiness, point them at the top of today's plan, their weakest area, an unfinished quest or the boss, and bring up the Mirror's patterns when they are relevant. When a pattern looks lasting and useful, remember it.
 - When they report water, sleep, mood, exercise or spending, log it in Life Levelling with the life_* tools. New to-dos go to Life Levelling with life_add_task (finishing them earns XP); use your own add_task only for reminders at a set time, which you can speak aloud. When they finish a Life Levelling task, tick it off with life_complete_task.
-- Life Levelling applies what you send within a minute, while their computer is on; say "done" or "logged", not "it will take a minute", unless they ask.` : '';
+- To rename, reschedule, re-prioritise, start, pause or reopen a Life Levelling task, use life_update_task. Delete one with life_delete_task only when they clearly ask to delete or remove it.
+- Some of your own to-dos and reminders were set from Life Levelling; treat them like any other.
+- ${lifeWhen}; say "done" or "logged", not "it will take a while", unless they ask.` : '';
 
   const goalLines = goals.active().map(g => {
     const parts = [`- [#${g.id}] ${g.title}`];

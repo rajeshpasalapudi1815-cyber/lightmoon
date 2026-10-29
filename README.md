@@ -36,9 +36,15 @@ LightMoon can connect to [Life Levelling](https://github.com/rajeshpasalapudi181
 game-style growth app. In LightMoon turn on **Sync between devices** and copy the code; in Life Levelling open
 **Settings → LightMoon assistant** and paste it. From then on LightMoon knows your level, quests, today's plan,
 readiness, health, money and the Mirror's patterns, coaches from them, and can log water, sleep, mood, exercise,
-spending, tasks and your morning intention there ("I drank two glasses", "I finished the report").
+spending, tasks and your morning intention there ("I drank two glasses", "I finished the report"). It can also
+change your Life Levelling tasks: rename, reschedule, re-prioritise, start, pause, reopen or delete them.
 Life Levelling sends its summary through LightMoon's cloud every few minutes, encrypted with the sync code,
-and applies LightMoon's requests within a minute, while its computer is on.
+and applies LightMoon's requests within a minute (its phone app: when it's open).
+
+It works the other way too: Life Levelling shows LightMoon's to-dos and reminders on its Tasks page and can add,
+tick off or delete them, and any task there can get a LightMoon reminder ("Ring with LightMoon" in its details).
+It changes LightMoon's synced copy the way another LightMoon device would, so the Android app rings those
+reminders even when it's closed (it checks the copy every 15 minutes).
 
 ## Or install it from Chrome
 
