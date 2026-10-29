@@ -95,9 +95,11 @@ public class PhonePlugin extends Plugin {
         return value instanceof Number ? Long.valueOf(Math.round(((Number) value).doubleValue())) : fallback;
     }
 
+    // Not a ternary: "value == null ? fallback : (int) ..." unboxes a null fallback and crashes the app.
     private static Integer intArg(PluginCall call, String name, Integer fallback) {
         Long value = longArg(call, name, null);
-        return value == null ? fallback : (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, value));
+        if (value == null) return fallback;
+        return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, value));
     }
 
     // ---------- Permissions and settings ----------
@@ -129,7 +131,11 @@ public class PhonePlugin extends Plugin {
 
     @PluginMethod
     public void status(PluginCall call) {
-        call.resolve(currentStatus());
+        try {
+            call.resolve(currentStatus());
+        } catch (RuntimeException err) {
+            call.reject("Couldn't read the phone settings.");
+        }
     }
 
     @PluginMethod
@@ -177,8 +183,18 @@ public class PhonePlugin extends Plugin {
 
     // { meetingLead (minutes, 0 = off), announceCalls, readMessages ("off" | "sender" | "full"), address,
     //   briefingMorning, briefingEvening ("07:00" or "" = off), place: { name, latitude, longitude } for the weather }
+    // The app calls this every time it opens, so nothing here may escape: Capacitor turns it into a crash.
     @PluginMethod
     public void configure(PluginCall call) {
+        try {
+            saveConfiguration(call);
+            call.resolve(currentStatus());
+        } catch (RuntimeException err) {
+            call.reject("Couldn't save the phone settings.");
+        }
+    }
+
+    private void saveConfiguration(PluginCall call) {
         android.content.SharedPreferences.Editor edit = PhonePrefs.get(getContext()).edit();
         Integer lead = intArg(call, "meetingLead", null);
         if (lead != null) edit.putInt("meetingLead", Math.max(0, Math.min(lead, 120)));
@@ -203,7 +219,6 @@ public class PhonePlugin extends Plugin {
         Meetings.reschedule(getContext());
         if (PhonePrefs.meetingLead(getContext()) > 0 && Meetings.canRead(getContext())) MeetingWorker.start(getContext());
         else MeetingWorker.stop(getContext());
-        call.resolve(currentStatus());
     }
 
     // { kind: "morning" | "evening" }: says that briefing now, to hear what it sounds like.
@@ -426,8 +441,12 @@ public class PhonePlugin extends Plugin {
             call.reject("Say what to reply.");
             return;
         }
-        if (MessageListener.reply(getContext(), conversation, text)) call.resolve();
-        else call.reject("That chat's notification is gone, so it can't be answered from here. Open the app to reply.");
+        try {
+            if (MessageListener.reply(getContext(), conversation, text)) call.resolve();
+            else call.reject("That chat's notification is gone, so it can't be answered from here. Open the app to reply.");
+        } catch (RuntimeException err) {
+            call.reject("That chat didn't take the reply. Open the app to reply.");
+        }
     }
 
     // { number, text }: opens the WhatsApp chat with the message written in; the user taps send.
@@ -582,12 +601,16 @@ public class PhonePlugin extends Plugin {
             case "previous": key = KeyEvent.KEYCODE_MEDIA_PREVIOUS; break;
             default: key = KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE;
         }
-        AudioManager audio = getContext().getSystemService(AudioManager.class);
-        audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
-        audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
-        JSObject result = new JSObject();
-        result.put("musicActive", audio.isMusicActive());
-        call.resolve(result);
+        try {
+            AudioManager audio = getContext().getSystemService(AudioManager.class);
+            audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
+            audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
+            JSObject result = new JSObject();
+            result.put("musicActive", audio.isMusicActive());
+            call.resolve(result);
+        } catch (RuntimeException err) {
+            call.reject("The music app didn't take it.");
+        }
     }
 
     // { destination, mode?: "drive" | "walk" | "bike" | "transit" }: turn-by-turn directions in Google Maps.
@@ -675,11 +698,15 @@ public class PhonePlugin extends Plugin {
     // -> { percent, charging }
     @PluginMethod
     public void battery(PluginCall call) {
-        BatteryManager battery = getContext().getSystemService(BatteryManager.class);
-        JSObject result = new JSObject();
-        result.put("percent", battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY));
-        result.put("charging", Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && battery.isCharging());
-        call.resolve(result);
+        try {
+            BatteryManager battery = getContext().getSystemService(BatteryManager.class);
+            JSObject result = new JSObject();
+            result.put("percent", battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY));
+            result.put("charging", Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && battery.isCharging());
+            call.resolve(result);
+        } catch (RuntimeException err) {
+            call.reject("Couldn't read the battery.");
+        }
     }
 
     // { stream: "media" | "ring" | "alarm", percent: 0-100 }
