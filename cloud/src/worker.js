@@ -146,9 +146,13 @@ async function route(request, env) {
   if (method === 'GET' && pathname === '/vapid-public-key') return json({ key: env.VAPID_PUBLIC_KEY });
 
   const [section, space, part, name, item, ...rest] = pathname.split('/').filter(Boolean);
-  if (section === 'backups' && BACKUP_ID.test(space ?? '') && !part) {
+  if (section === 'backups' && BACKUP_ID.test(space ?? '') && (!part || (part === 'meta' && !name))) {
     const key = request.headers.get('X-Backup-Key') ?? '';
     if (!BACKUP_KEY.test(key)) throw new HttpError(401, 'Backup key required');
+    if (part === 'meta') {
+      if (method === 'GET') return getBackupMeta(env, space, key);
+      throw new HttpError(404, 'Not found');
+    }
     if (method === 'GET') return getBackup(env, space, key);
     if (method === 'PUT') return putBackup(env, space, key, await readJson(request, MAX_BACKUP_BODY_BYTES));
     if (method === 'DELETE') return deleteBackup(env, space, key);
@@ -204,6 +208,15 @@ async function getBackup(env, id, key) {
   await checkBackupKey(env, row, key);
   const { results } = await env.DB.prepare('SELECT data FROM backup_parts WHERE backup_id = ? ORDER BY part').bind(id).all();
   return json({ blob: results.map(r => r.data).join(''), updatedAt: row.updated_at, size: row.size });
+}
+
+// Only when the backup last changed: a phone and a computer sharing one check this often (whenever they come
+// to the front) and download the backup only when the other one has made a newer copy.
+async function getBackupMeta(env, id, key) {
+  const row = await env.DB.prepare('SELECT * FROM backups WHERE id = ?').bind(id).first();
+  if (!row) return json({ error: 'Not found' }, 404);
+  await checkBackupKey(env, row, key);
+  return json({ updatedAt: row.updated_at, size: row.size });
 }
 
 // { blob, newKey?, ifUpdatedAt? }: the first upload creates the backup; newKey changes the key (after a
