@@ -55,16 +55,18 @@ const engineReady = (async () => {
   }
 })();
 
-// Queued behind what is already being said, so sentences follow each other without a gap. If the chosen voice
-// fails (an online voice with no connection), the phone's own voice for that language says it instead.
-async function sayOnAndroid(text, utterance) {
+// Queued behind what is already being said, so sentences follow each other without a gap. If an online voice
+// fails (no connection), the app says this sentence and the ones after it again with an offline voice, in order;
+// if another voice fails, the phone's own voice for that language says it instead.
+async function sayOnAndroid(text, utterance, wasStopped) {
   const voice = utterance.voice ? androidVoices.findIndex(v => v.name === utterance.voice.name) : -1;
   const lang = utterance.voice?.lang || utterance.lang || 'en-GB';
   const options = { text, lang, rate: utterance.rate || 1, voice, queueStrategy: 1 };
   try {
     return await plugins.TextToSpeech.speak(options);
   } catch (err) {
-    if (voice < 0 && lang === 'en-US') throw err;
+    if (utterance.voice?.localService === false) throw Object.assign(new Error('network'), { type: 'error', error: 'network' });
+    if (wasStopped() || (voice < 0 && lang === 'en-US')) throw err;
     const fallbackLang = /language/i.test(String(err?.message ?? err)) ? 'en-US' : lang;
     return plugins.TextToSpeech.speak({ ...options, voice: -1, lang: fallbackLang });
   }
@@ -96,7 +98,7 @@ const nativeSynthesis = {
     });
     this.inFlight.add(interrupt);
     engineReady
-      .then(() => (stopped ? null : Promise.race([sayOnAndroid(text, utterance), interrupted])))
+      .then(() => (stopped ? null : Promise.race([sayOnAndroid(text, utterance, () => stopped), interrupted])))
       .then(() => utterance.onend?.(), err => utterance.onerror?.(err))
       .finally(() => this.inFlight.delete(interrupt));
   },

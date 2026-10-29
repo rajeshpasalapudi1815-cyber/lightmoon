@@ -258,6 +258,8 @@ function streamReply({ quiet = false } = {}) {
           details.append(el('summary', '', 'Details'), el('code', '', out.detail));
           errorNode.append(details);
         }
+        const end = lastSentenceEnd(unspoken);
+        if (end > 0) say(unspoken.slice(0, end)); // finished sentences that were waiting to be said
         say(out.reply);
         return;
       }
@@ -339,6 +341,8 @@ function chime() {
 // ---------- Talking back (speech synthesis) ----------
 
 const isOnlineVoice = voice => voice?.localService === false;
+// What an online voice reports when it can't reach its service (other errors aren't the connection's fault).
+const CONNECTION_ERRORS = ['network', 'synthesis-failed', 'synthesis-unavailable', 'voice-unavailable'];
 
 // The browser lists its voices a moment after the page opens (the phone, once Android's voice has started).
 // Speaking before then would use whatever voice comes first, and switch voices mid-reply.
@@ -350,7 +354,7 @@ const voicesLoaded = new Promise(resolve => {
 
 const speaker = {
   active: false,
-  pending: 0,
+  queue: [], // phrases handed to the voice and not finished yet, in order
   generation: 0, // bumped by stop() so callbacks from cancelled speech are ignored
   voices: [],
   watchdog: null,
@@ -379,7 +383,8 @@ const speaker = {
     refresh();
     const go = () => {
       if (generation !== this.generation) return;
-      for (const phrase of phrases) this.say(phrase, voice, rate, generation);
+      if (!this.voices.length) this.voices = speechSynthesis.getVoices(); // they've only just arrived
+      for (const phrase of phrases) this.say({ phrase, voiceName: voice, rate, generation });
       // Some browsers occasionally skip the "end" event; don't stay stuck in speaking mode.
       clearInterval(this.watchdog);
       this.watchdog = setInterval(() => {
@@ -390,10 +395,11 @@ const speaker = {
     else voicesLoaded.then(go);
   },
 
-  // One phrase. If an online voice fails (the connection dropped), it is said again with an offline voice.
-  say(phrase, voiceName, rate, generation) {
-    const chosen = this.pickVoice(voiceName);
-    const utterance = new SpeechSynthesisUtterance(phrase);
+  // One phrase: { phrase, voiceName, rate, generation }. If an online voice fails (the connection dropped), this
+  // phrase and the ones after it are said again, in order, with an offline voice.
+  say(entry) {
+    const chosen = this.pickVoice(entry.voiceName);
+    const utterance = new SpeechSynthesisUtterance(entry.phrase);
     if (chosen) {
       utterance.voice = chosen;
       utterance.lang = chosen.lang;
@@ -401,24 +407,41 @@ const speaker = {
       // The phone's own voice: British English, unless another language is chosen for listening.
       utterance.lang = prefs.lang.startsWith('en') ? 'en-GB' : prefs.lang;
     }
-    utterance.rate = rate;
+    utterance.rate = entry.rate;
     utterance.onend = utterance.onerror = event => {
-      if (generation !== this.generation) return;
-      const failed = event?.type === 'error' && !['interrupted', 'canceled'].includes(event.error);
-      if (failed && isOnlineVoice(chosen)) {
-        this.onlineFailedAt = Date.now();
-        this.say(phrase, voiceName, rate, generation);
-      }
-      this.pending = Math.max(0, this.pending - 1);
-      if (!this.pending) this.finish();
+      if (entry.dropped || entry.generation !== this.generation) return;
+      this.queue = this.queue.filter(other => other !== entry);
+      if (CONNECTION_ERRORS.includes(event?.error) && isOnlineVoice(chosen)) return this.sayOffline(entry);
+      if (!this.queue.length) this.finish();
     };
-    this.pending++;
+    this.queue.push(entry);
     speechSynthesis.speak(utterance);
+  },
+
+  sayOffline(failed) {
+    this.onlineFailedAt = Date.now(); // pickVoice leaves online voices out for a while
+    const again = [failed, ...this.queue];
+    this.drop();
+    speechSynthesis.cancel();
+    // A phrase handed over in the same moment as a cancel can be skipped, so wait a moment.
+    setTimeout(() => {
+      const current = again.filter(entry => entry.generation === this.generation);
+      if (!current.length) return;
+      this.active = true;
+      for (const entry of current) this.say({ ...entry, dropped: false });
+      refresh();
+    }, 50);
+  },
+
+  // What was handed to the voice no longer counts: its end (or the cancel's error) is ignored.
+  drop() {
+    for (const entry of this.queue) entry.dropped = true;
+    this.queue = [];
   },
 
   finish() {
     clearInterval(this.watchdog);
-    this.pending = 0;
+    this.drop();
     if (!this.active) return;
     this.active = false;
     refresh();
@@ -430,10 +453,13 @@ const speaker = {
     this.finish();
   },
 
-  // The phone says some things by itself (reminders, callers): in the same voice and at the same speed.
+  // The phone says some things by itself (reminders, callers): in the same voice and at the same speed. The phone
+  // may be offline when a reminder goes off, so an online voice is replaced by its offline twin.
   shareVoice() {
     if (!nativeAlarms?.setVoice || !this.voices.length) return;
-    nativeAlarms.setVoice({ name: this.pickVoice()?.name ?? '', rate: prefs.rate }).catch(() => {});
+    const voice = this.pickVoice();
+    const steady = isOnlineVoice(voice) ? this.voices.find(v => v.name === voice.name.replace(/-network$/, '-local')) : voice;
+    nativeAlarms.setVoice({ name: steady?.name ?? '', rate: prefs.rate }).catch(() => {});
   },
 };
 

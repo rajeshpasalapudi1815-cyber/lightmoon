@@ -23,6 +23,21 @@ function spokenDate(_, year, month, day, hour, minute) {
   return hour ? `${date} at ${clock(hour, minute)}` : date;
 }
 
+// "5 p.m." and "9:30am" → "5 PM" and "9:30 AM", keeping a full stop that also ends the sentence.
+function clockWords(match, hour, minute, ap, offset, all) {
+  const rest = all.slice(offset + match.length);
+  const endsSentence = match.endsWith('.') && /^(\s+["'“‘(]*[A-Z]|\s*$)/.test(rest);
+  return `${hour}${minute && minute !== '00' ? `:${minute}` : ''} ${ap.toUpperCase()}M${endsSentence ? '.' : ''}`;
+}
+
+// An amount, and what it's counted in: "5k", "2.5 billion", "1.5 lakh".
+const AMOUNT = String.raw`(\d+(?:\.\d+)?)(?:(k|m|mn|bn|b|cr)\b|\s(lakhs?|crores?|thousand|million|billion)\b)?`;
+const SCALES = { k: 'thousand', m: 'million', mn: 'million', b: 'billion', bn: 'billion', cr: 'crore' };
+const money = unit => (_, amount, short, word) => {
+  const scale = short ? SCALES[short.toLowerCase()] : word?.toLowerCase();
+  return `${amount}${scale ? ` ${scale}` : ''} ${unit}`;
+};
+
 // Markdown, emoji, links and symbols out; words in. Each line of a list becomes its own sentence.
 export function forSpeech(text) {
   const lines = String(text ?? '')
@@ -43,22 +58,21 @@ export function forSpeech(text) {
   return sentences.join(' ')
     // Dates and times the way they're said.
     .replace(/\b(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::\d{2})?)?\b/g, spokenDate)
-    .replace(/\b(\d{1,2}):(\d{2})\s*([ap])\.?m\.?(?=[\s,.!?;:]|$)/gi, (_, h, m, ap) => `${h}${m === '00' ? '' : `:${m}`} ${ap.toUpperCase()}M`)
-    .replace(/\b(\d{1,2})\s*([ap])\.m\.?(?=[\s,!?;:]|$)/gi, (_, h, ap) => `${h} ${ap.toUpperCase()}M`)
+    .replace(/\b(\d{1,2})(?::(\d{2}))?\s?([ap])\.?m\b\.?/gi, clockWords)
     // Abbreviations whose dots would otherwise end a sentence.
     .replace(/\be\.?g\.(?=[\s,]|$)/gi, 'for example')
     .replace(/\bi\.?e\.(?=[\s,]|$)/gi, 'that is')
     .replace(/\betc\.(?=\s+[A-Z]|\s*$)/g, 'and so on.')
     .replace(/\betc\./gi, 'and so on')
-    .replace(/\bvs\.?(?=\s)/gi, 'versus')
+    .replace(/\bvs\.?(?=\s)/g, 'versus')
     .replace(/\bapprox\.?(?=\s)/gi, 'about')
     .replace(/\b(Mr|Mrs|Ms|Dr|St|Prof|Sr|Jr)\.(?=\s)/g, '$1')
     .replace(/\bNo\.\s*(?=\d)/g, 'number ')
     // Money, measures and symbols.
-    .replace(/(\d),(?=\d)/g, '$1')
-    .replace(/(?:₹|\bRs\.?|\bINR)\s?(\d+(?:\.\d+)?)/g, '$1 rupees')
-    .replace(/\$\s?(\d+(?:\.\d+)?)/g, '$1 dollars')
-    .replace(/[£]\s?(\d+(?:\.\d+)?)/g, '$1 pounds')
+    .replace(/(\d),(?=(?:\d{2},)*\d{3}\b)/g, '$1') // 1,500 and 1,20,000 are numbers; 1,2,3 is a list
+    .replace(new RegExp(String.raw`(?:₹|\bRs\.?|\bINR)\s?${AMOUNT}`, 'gi'), money('rupees'))
+    .replace(new RegExp(String.raw`\$\s?${AMOUNT}`, 'gi'), money('dollars'))
+    .replace(new RegExp(String.raw`£\s?${AMOUNT}`, 'gi'), money('pounds'))
     .replace(/(\d)\s?%/g, '$1 percent')
     .replace(/\s?°\s?C\b/g, ' degrees Celsius')
     .replace(/\s?°\s?F\b/g, ' degrees Fahrenheit')
@@ -67,6 +81,7 @@ export function forSpeech(text) {
     .replace(/(\d)\s?x\b/g, '$1 times')
     .replace(/(^|[^\d-])(\d{1,3})\s?[–-]\s?(\d{1,3})(?![\d-])/g, '$1$2 to $3')
     .replace(/\s*(?:->|→|=>)\s*/g, ' to ')
+    .replace(/\band\/or\b/gi, 'and or')
     .replace(/\b([A-Za-z]{2,})\/([A-Za-z]{2,})\b/g, '$1 or $2')
     .replace(/\s*&\s*/g, ' and ')
     .replace(/\s?\+\s?(?=\d)/g, (match, offset, all) => (/\d$/.test(all.slice(0, offset).trim()) ? ' plus ' : match))
