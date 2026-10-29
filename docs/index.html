@@ -207,6 +207,26 @@
             </label>
             <label>Assistant name <input name="assistantName" maxlength="30"><small>Also the wake word.</small></label>
           </div>
+
+          <div class="set-card">
+            <h3 class="card-title">What LightMoon has learned</h3>
+            <ul id="rhythmList" class="learned-list"></ul>
+            <span class="row actions"><button type="button" id="rhythmForget" class="btn-ghost">Forget it and start again</button></span>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>Each time you finish, snooze or skip a reminder, LightMoon notes how it went. After a few of the same kind it spots patterns, like something you always do 20 minutes late, a reminder you keep snoozing, or the hours you get things done fastest. It uses them to suggest better times; it never moves a reminder on its own. It syncs with your other devices.</p>
+            </details>
+          </div>
+
+          <div class="set-card">
+            <h3 class="card-title">Accountability buddy</h3>
+            <label>Their name <input name="buddyName" maxlength="40" placeholder="e.g. Rahul" autocomplete="off"></label>
+            <label>How to reach them <input name="buddyContact" maxlength="80" placeholder="Their contact name or number" autocomplete="off"></label>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>Someone who cheers you on. After your Sunday letter, LightMoon offers to send them a two-line note about your week from the LightMoon app on your phone. It always shows you the exact words first and sends only if you say yes. Nothing else about you is shared. Leave the name empty to switch it off.</p>
+            </details>
+          </div>
         </section>
 
         <!-- ---------- Voice and listening ---------- -->
@@ -273,6 +293,18 @@
             <label>Model <input name="model" spellcheck="false"></label>
             <label>Backup model <input name="fallbackModel" spellcheck="false"><small>Used when the free limit is hit.</small></label>
             <span class="row actions"><button type="button" id="resetAi" class="btn-ghost">Reset to Groq defaults</button></span>
+          </div>
+          <div class="set-card" id="offlineBox" hidden>
+            <div class="card-head"><h3 class="card-title">Offline brain</h3><span id="offlineStatus" class="card-status"></span></div>
+            <p id="offlineNote" class="card-note"></p>
+            <span class="row actions">
+              <button type="button" id="offlineDownload" class="btn-ghost">Download (about 1 GB, on Wi-Fi)</button>
+              <button type="button" id="offlineRemove" class="btn-ghost" hidden>Remove</button>
+            </span>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>A small AI that runs on this phone itself, so LightMoon still answers with no internet: setting reminders, ticking tasks off, remembering things and simple questions. It's much less clever than the main AI, which takes over again as soon as you're back online. It only downloads once, and nothing you say to it leaves the phone.</p>
+            </details>
           </div>
           <div class="set-card" id="ownModelCard">
             <div class="card-head"><h3 class="card-title">Our own model</h3><span id="learnStatus" class="card-status"></span></div>
@@ -364,6 +396,23 @@
             <details class="help">
               <summary>Privacy</summary>
               <p>Forecasts come from Open-Meteo, free. Only your city's rough location is sent.</p>
+            </details>
+          </div>
+
+          <div class="set-card">
+            <h3 class="card-title">Weekly letter</h3>
+            <label>On Sunday evening
+              <span class="row">
+                <select name="weeklyLetter">
+                  <option value="on">write me a letter about my week</option>
+                  <option value="off">off</option>
+                </select>
+                <button type="button" id="letterNow" class="btn-ghost">Write it now</button>
+              </span>
+            </label>
+            <details class="help">
+              <summary>What it says</summary>
+              <p>A few short paragraphs in the chat, from 6 pm on Sundays: what went well, what slipped, a pattern it noticed and one suggestion for the week ahead. Reply to correct anything it got wrong, and it remembers.</p>
             </details>
           </div>
 
@@ -515,23 +564,36 @@
               <span class="row actions">
                 <button type="button" id="syncStart" class="btn-ghost">Start syncing</button>
                 <button type="button" id="syncJoinShow" class="btn-ghost">I have a code</button>
-              </span>
-              <span class="row" id="syncJoinRow" hidden>
-                <input id="syncCodeInput" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false">
-                <button type="button" id="syncJoin" class="btn-ghost">Join</button>
+                <button type="button" id="syncScan" class="btn-ghost" hidden>Scan a QR code</button>
               </span>
             </div>
             <div id="syncOnBox" class="sync-box" hidden>
               <code id="syncCodeShow" class="sync-code"></code>
               <span class="row actions">
+                <button type="button" id="syncQrShow" class="btn-ghost">Show QR code</button>
                 <button type="button" id="syncCopy" class="btn-ghost">Copy code</button>
                 <button type="button" id="syncNowBtn" class="btn-ghost">Sync now</button>
+                <button type="button" id="syncSwitch" class="btn-ghost">Use another code</button>
                 <button type="button" id="syncStop" class="btn-ghost">Stop syncing</button>
               </span>
+              <div id="syncQrBox" class="qr-box" hidden>
+                <canvas id="syncQr" aria-label="Sync code as a QR code"></canvas>
+                <p class="card-note">Scan it with LightMoon or Life Levelling on your phone. Anyone who scans it can read your LightMoon data, so only show it to your own devices.</p>
+              </div>
+            </div>
+            <span class="row" id="syncJoinRow" hidden>
+              <input id="syncCodeInput" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false">
+              <button type="button" id="syncJoin" class="btn-ghost">Join</button>
+              <button type="button" id="syncScanToo" class="btn-ghost" hidden>Scan</button>
+            </span>
+            <div id="scanBox" class="qr-box" hidden>
+              <video id="scanVideo" playsinline muted></video>
+              <p class="card-note">Point the camera at the QR code on your other device.</p>
+              <button type="button" id="scanCancel" class="btn-ghost">Cancel</button>
             </div>
             <details class="help">
               <summary>How it works</summary>
-              <p>On your other device, open Settings → Sync and Life Levelling → <em>I have a code</em> and enter this code: both devices' memories, tasks, goals and chats are combined. Everything is encrypted with the code before it leaves the device, so keep the code private. Your API key, PIN and voice settings stay on each device.</p>
+              <p>On your other device, open Settings → Sync and Life Levelling and scan this device's QR code, or choose <em>I have a code</em> and type it: both devices' memories, tasks, goals and chats are combined. Already syncing with a different code? <em>Use another code</em> switches this device over and brings what it has along. Everything is encrypted with the code before it leaves the device, so keep the code private. Your API key, PIN and voice settings stay on each device.</p>
             </details>
           </div>
 

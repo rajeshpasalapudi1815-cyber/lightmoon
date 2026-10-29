@@ -7,6 +7,7 @@ import { weatherSummary } from './weather.js';
 import { refresh as refreshLifeLevelling } from './lifelevelling.js';
 import { refresh as refreshPhone } from './phone.js';
 import { learnFrom, answerLocally } from './learning.js';
+import { answerOffline } from './offline.js';
 
 const HISTORY_LIMIT = 10;
 const OLD_MESSAGE_CHARS = 600; // older messages are cut short: every request counts against the free tier's tokens per minute
@@ -18,8 +19,10 @@ const briefingRequest = weather =>
   '(Automatic message: I just opened the app. Give me a short spoken briefing, under 70 words. Greet me for the time of day. '
   + 'Mention anything overdue or due today and any upcoming reminders. If a reminder is waiting for my answer, ask whether I got it done. '
   + 'Nudge one of my goals or ask how it is going. '
-  + 'If Life Levelling data is in your context, use it: how ready I am today, the top of my plan, and a quest or the boss worth chasing. '
-  + 'If phone data is in your context, mention my next meetings today, and any missed calls or messages that look important. '
+  + 'If Life Levelling data is in your context, use it: how ready I am today, the top of my plan, and a quest or the boss worth chasing; '
+  + 'if I am low on readiness or sleep, suggest a lighter day, and otherwise put the hardest thing in my best hours. '
+  + 'If phone data is in your context, mention my next meetings today, and any missed calls or messages that look important; '
+  + 'if a message asks something of me, offer a reminder for it. '
   + 'End with one useful suggestion. If you know little about me yet, introduce yourself in one sentence and ask what I am working towards. '
   + `Do not use tools.${weather ? ` Today's weather: ${weather} Mention it in a few words if it matters for my day, like rain, heat or cold.` : ''})`;
 
@@ -51,6 +54,11 @@ class BrainError extends Error {
 // onText receives the reply piece by piece as it arrives, so the app can show and speak it straight away.
 export async function chat(text, { onText } = {}) {
   messages.add('user', text);
+  // No internet: the offline brain on the phone answers, if it has been downloaded (offline.js).
+  if (navigator.onLine === false) {
+    const offline = await answerOffline({ onText });
+    if (offline) return finish(offline.reply, offline.actions);
+  }
   await Promise.all([refreshLifeLevelling(), refreshPhone()]); // quick, and only every minute or two
   const convo = [systemMessage(), ...recentHistory()];
   const actions = [];
@@ -81,6 +89,11 @@ export async function chat(text, { onText } = {}) {
     }
     return finish('I went round in circles on that one. Could you put it another way?', actions);
   } catch (err) {
+    // The AI service can't be reached and nothing was said yet: the offline brain takes it, if it can.
+    if (err.kind === 'network' && !written.length && !actions.length) {
+      const offline = await answerOffline({ onText });
+      if (offline) return finish(offline.reply, offline.actions);
+    }
     return failure(err, actions);
   }
 }
@@ -91,6 +104,27 @@ export async function briefing({ onText } = {}) {
   try {
     const reply = await complete(convo, null, onText);
     learnFrom(convo, null, reply);
+    return finish(reply.content, []);
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+// The weekly letter, on Sunday evening: for reading on screen, so longer than a spoken reply. `facts` sums up the
+// week (store.weekFacts); with an accountability buddy set, it then offers to send them a short progress note.
+const letterRequest = (facts, buddy) =>
+  '(Automatic message: it is Sunday evening. Write my weekly letter, 120 to 180 words, warm and honest, in short paragraphs; '
+  + 'it is read on screen, not aloud. Cover what went well this week (be specific), what slipped, one pattern you noticed, '
+  + 'and one concrete suggestion for next week. Use Life Levelling and THEIR RHYTHM if they are in your context. '
+  + 'End by asking me to correct anything you got wrong; if I do, remember the correction. '
+  + (buddy ? `Then ask whether I'd like you to send ${buddy}, my accountability buddy, a two-line progress note, and show me the exact words first. ` : '')
+  + `Do not use tools. This week: ${facts})`;
+
+export async function weeklyLetter({ facts, buddy = '', onText } = {}) {
+  await refreshLifeLevelling({ force: true }).catch(() => {});
+  const convo = [systemMessage(), ...recentHistory().slice(-4), { role: 'user', content: letterRequest(facts, buddy) }];
+  try {
+    const reply = await complete(convo, null, onText);
     return finish(reply.content, []);
   } catch (err) {
     return failure(err);

@@ -349,6 +349,12 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
 .stage { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
 .chip-link { text-decoration: none; border-style: dashed; }
 .chip-link:hover { background: rgba(63, 216, 255, 0.2); }
+/* What LightMoon has learned (Settings → You and LightMoon). */
+.learned-list { margin: 4px 0 8px; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; line-height: 1.45; color: var(--text-dim, #a9b4c4); }
+/* Pairing by QR: the code shown as a QR, and the camera while scanning one. */
+.qr-box { display: grid; justify-items: center; gap: 8px; margin-top: 12px; }
+.qr-box canvas { width: 220px; height: 220px; border-radius: 12px; image-rendering: pixelated; }
+.qr-box video { width: min(100%, 320px); aspect-ratio: 1; object-fit: cover; border-radius: 12px; background: #000; }
 /* Answering a reminder in the conversation: Done, Snooze, Stop asking. */
 .chip-button { font: inherit; font-size: 13px; padding: 6px 14px; cursor: pointer; }
 .chip-button:hover:not(:disabled) { background: rgba(63, 216, 255, 0.2); }

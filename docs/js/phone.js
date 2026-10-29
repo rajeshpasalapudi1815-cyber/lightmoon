@@ -63,6 +63,15 @@ const SECURITY_WORDS = /\b(otp|one[- ]?time|verification|security code|passcode|
 const CODE_NUMBER = /\d{4,8}|\d{3}[- ]\d{3}/;
 const shareable = text => (SECURITY_WORDS.test(text) && CODE_NUMBER.test(text) ? '(a one-time code or security message, hidden)' : String(text).slice(0, 200));
 
+// The commitment catcher: a message asking them to do something, or naming a deadline, is flagged so the AI can
+// offer a reminder for it ("Asha wants the report by 5; shall I remind you at 4:15?").
+const ASKS = new RegExp([
+  "\\b(can|could|would|will) (you|u)\\b", '\\bplease\\b', '\\bpls\\b', '\\bneed you to\\b', "\\bdon'?t forget\\b", '\\bremember to\\b',
+  '\\blet me know\\b', '\\bcall me\\b', '\\bsend (me|it|the|over)\\b', '\\bdeadline\\b', '\\basap\\b', '\\bdue (today|tomorrow|by|on)\\b',
+  '\\bby (today|tonight|tomorrow|eod|end of (the )?day|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\\d{1,2}(:\\d{2})?\\s?(am|pm)?)\\b',
+].join('|'), 'i');
+const asksSomething = m => ASKS.test(String(m.text)) && !(SECURITY_WORDS.test(m.text) && CODE_NUMBER.test(m.text));
+
 // Recent messages get short references (M1, M2...) the AI uses to reply.
 const messageRefs = () => seen.messages.slice(-MAX_MESSAGES).map((m, i) => ({ ...m, ref: `M${i + 1}` }));
 
@@ -84,10 +93,14 @@ export function promptSection() {
     const missed = seen.calls.filter(c => c.type === 'missed').slice(0, MAX_MISSED);
     lines.push(missed.length ? `Missed calls (last 24 h): ${missed.map(c => `${who(c)} ${dayWord(c.at).toLowerCase()} ${clock(c.at)}`).join('; ')}` : 'No missed calls in the last 24 hours.');
   }
+  if (allowed.focusUntil > Date.now()) {
+    lines.push(`FOCUS MODE until ${clock(allowed.focusUntil)}: calls and messages are held (except people let through) and summed up when it ends. Don't interrupt them with non-urgent things.`);
+  }
   if (allowed.messages) {
     const refs = messageRefs();
     lines.push(refs.length ? 'Recent messages and emails (oldest first; only what they chose to share):' : 'No new messages in the last 12 hours.');
-    lines.push(...refs.map(m => `  [${m.ref}] ${source(m)}, ${clock(m.at)}: "${shareable(m.text)}"${m.canReply ? '' : ' (no reply from here)'}`));
+    lines.push(...refs.map(m => `  [${m.ref}] ${source(m)}, ${clock(m.at)}: "${shareable(m.text)}"${m.canReply ? '' : ' (no reply from here)'}`
+      + `${asksSomething(m) ? ' (ASKS SOMETHING OF THEM)' : ''}`));
   }
   const can = [
     allowed.calendar && 'read and add calendar events',
@@ -233,6 +246,13 @@ export function phoneTools() {
       volume: { type: 'integer', minimum: 0, maximum: 100, description: 'Percent.' },
       stream: { type: 'string', enum: ['media', 'ring', 'alarm'], description: 'Default media.' },
       ringer: { type: 'string', enum: ['normal', 'vibrate', 'silent'] },
+    }),
+    tool('phone_focus', 'Focus mode: hold call and message announcements (except the people they let through) and silence the '
+      + 'phone for a while; when it ends you say what came in. end: true stops it now.', {
+      minutes: { type: 'integer', minimum: 5, maximum: 480, description: 'Default 45.' },
+      allow: { type: 'string', description: 'People who may still get through, comma-separated, e.g. "Mom, Asha".' },
+      quiet: { type: 'boolean', description: 'Also turn on Do Not Disturb. Default true.' },
+      end: { type: 'boolean' },
     }),
     tool('phone_media', 'Control the music or video playing.', {
       action: { type: 'string', enum: ['play', 'pause', 'toggle', 'next', 'previous'] },
@@ -396,6 +416,24 @@ export const phoneHandlers = {
     }
     if (!done.length) throw new Error('Say flashlight (true/false), volume (0-100) or ringer.');
     return note ? { text: done.join(', '), result: `${done.join(', ')}.${note}` } : done.join(', ');
+  },
+
+  async phone_focus({ minutes = 45, allow = '', quiet = true, end = false }) {
+    if (end) {
+      const { summary } = await call(phone.endFocus());
+      seen.at = 0; // the status changed: read it again
+      return { text: 'Focus mode ended', result: summary ?? 'Focus mode was not on.' };
+    }
+    const span = Math.min(Math.max(Math.round(Number(minutes) || 45), 5), 480);
+    const out = await call(phone.focus({ minutes: span, allow: String(allow ?? '').slice(0, 200), quiet: quiet !== false }));
+    seen.at = 0;
+    const through = String(allow ?? '').trim();
+    const extra = out.quietNeedsAccess ? ' Do Not Disturb needs their permission first: in LightMoon, Settings → Phone → What LightMoon may use → '
+      + 'Full silence → Allow. Your announcements are held anyway.' : '';
+    return {
+      text: `Focus until ${clock(out.until)}`,
+      result: `Focus mode on until ${clock(out.until)}${through ? `; letting through: ${through}` : ''}${out.quiet ? '; Do Not Disturb is on' : ''}.${extra}`,
+    };
   },
 
   async phone_media({ action }) {

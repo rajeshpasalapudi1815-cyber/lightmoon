@@ -18,6 +18,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(WakeWordPlugin.class);
         registerPlugin(FileSaverPlugin.class);
         registerPlugin(PhonePlugin.class);
+        registerPlugin(OfflineBrainPlugin.class);
         super.onCreate(savedInstanceState);
         // The back button steps back inside the web app first (Settings adds a history step for each page),
         // and only leaves LightMoon when there's nothing to go back to.

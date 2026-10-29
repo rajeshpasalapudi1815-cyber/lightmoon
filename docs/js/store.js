@@ -3,6 +3,7 @@
 // an encrypted copy (see cloud.js). Records carry random ids and change times so devices can merge.
 import { localStamp, today } from './time.js';
 import { reminderLine, checkInsOf, checkInLine, checksIn } from './announce.js';
+import { kindOf, learnRhythm } from './rhythm.js';
 
 export const MEMORY_CATEGORIES = ['preference', 'person', 'routine', 'goal', 'health', 'work', 'fact', 'other'];
 export const GOAL_STATUSES = ['active', 'achieved', 'dropped'];
@@ -21,7 +22,7 @@ const DATA_KEY = 'assistant.data.v1';
 const AI_KEY = 'assistant.ai'; // kept apart from the data so backups never contain the API key
 const MAX_MESSAGES = 400;
 const KEEP_DELETED_MS = 60 * 86_400_000; // deletions are remembered this long so they reach other devices
-const COLLECTIONS = ['memories', 'tasks', 'goals', 'checkins', 'routines'];
+const COLLECTIONS = ['memories', 'tasks', 'goals', 'checkins', 'routines', 'outcomes'];
 const LOCAL_SETTINGS = new Set(['last_briefing']); // per device, never synced
 
 const blank = () => ({
@@ -33,6 +34,7 @@ const blank = () => ({
   goals: [],
   checkins: [],
   routines: [], // "good night" -> steps the AI carries out with its tools
+  outcomes: [], // how each reminder went, for the rhythm learner (rhythm.js)
 });
 
 // Short random ids that won't clash between a phone and a computer.
@@ -71,6 +73,7 @@ function normalize(saved) {
     goals: list('goals'),
     checkins: list('checkins'),
     routines: list('routines'),
+    outcomes: list('outcomes'),
   };
   return upgradeRecords(data);
 }
@@ -241,6 +244,61 @@ export const memories = {
 const whenOf = task => task.remind_at ?? task.due_at ?? '9999';
 const LATE_CHECK_IN_MS = 20 * 60_000; // a check-in missed by more than this (the device was off) is skipped
 const WAITING_FOR_MS = 12 * 3600_000; // how long a reminder nobody answered stays on the AI's mind
+const MAX_OUTCOMES = 300;
+
+// How a reminder went, for the rhythm learner: 'done' (minutes after it rang), 'early' (before it rang),
+// 'snoozed' or 'stopped'. Synced, so every device learns from all of them; the oldest are let go.
+function noteOutcome(task, outcome) {
+  const rang = Date.parse(task.remind_at ?? '');
+  if (!Number.isFinite(rang)) return;
+  const minutes = Math.round((Date.now() - rang) / 60_000);
+  data.outcomes.push({
+    id: newId(), title: task.title, kind: kindOf(task.title), outcome: outcome === 'done' && minutes < 0 ? 'early' : outcome,
+    minutes, hour: new Date(rang).getHours(), weekday: new Date(rang).getDay(), created_at: localStamp(), updated_at: Date.now(),
+  });
+  const kept = live('outcomes');
+  for (const old of kept.slice(0, Math.max(0, kept.length - MAX_OUTCOMES))) remove('outcomes', old.id);
+}
+
+// What the rhythm learner has worked out so far (rhythm.js): { insights, kinds }.
+export const rhythm = () => learnRhythm(live('outcomes'), data.tasks);
+
+// This week, Monday to now: its key (one weekly letter per week) and the facts the letter is written from.
+function mondayOf(date = new Date()) {
+  const monday = new Date(date);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  return monday;
+}
+export const weekKey = () => localStamp(mondayOf()).slice(0, 10);
+
+export function weekFacts() {
+  const since = localStamp(mondayOf());
+  const sinceMs = mondayOf().getTime();
+  const done = live('tasks').filter(t => t.done && (t.done_at ?? '') >= since).map(t => t.title);
+  const open = live('tasks').filter(t => !t.done && t.due_at && t.due_at < localStamp()).map(t => t.title);
+  const went = live('outcomes').filter(o => (o.updated_at ?? 0) >= sinceMs);
+  const count = kind => went.filter(o => o.outcome === kind).length;
+  const late = went.filter(o => o.outcome === 'done' && o.minutes > 15).length;
+  const onTime = count('done') - late + count('early');
+  const checkins = live('checkins').filter(c => (c.created_at ?? '') >= since);
+  const goalNames = new Map(live('goals').map(g => [g.id, g.title]));
+  const progress = [...new Set(checkins.map(c => goalNames.get(c.goal_id)).filter(Boolean))];
+  const learned = live('memories').filter(m => (m.created_at ?? '') >= since).length;
+  return [
+    `Tasks done: ${done.length}${done.length ? ` (${done.slice(0, 10).join('; ')})` : ''}.`,
+    open.length ? `Overdue now: ${open.slice(0, 6).join('; ')}.` : 'Nothing overdue.',
+    went.length ? `Reminders: ${onTime} done on time or early, ${late} done late, ${count('snoozed')} snoozed, `
+      + `${count('stopped')} told to stop asking.` : 'No reminders answered this week.',
+    progress.length ? `Goal check-ins: ${checkins.length}, on ${progress.join('; ')}.` : 'No goal check-ins this week.',
+    `New things learned about them: ${learned}.`,
+  ].join(' ');
+}
+
+// "Forget what you've learned": the rhythm learner starts again (on every device).
+export function forgetRhythm() {
+  for (const outcome of live('outcomes')) remove('outcomes', outcome.id);
+}
 
 export const tasks = {
   open: () => live('tasks').filter(t => !t.done).sort((a, b) => whenOf(a).localeCompare(whenOf(b)) || byCreated(a, b)),
@@ -260,6 +318,7 @@ export const tasks = {
   snooze(id, remindAt) {
     const task = tasks.get(id);
     if (!task || task.done) return false;
+    if (task.reminded) noteOutcome(task, 'snoozed');
     Object.assign(task, { remind_at: remindAt, reminded: false, checked_in: 0, answered: false });
     touch(task);
     save();
@@ -269,6 +328,7 @@ export const tasks = {
   stopCheckingIn(id) {
     const task = tasks.get(id);
     if (!task || task.answered) return false;
+    if (task.reminded) noteOutcome(task, 'stopped');
     task.answered = true;
     touch(task);
     save();
@@ -293,6 +353,7 @@ export const tasks = {
   complete(id) {
     const task = tasks.get(id);
     if (!task || task.done) return false;
+    if (task.remind_at) noteOutcome(task, 'done');
     task.done = true;
     task.done_at = localStamp();
     touch(task);

@@ -248,6 +248,13 @@ public class MessageListener extends NotificationListenerService {
     private void announce(List<JSONObject> fresh) {
         String mode = PhonePrefs.readMessages(this);
         if ("off".equals(mode) || !PhonePrefs.maySpeakNow(this)) return;
+        if (Focus.active(this)) {
+            // Focus mode: only the people let through are announced; the rest is summed up when it ends.
+            List<JSONObject> through = new ArrayList<>();
+            for (JSONObject m : fresh) if (Focus.letsThrough(this, m.optString("from"))) through.add(m);
+            if (through.isEmpty()) return;
+            fresh = through;
+        }
         JSONObject last = fresh.get(fresh.size() - 1);
         String from = last.optString("from");
         String app = last.optString("app");
@@ -375,6 +382,17 @@ public class MessageListener extends NotificationListenerService {
 
     private static String keyOf(JSONObject m) {
         return m == null ? "" : m.optString("conversation") + "|" + m.optLong("at") + "|" + m.optString("text").hashCode();
+    }
+
+    // Who wrote since `since`, oldest first, one entry per message (for the focus summary, Focus.end).
+    static synchronized List<String> sendersSince(Context context, long since) {
+        JSONArray all = load(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE));
+        List<String> senders = new ArrayList<>();
+        for (int i = 0; i < all.length(); i++) {
+            JSONObject m = all.optJSONObject(i);
+            if (m != null && m.optLong("at") >= since && !m.optString("from").isEmpty()) senders.add(m.optString("from"));
+        }
+        return senders;
     }
 
     private static JSONArray load(SharedPreferences prefs) {

@@ -27,6 +27,7 @@
         <!-- Spoken reminders: the alarm, the voice that says it, and setting alarms again after a restart. -->
         <receiver android:name=".AlarmReceiver" android:exported="false" />
         <receiver android:name=".ReminderActionReceiver" android:exported="false" />
+        <receiver android:name=".FocusReceiver" android:exported="false" />
 
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>
@@ -103,6 +104,9 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Wake word -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Scanning another device's QR code to pair (docs/js/qr.js); asked for only when scanning. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Phone: calendar, calls, contacts, texts, the clock app's alarms and timers -->

@@ -40,6 +40,10 @@ function run(command, args, { cwd = root, input } = {}) {
   if (result.status !== 0) throw new Error(`${command} failed (exit ${result.status})`);
 }
 
+// The offline brain's native code (llama.cpp) is built with these; android/app/build.gradle names the same NDK.
+const NDK_VERSION = '27.2.12479018';
+const CMAKE_VERSION = '3.22.1';
+
 // Google's Android command-line tools (sdkmanager), downloaded into the SDK folder if missing.
 const CMDLINE_TOOLS_URL = 'https://dl.google.com/android/repository/commandlinetools-win-13114758_latest.zip';
 
@@ -66,7 +70,9 @@ function setup() {
   const minSdk = variables.match(/minSdkVersion\s*=\s*(\d+)/)[1];
   console.log(`compileSdk=${compileSdk} minSdk=${minSdk}`);
   run(`"${sdkmanager}"`, ['--licenses'], { input: 'y\n'.repeat(30) });
-  run(`"${sdkmanager}"`, ['--install', '"platform-tools"', `"platforms;android-${compileSdk}"`, `"build-tools;${compileSdk}.0.0"`]);
+  // The NDK and CMake build the offline brain (llama.cpp, android/app/src/main/cpp).
+  run(`"${sdkmanager}"`, ['--install', '"platform-tools"', `"platforms;android-${compileSdk}"`, `"build-tools;${compileSdk}.0.0"`,
+    `"ndk;${NDK_VERSION}"`, `"cmake;${CMAKE_VERSION}"`]);
   fs.writeFileSync(path.join(android, 'local.properties'), `sdk.dir=${env.ANDROID_HOME.replace(/\\/g, '\\\\')}\n`);
   console.log('\nSETUP DONE');
 }
@@ -101,7 +107,8 @@ function signWithReleaseKey(apk, alias) {
 function build() {
   run('npx', ['cap', 'sync', 'android']);
   run(`"${path.join(android, 'gradlew.bat')}"`, ['assembleDebug', '--console=plain'], { cwd: android });
-  const apk = path.join(android, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+  // android/app/build.gradle keeps the build output in a short folder (Windows' 260-character path limit).
+  const apk = path.join(os.homedir(), '.lightmoon-build', 'app', 'outputs', 'apk', 'debug', 'app-debug.apk');
   fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
   const target = path.join(root, 'dist', 'LightMoon.apk');
   fs.copyFileSync(apk, target);

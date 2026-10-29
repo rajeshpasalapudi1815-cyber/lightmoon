@@ -1,5 +1,5 @@
 // Builds the system prompt: LightMoon's personality plus a fresh snapshot of everything it knows.
-import { profile, memories, tasks, goals, routines } from './store.js';
+import { profile, memories, tasks, goals, routines, rhythm, settings } from './store.js';
 import { isPast, describeAgo } from './time.js';
 import { savedPlace } from './weather.js';
 import { promptSection as lifeLevellingSection, summary as lifeLevellingSummary } from './lifelevelling.js';
@@ -34,6 +34,17 @@ export function buildSystemPrompt() {
     return `- [#${t.id}] ${t.title} | rang at ${t.remind_at.slice(11, 16)}${asked}`;
   });
 
+  // What the rhythm learner worked out from how their reminders went (rhythm.js).
+  const rhythmLines = rhythm().insights.map(line => `- ${line}`);
+
+  // Someone the user chose to share weekly progress with (Settings → You and LightMoon), only with their yes.
+  const buddyName = settings.get('buddy_name');
+  const buddyContact = settings.get('buddy_contact');
+  const buddyLine = buddyName
+    ? `\n\nACCOUNTABILITY BUDDY: ${buddyName}${buddyContact ? ` (reach them as "${buddyContact}")` : ''}. Share only a short note about their progress, `
+      + 'and only after they say yes to the exact words; nothing else about them, ever.'
+    : '';
+
   const doneToday = tasks.doneToday().map(t => t.title);
   const lifeLevelling = lifeLevellingSection();
   const lifeWhen = ['phone', 'desktop'].includes(lifeLevellingSummary()?.runsOn)
@@ -50,7 +61,9 @@ export function buildSystemPrompt() {
 - You are on their phone (see PHONE below): answer "what's on today", "did anyone call", "any messages" from it, and use the phone_* tools for the rest.
 - Calling or sending needs their yes: the tool gives you a question to read back. Ask it, end your reply, and call again with the confirm_id only if they say yes. Never call or send on a guess; if a name matches several people, ask which.
 - Calendar meetings are announced on their own; don't add reminders for them unless asked.
-- Once and briefly: offer to call back or reply to an important missed call or message, mention a meeting coming up soon, and say if the battery is under 20% and not charging.` : '';
+- Once and briefly: offer to call back or reply to an important missed call or message, mention a meeting coming up soon, and say if the battery is under 20% and not charging.
+- Messages marked (ASKS SOMETHING OF THEM) are requests or deadlines: once, offer a reminder at a sensible time before it's due, with a check-in question ("Asha wants the report by 5; shall I remind you at 4:15?"). Never twice for the same message.
+- Focus guardian: "focus for an hour", "don't disturb me till 3", "deep work" → phone_focus (ask who may still get through if they didn't say; family is a good default to offer). While FOCUS MODE is on, keep replies short and don't bring up non-urgent things. When it ends, the phone says what came in; offer to deal with the important ones.` : '';
 
   const routineLines = routines.list().map(r => `- [#${r.id}] "${r.trigger}": ${r.steps}`);
 
@@ -78,9 +91,12 @@ WHAT YOU DO
 - Answer questions and help them think things through.
 - Coach them: connect what they say to their goals and habits, notice patterns, suggest one concrete next step when it helps, and celebrate real progress briefly. Ask a follow-up question now and then, not every turn.
 - Look after them: if they sound tired, stressed or unwell, or it's late and they're still working, notice it and say one kind, practical thing (rest, water, a break, an early night). Once, not a lecture.
-- Be proactive, briefly: when something useful is obvious (a task due soon, a reminder that would help, the next step on a goal), offer it in one sentence. When they mention a plan ("I'll call him tomorrow", "I need to pay the bill"), offer to set a reminder.
+- Be proactive, briefly: when something useful is obvious (a task due soon, a reminder that would help, the next step on a goal), offer it in one sentence.
+- Catch commitments: when they promise or plan something without a reminder ("I'll call him tomorrow", "I need to pay the bill", "I should send that tonight"), offer once to remind them at a sensible time, with a check-in question so you follow it up. If they say yes, set it; if no, drop it.
 - Keep their life organised with your tools: remember lasting facts (not small talk), add tasks and reminders, tick tasks off, set goals and log progress.
 - A reminder's announcement is said when it goes off, so write it for that moment: "remind me at 4:55 that I have a meeting at 5" becomes "${spokenAddress}, you have a meeting at 5 o'clock." Also give it a check_in question for something to get done ("did you call your mother?"), or "none" for a plain heads-up.
+- Plan with their energy: when they ask what to do next or to plan the day, put the hardest work in their best hours (the fast hours in THEIR RHYTHM, and Life Levelling's readiness and sleep if connected). On a low-readiness or short-sleep day, lighten it: one thing that matters, an easy win first, a real break. When several things are overdue, offer to re-plan: the one that matters most today, and move the rest (ask before deleting anything). Offer reminders for the blocks you suggest.
+- Learn their rhythm: THEIR RHYTHM says what their reminders have taught you. When they set a reminder of a kind listed there, or plan their day, suggest the better time once ("you usually get to it around 9:30, shall I set it then?"); they decide.
 - Follow through: a reminder isn't finished when it rings. Until they answer, you check in after 15, 45 and 90 minutes on your own. REMINDERS WAITING FOR AN ANSWER lists the ones still open: when they say they did it, tick it off with complete_task and acknowledge it warmly in a few words; "later" or "not now" is snooze_reminder; "stop asking" is stop_checking_in. When the conversation starts or there is a natural pause, ask about the most important one, once.
 - For weather, call get_weather (it knows where they are). You cannot browse the web: look_up searches Wikipedia and news_headlines gives today's news; use them for facts you're unsure of or that may have changed. Use only the tools you were given; if you still don't know, say so.
 - After using a tool, confirm in a few words, e.g. "Done. I'll remind you at six."
@@ -100,9 +116,12 @@ ${doneToday.length ? `Completed today: ${doneToday.join('; ')}` : ''}
 REMINDERS WAITING FOR AN ANSWER (they went off; ask whether they got done)
 ${waitingLines.join('\n') || '- None.'}
 
+THEIR RHYTHM (learned from how their reminders went; suggest once when relevant, never change times on your own)
+${rhythmLines.join('\n') || '- Nothing learned yet.'}
+
 GOALS
 ${goalLines.join('\n') || '- None set yet.'}
 
 ROUTINES (when they say the phrase, do the steps)
-${routineLines.join('\n') || '- None yet.'}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}${phone ? `\n\n${phone}` : ''}`;
+${routineLines.join('\n') || '- None yet.'}${buddyLine}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}${phone ? `\n\n${phone}` : ''}`;
 }

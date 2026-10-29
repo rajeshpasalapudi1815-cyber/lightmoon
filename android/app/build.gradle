@@ -1,18 +1,36 @@
 apply plugin: 'com.android.application'
 
+// The app's build output lives in a short folder (%USERPROFILE%\.lightmoon-build): the offline brain's native build
+// (llama.cpp) nests deep, and Windows tools give up on paths over 260 characters. scripts/android.mjs reads it there.
+layout.buildDirectory = file("${System.getProperty('user.home')}/.lightmoon-build/app")
+
 android {
     namespace = "app.lightmoon.assistant"
     compileSdk = rootProject.ext.compileSdkVersion
+    ndkVersion = "27.2.12479018" // the offline brain (src/main/cpp); scripts/android.mjs setup installs it
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+            // Kept short: llama.cpp's paths are deep, and Windows tools trip over very long ones.
+            buildStagingDirectory = file("${System.getProperty('user.home')}/.lightmoon-cxx")
+        }
+    }
     defaultConfig {
         applicationId "app.lightmoon.assistant"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 10
-        versionName "1.6"
+        versionCode 11
+        versionName "1.7"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Phones only (the wake word's speech engine ships native code for each processor type).
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
+        externalNativeBuild {
+            cmake {
+                arguments "-DCMAKE_BUILD_TYPE=Release", "-DANDROID_STL=c++_shared"
+            }
         }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

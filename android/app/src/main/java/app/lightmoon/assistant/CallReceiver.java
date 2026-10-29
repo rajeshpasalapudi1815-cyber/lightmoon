@@ -32,6 +32,7 @@ public class CallReceiver extends BroadcastReceiver {
         }
         if (!PhonePrefs.maySpeakNow(context)) return; // silent or vibrate: the user doesn't want sound
         String name = Contacts.nameFor(context, number);
+        if (!Focus.letsThrough(context, name != null ? name : number)) return; // focus mode: summed up when it ends
         String say = name != null ? "Call from " + name + "." : "Call from a number not in your contacts.";
         PendingResult pending = goAsync();
         Voice.say(context, say, pending::finish);

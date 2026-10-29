@@ -15,6 +15,7 @@ public class BootReceiver extends BroadcastReceiver {
             Meetings.reschedule(context);
             if (PhonePrefs.meetingLead(context) > 0 && Meetings.canRead(context)) MeetingWorker.start(context);
             Briefings.scheduleAll(context);
+            Focus.restore(context);
         }
     }
 }

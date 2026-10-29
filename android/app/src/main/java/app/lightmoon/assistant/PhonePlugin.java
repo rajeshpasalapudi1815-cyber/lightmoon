@@ -128,6 +128,7 @@ public class PhonePlugin extends Plugin {
         status.put("readMessages", PhonePrefs.readMessages(getContext()));
         status.put("briefingMorning", Briefings.time(getContext(), Briefings.MORNING));
         status.put("briefingEvening", Briefings.time(getContext(), Briefings.EVENING));
+        status.put("focusUntil", Focus.active(getContext()) ? Focus.until(getContext()) : 0);
         return status;
     }
 
@@ -786,6 +787,37 @@ public class PhonePlugin extends Plugin {
         result.put("mode", applied);
         result.put("silentNeedsAccess", "silent".equals(mode) && !mayGoSilent);
         call.resolve(result);
+    }
+
+    // Focus mode (Focus.java). { minutes, allow: "Mom, Asha", quiet } -> { until, quiet, quietNeedsAccess }: quiet is
+    // whether Do Not Disturb went on, which needs the user's permission (openSilenceAccess).
+    @PluginMethod
+    public void focus(PluginCall call) {
+        try {
+            int minutes = Math.max(5, Math.min(intArg(call, "minutes", 45), 480));
+            boolean wantQuiet = !Boolean.FALSE.equals(call.getBoolean("quiet", true));
+            long until = System.currentTimeMillis() + minutes * 60_000L;
+            boolean quiet = Focus.start(getContext(), until, call.getString("allow", ""), wantQuiet);
+            JSObject result = new JSObject();
+            result.put("until", until);
+            result.put("quiet", quiet);
+            result.put("quietNeedsAccess", wantQuiet && !quiet);
+            call.resolve(result);
+        } catch (RuntimeException err) {
+            call.reject("Couldn't start focus mode.");
+        }
+    }
+
+    // Ends focus mode now -> { summary } (null when it wasn't on).
+    @PluginMethod
+    public void endFocus(PluginCall call) {
+        try {
+            JSObject result = new JSObject();
+            result.put("summary", Focus.end(getContext()));
+            call.resolve(result);
+        } catch (RuntimeException err) {
+            call.reject("Couldn't end focus mode.");
+        }
     }
 
     // Opens Android's screen where the user can let LightMoon fully silence the phone.

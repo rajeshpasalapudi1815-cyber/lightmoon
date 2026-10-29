@@ -8,7 +8,9 @@ import * as weather from './js/weather.js';
 import * as cloud from './js/cloud.js';
 import * as lifeLevelling from './js/lifelevelling.js';
 import { reminderLine, checkInLine, parseAlertId } from './js/announce.js';
-import { chat, briefing } from './js/brain.js';
+import { drawQr, pairingText, canScan, scanQr, codeFromScan } from './js/qr.js';
+import { offlineAvailable, offlineStatus, downloadOffline, removeOffline } from './js/offline.js';
+import { chat, briefing, weeklyLetter } from './js/brain.js';
 import { wireLearning } from './js/learning.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 
@@ -223,14 +225,15 @@ function lastSentenceEnd(text) {
   return end;
 }
 
-// Shows a reply while it is still arriving and speaks each sentence as soon as it is complete.
-function streamReply() {
+// Shows a reply while it is still arriving and speaks each sentence as soon as it is complete
+// (`quiet`: shown only, e.g. the weekly letter, which is for reading).
+function streamReply({ quiet = false } = {}) {
   let node = null;
   let shown = '';
   let unspoken = '';
   const generation = speaker.generation; // if the user stops the speech, stay quiet for the rest of this reply
   const say = text => {
-    if (speaker.generation === generation) speaker.speak(text);
+    if (!quiet && speaker.generation === generation) speaker.speak(text);
   };
   const bubble = () => (node ??= addMessage('assistant', ''));
   return {
@@ -661,6 +664,41 @@ async function runBriefing(force = false) {
   }
 }
 
+// The weekly letter: Sunday from 6 pm, once a week. The week is marked in the synced settings first, so another
+// open device doesn't write one too. `force` writes it now (from Settings).
+const LETTER_FROM_HOUR = 18;
+const LETTER_RETRY_MS = 30 * 60_000;
+let letterFailedAt = 0; // an automatic letter that failed (offline, limit hit) is tried again a while later
+async function maybeWeeklyLetter(force = false) {
+  if (!started || locked || !state.ai.ready || busy || listener.capturing) return;
+  const week = store.weekKey();
+  if (!force) {
+    const now = new Date();
+    if (store.settings.get('weekly_letter', 'on') === 'off' || now.getDay() !== 0 || now.getHours() < LETTER_FROM_HOUR) return;
+    if (store.settings.get('last_letter') === week || Date.now() - letterFailedAt < LETTER_RETRY_MS) return;
+  }
+  const previous = store.settings.get('last_letter');
+  store.settings.set('last_letter', week);
+  busy = true;
+  refresh();
+  try {
+    const live = streamReply({ quiet: true });
+    const out = await weeklyLetter({ facts: store.weekFacts(), buddy: store.settings.get('buddy_name'), onText: live.push });
+    if (out.error) {
+      store.settings.set('last_letter', previous); // not written: try again
+      letterFailedAt = Date.now();
+      if (force) live.done(out); // asked for now: say why; written on its own: quietly, later
+      return;
+    }
+    live.done(out);
+    speaker.speak(`${addressWord()}, your weekly letter is ready.`);
+    if (document.hidden) notify(`${assistantName()}: your weekly letter`, 'Your week in a few paragraphs, and a suggestion for next week. Tap to read it.');
+  } finally {
+    busy = false;
+    refresh();
+  }
+}
+
 async function pollReminders() {
   await takeAnswers();
   if (nativeAlarms) {
@@ -931,6 +969,9 @@ function openSettings() {
   fields.listenOnOpen.checked = prefs.listenOnOpen;
   fields.followUp.value = prefs.followUp;
   fields.reminderChecks.value = store.settings.get('reminder_checks', 'on');
+  fields.weeklyLetter.value = store.settings.get('weekly_letter', 'on');
+  fields.buddyName.value = store.settings.get('buddy_name');
+  fields.buddyContact.value = store.settings.get('buddy_contact');
   fields.lang.value = prefs.lang;
   fields.apiKey.value = '';
   fillAiFields(fields, store.aiConfig());
@@ -940,6 +981,8 @@ function openSettings() {
   paintWeatherSettings();
   paintLockSettings();
   paintCloudSettings();
+  paintRhythm();
+  paintOfflineBrain();
   paintPhoneSettings();
   paintWakeSettings();
   paintPhonePowers();
@@ -1260,6 +1303,9 @@ function paintCloudSettings() {
   $('#syncOffBox').hidden = Boolean(code);
   $('#syncOnBox').hidden = !code;
   $('#syncJoinRow').hidden = true;
+  $('#syncQrBox').hidden = true;
+  $('#syncScan').hidden = !canScan();
+  $('#syncScanToo').hidden = !canScan();
   $('#syncCodeInput').value = '';
   $('#syncCodeShow').textContent = code ?? '';
   $('#syncCopy').textContent = 'Copy code';
@@ -1281,6 +1327,69 @@ async function cloudAction(action, doneMessage) {
   } finally {
     for (const button of document.querySelectorAll('.cloud-box button')) button.disabled = false;
     paintCloudSettings();
+  }
+}
+
+// The offline brain (Android app, js/offline.js): its download and whether it's ready. While it downloads (or is
+// checked), the card refreshes every few seconds as long as Settings is open.
+let offlineTimer = null;
+async function paintOfflineBrain() {
+  clearTimeout(offlineTimer);
+  $('#offlineBox').hidden = !offlineAvailable();
+  if (!offlineAvailable()) return;
+  const status = await offlineStatus();
+  const mb = bytes => Math.round(bytes / 1_048_576);
+  const busyNow = status?.state === 'downloading';
+  $('#offlineStatus').textContent = !status ? 'Not available'
+    : !status.supported ? "This phone can't run it"
+    : { ready: 'Ready', downloading: `Downloading ${Math.floor((100 * status.done) / status.total)}%`, failed: 'Download failed', none: 'Not downloaded' }[status.state] ?? '';
+  $('#offlineNote').textContent = !status?.supported ? ''
+    : status.state === 'ready' ? `${status.model} is on this phone: ${assistantName()} answers simple things even with no internet.`
+    : busyNow ? `${mb(status.done)} of ${mb(status.total)} MB. It carries on if you close ${assistantName()}; it's checked when it finishes.`
+    : status.problem || `${status.model}, about ${mb(status.total)} MB, downloaded once.`;
+  $('#offlineDownload').hidden = !status?.supported || status.state === 'ready' || busyNow;
+  $('#offlineRemove').hidden = !status || status.state === 'none' || status.state === 'failed';
+  $('#offlineRemove').textContent = busyNow ? 'Cancel' : 'Remove';
+  if (busyNow && $('#settings').open) offlineTimer = setTimeout(paintOfflineBrain, 3000);
+}
+
+// What the rhythm learner has worked out from how reminders went (store.rhythm, js/rhythm.js).
+function paintRhythm() {
+  const { insights } = store.rhythm();
+  const list = $('#rhythmList');
+  list.replaceChildren(...(insights.length ? insights : ['Nothing yet. It learns as you finish, snooze or skip reminders.']).map(line => el('li', '', line)));
+  $('#rhythmForget').hidden = !insights.length;
+}
+
+// Joins a sync code (typed or scanned). A device already syncing with another code switches over, keeping what it has.
+function joinCode(input) {
+  const tidy = value => String(value ?? '').toUpperCase().replace(/[\s-]/g, '');
+  const current = cloud.syncCode();
+  if (current && tidy(current) !== tidy(input)
+    && !confirm('Switch this device to the other sync code? What it has is kept and combined with the devices on that code.')) return;
+  cloudAction(() => cloud.joinSync(input), 'Synced. This device now shares memories, tasks and goals with your other devices.');
+}
+
+// Scans the other device's QR code with the camera, then joins its code.
+let scanning = null;
+async function scanToJoin() {
+  scanning?.abort();
+  const stop = new AbortController();
+  scanning = stop;
+  $('#scanBox').hidden = false;
+  $('#settingsError').textContent = '';
+  try {
+    const text = await scanQr($('#scanVideo'), stop.signal);
+    if (!text) return;
+    const code = codeFromScan(text);
+    if (!code) throw new Error("That QR code isn't a LightMoon sync code.");
+    $('#syncCodeInput').value = code;
+    joinCode(code);
+  } catch (err) {
+    $('#settingsError').textContent = err.message;
+  } finally {
+    if (scanning === stop) scanning = null;
+    $('#scanBox').hidden = true;
   }
 }
 
@@ -1429,7 +1538,13 @@ function saveSettings(event) {
   });
   savePrefs();
   // Synced, so every device (and the phone's alarms) checks in the same way.
-  if (fields.reminderChecks.value !== store.settings.get('reminder_checks', 'on')) store.settings.set('reminder_checks', fields.reminderChecks.value);
+  const synced = (key, value, fallback = '') => {
+    if (value !== store.settings.get(key, fallback)) store.settings.set(key, value);
+  };
+  synced('reminder_checks', fields.reminderChecks.value, 'on');
+  synced('weekly_letter', fields.weeklyLetter.value, 'on');
+  synced('buddy_name', fields.buddyName.value.trim());
+  synced('buddy_contact', fields.buddyContact.value.trim());
   store.saveProfile({ userName: fields.userName.value, address: fields.address.value, assistantName: fields.assistantName.value });
   tellPhoneAddress();
   store.saveAiConfig({
@@ -1566,7 +1681,43 @@ function wireUp() {
     $('#syncJoinRow').hidden = false;
     $('#syncCodeInput').focus();
   });
-  $('#syncJoin').addEventListener('click', () => cloudAction(() => cloud.joinSync($('#syncCodeInput').value), 'Synced. This device now shares memories, tasks and goals with your other devices.'));
+  $('#syncJoin').addEventListener('click', () => joinCode($('#syncCodeInput').value));
+  $('#syncSwitch').addEventListener('click', () => {
+    $('#syncJoinRow').hidden = false;
+    $('#syncCodeInput').focus();
+  });
+  $('#syncQrShow').addEventListener('click', () => {
+    const box = $('#syncQrBox');
+    box.hidden = !box.hidden;
+    if (!box.hidden) drawQr($('#syncQr'), pairingText(cloud.syncCode()));
+  });
+  $('#syncScan').addEventListener('click', scanToJoin);
+  $('#syncScanToo').addEventListener('click', scanToJoin);
+  $('#scanCancel').addEventListener('click', () => scanning?.abort());
+  $('#settings').addEventListener('close', () => scanning?.abort());
+  $('#offlineDownload').addEventListener('click', async () => {
+    try {
+      await downloadOffline(true);
+    } catch (err) {
+      $('#settingsError').textContent = String(err?.message ?? err);
+    }
+    paintOfflineBrain();
+  });
+  $('#offlineRemove').addEventListener('click', async () => {
+    if (!confirm(`Remove the offline brain from this phone? ${assistantName()} then needs the internet to answer.`)) return;
+    await removeOffline().catch(() => {});
+    paintOfflineBrain();
+  });
+  $('#letterNow').addEventListener('click', () => {
+    $('#settings').close();
+    setChatOpen(true);
+    maybeWeeklyLetter(true);
+  });
+  $('#rhythmForget').addEventListener('click', () => {
+    if (!confirm(`Forget what ${assistantName()} has learned from your reminders? It starts learning again from now.`)) return;
+    store.forgetRhythm();
+    paintRhythm();
+  });
   $('#syncCodeInput').addEventListener('keydown', event => {
     if (event.key !== 'Enter') return;
     event.preventDefault();
@@ -1708,6 +1859,7 @@ function start({ auto = false } = {}) {
   refresh();
   pollReminders();
   setInterval(pollReminders, REMINDER_POLL_MS);
+  setInterval(() => maybeWeeklyLetter(), 60_000);
   setInterval(renderTasks, 60_000); // keeps overdue highlighting current
   cloud.init({
     // Another device's changes arrived: show them (the chat only if new messages came in).
@@ -1721,6 +1873,7 @@ function start({ auto = false } = {}) {
   if (phone) {
     phone.addListener('meetingDue', onPhoneSay);
     phone.addListener('messageArrived', onPhoneSay);
+    phone.addListener('focusEnded', onPhoneSay); // focus mode's "while you focused…" (Focus.java)
     tellPhoneAddress();
     refreshPhone({ force: true });
   }
