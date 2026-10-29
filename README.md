@@ -50,6 +50,15 @@ Only in the Android app:
   time the phone says the weather for your weather city, the day's meetings and reminders, and in the morning the
   calls and messages you missed overnight, even with LightMoon closed. *Hear it now* plays it straight away.
 
+## On a Windows computer: LightMoon Listener
+
+A browser can't listen for a page that's closed or minimized, so `windows/` has a small Windows program that does:
+it hears "LightMoon" with Windows' own offline speech recognizer and brings LightMoon up ready to talk (it opens it
+if it's closed, or brings it to the front and presses Space). It leaves LightMoon alone while it's already in front,
+lives in the tray (pause, open LightMoon, quit), and logs only what it heard and did, never audio. Build it with
+`windows/build.sh` (Windows' own C# compiler) into `%USERPROFILE%\LightMoon`, then run `LightMoon Listener` from the
+Start menu; `--self-test` checks the recognizer with Windows' voice.
+
 ## Life Levelling
 
 LightMoon can connect to [Life Levelling](https://github.com/rajeshpasalapudi1815-cyber/life-levelling), the
