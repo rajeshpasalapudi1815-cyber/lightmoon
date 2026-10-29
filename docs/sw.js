@@ -2,7 +2,7 @@
 // notifications, including when the cloud wakes it at a reminder's time while the app is closed.
 import { showDueReminders, openReminder, answerReminder } from './js/notifier.js';
 
-const CACHE = 'lightmoon-v21';
+const CACHE = 'lightmoon-v22';
 const APP_FILES = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const APP_FILES = [
   './js/tools.js',
   './js/prompt.js',
   './js/time.js',
+  './js/speech.js',
   './js/weather.js',
   './js/lock.js',
   './js/idb.js',

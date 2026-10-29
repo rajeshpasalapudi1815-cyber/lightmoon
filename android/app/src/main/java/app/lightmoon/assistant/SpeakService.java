@@ -24,7 +24,6 @@ import androidx.core.app.NotificationManagerCompat;
 import androidx.core.app.ServiceCompat;
 import androidx.core.content.ContextCompat;
 import java.util.ArrayDeque;
-import java.util.Locale;
 
 // Says reminders out loud with Android's text-to-speech when their time comes, even while LightMoon is
 // closed, on the alarm volume so it's heard like an alarm clock. Each reminder also gets a notification.
@@ -117,7 +116,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
             return;
         }
         ready = true;
-        if (tts.setLanguage(Locale.UK) < 0) tts.setLanguage(Locale.getDefault());
+        Voice.useChosenVoice(this, tts);
         tts.setAudioAttributes(alarmAudio);
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             @Override

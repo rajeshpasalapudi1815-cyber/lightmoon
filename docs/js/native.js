@@ -37,62 +37,80 @@ class NativeUtterance {
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// Android's voice takes a moment to load when the app opens, and may not have the accent asked for.
-async function sayOnAndroid(text, lang, rate) {
-  for (let attempt = 0; ; attempt++) {
+// Android's voices, shaped like the browser's (name, lang, localService), in the plugin's order: the plugin picks
+// a voice by its position in this list. Loaded once Android's text-to-speech has started (a moment after opening).
+let androidVoices = [];
+const voiceListeners = [];
+const engineReady = (async () => {
+  if (!isNativeApp || !plugins.TextToSpeech) return;
+  for (let attempt = 0; attempt < 25; attempt++) {
     try {
-      return await plugins.TextToSpeech.speak({ text, lang, rate });
-    } catch (err) {
-      const message = String(err?.message ?? err);
-      if (/language/i.test(message) && lang !== 'en-US') lang = 'en-US';
-      else if (/initialized/i.test(message) && attempt < 10) await wait(400);
-      else throw err;
+      const { voices } = await plugins.TextToSpeech.getSupportedVoices();
+      androidVoices = voices.map(v => ({ name: v.voiceURI, voiceURI: v.voiceURI, lang: v.lang, localService: v.localService, default: false }));
+      for (const listener of voiceListeners) listener();
+      return;
+    } catch {
+      await wait(400);
     }
+  }
+})();
+
+// Queued behind what is already being said, so sentences follow each other without a gap. If the chosen voice
+// fails (an online voice with no connection), the phone's own voice for that language says it instead.
+async function sayOnAndroid(text, utterance) {
+  const voice = utterance.voice ? androidVoices.findIndex(v => v.name === utterance.voice.name) : -1;
+  const lang = utterance.voice?.lang || utterance.lang || 'en-GB';
+  const options = { text, lang, rate: utterance.rate || 1, voice, queueStrategy: 1 };
+  try {
+    return await plugins.TextToSpeech.speak(options);
+  } catch (err) {
+    if (voice < 0 && lang === 'en-US') throw err;
+    const fallbackLang = /language/i.test(String(err?.message ?? err)) ? 'en-US' : lang;
+    return plugins.TextToSpeech.speak({ ...options, voice: -1, lang: fallbackLang });
   }
 }
 
 const nativeSynthesis = {
-  queue: [],
-  speaking: false,
+  inFlight: new Set(), // for each sentence handed to Android and not finished: ends its wait when cancelled
   pending: false,
-  interrupt: null,
 
-  speak(utterance) {
-    this.queue.push(utterance);
-    this.pending = true;
-    if (!this.speaking) this.next();
+  get speaking() {
+    return this.inFlight.size > 0;
   },
 
-  async next() {
-    const utterance = this.queue.shift();
-    this.pending = this.queue.length > 0;
-    if (!utterance) {
-      this.speaking = false;
+  speak(utterance) {
+    const text = utterance.text.trim();
+    if (!text) {
+      setTimeout(() => utterance.onend?.());
       return;
     }
-    this.speaking = true;
-    try {
-      if (utterance.text.trim()) {
-        // Android drops the request on stop without answering, so cancel() ends the wait itself.
-        const interrupted = new Promise(resolve => { this.interrupt = resolve; });
-        await Promise.race([sayOnAndroid(utterance.text, utterance.lang || 'en-GB', utterance.rate || 1), interrupted]);
-      }
-      utterance.onend?.();
-    } catch (err) {
-      utterance.onerror?.(err);
-    }
-    this.next();
+    // Android drops queued sentences on stop without answering, so cancel() ends their waits itself (and one
+    // cancelled while the voice was still starting up is never said).
+    let stopped = false;
+    let interrupt;
+    const interrupted = new Promise(resolve => {
+      interrupt = () => {
+        stopped = true;
+        resolve();
+      };
+    });
+    this.inFlight.add(interrupt);
+    engineReady
+      .then(() => (stopped ? null : Promise.race([sayOnAndroid(text, utterance), interrupted])))
+      .then(() => utterance.onend?.(), err => utterance.onerror?.(err))
+      .finally(() => this.inFlight.delete(interrupt));
   },
 
   cancel() {
-    this.queue = [];
-    this.pending = false;
     plugins.TextToSpeech.stop().catch(() => {});
-    this.interrupt?.();
+    for (const interrupt of this.inFlight) interrupt();
+    this.inFlight.clear();
   },
 
-  getVoices: () => [],
-  addEventListener() {},
+  getVoices: () => androidVoices,
+  addEventListener(type, listener) {
+    if (type === 'voiceschanged') voiceListeners.push(listener);
+  },
 };
 
 // ---------- Listening: a SpeechRecognition stand-in on Android speech recognition ----------

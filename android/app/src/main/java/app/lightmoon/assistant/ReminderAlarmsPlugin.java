@@ -100,6 +100,19 @@ public class ReminderAlarmsPlugin extends Plugin {
         call.resolve(result);
     }
 
+    // { name, rate }: the voice and speed the app speaks with, for reminders, briefings and callers said by the phone.
+    @PluginMethod
+    public void setVoice(PluginCall call) {
+        try {
+            Object rate = call.getData().opt("rate");
+            float speed = rate instanceof Number ? ((Number) rate).floatValue() : 1f;
+            ReminderStore.setVoice(getContext(), call.getString("name", ""), speed > 0 ? speed : 1f);
+            call.resolve();
+        } catch (Exception err) {
+            call.reject(String.valueOf(err.getMessage()));
+        }
+    }
+
     // Done, Snooze and Stop asking tapped on notifications since the app last asked: { actions: [{ id, action, at, until }] }.
     @PluginMethod
     public void takeActions(PluginCall call) {

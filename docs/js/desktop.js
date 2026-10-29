@@ -16,6 +16,9 @@ const RECENT_MS = 30 * 60_000; // ones that went off this recently stay on the o
 const SNOOZE_MS = 10 * 60_000; // the orb's "Snooze 10 min"
 
 const onWindows = /Windows/.test(navigator.userAgentData?.platform ?? navigator.userAgent);
+// A copy served on this computer for testing leaves the real orb alone (it would take its Done and Snooze
+// presses), unless the address asks for it with ?orb.
+const testCopy = ['localhost', '127.0.0.1'].includes(location.hostname) && !new URLSearchParams(location.search).has('orb');
 
 let onAnswer = () => {};
 let timer = 0;
@@ -27,7 +30,7 @@ let sentAt = 0;
 
 // `onAnswer(taskId, action, { until })` applies Done or Snooze pressed on the orb.
 export function start(handlers) {
-  if (isNativeApp || !onWindows || timer) return;
+  if (isNativeApp || !onWindows || testCopy || timer) return;
   onAnswer = handlers.onAnswer;
   store.onLocalChange(() => {
     if (!connected) return;

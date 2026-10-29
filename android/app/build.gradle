@@ -20,8 +20,8 @@ android {
         applicationId "app.lightmoon.assistant"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 11
-        versionName "1.7"
+        versionCode 12
+        versionName "1.8"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Phones only (the wake word's speech engine ships native code for each processor type).
         ndk {

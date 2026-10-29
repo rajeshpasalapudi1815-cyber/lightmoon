@@ -50,6 +50,8 @@ final class ReminderStore {
     private static final String KEY_HIDE_TEXT = "hideText";
     private static final String KEY_SPOKEN = "spoken";
     private static final String KEY_ANSWERS = "answers";
+    private static final String KEY_VOICE = "voice";
+    private static final String KEY_RATE = "rate";
     private static final String ACTION = "app.lightmoon.assistant.REMINDER";
     private static final long FORGET_ANSWERS_MS = 2 * 86_400_000L;
 
@@ -111,6 +113,20 @@ final class ReminderStore {
 
     static boolean hideText(Context context) {
         return prefs(context).getBoolean(KEY_HIDE_TEXT, false);
+    }
+
+    // The voice the app speaks with (an Android voice name, "" for the phone's British voice) and its speed, so
+    // what the phone says by itself sounds the same (ReminderAlarmsPlugin.setVoice, Voice.useChosenVoice).
+    static void setVoice(Context context, String name, float rate) {
+        prefs(context).edit().putString(KEY_VOICE, name == null ? "" : name).putFloat(KEY_RATE, rate).apply();
+    }
+
+    static String voiceName(Context context) {
+        return prefs(context).getString(KEY_VOICE, "");
+    }
+
+    static float voiceRate(Context context) {
+        return prefs(context).getFloat(KEY_RATE, 1f);
     }
 
     static boolean canUseExactAlarms(Context context) {

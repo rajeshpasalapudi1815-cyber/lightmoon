@@ -55,6 +55,22 @@ final class Voice {
         speak(app, text, giveUp, () -> main.post(() -> next(app)));
     }
 
+    // The voice and speed chosen in the app, so the phone sounds the same when it speaks by itself; else British.
+    static void useChosenVoice(Context context, TextToSpeech tts) {
+        if (tts.setLanguage(Locale.UK) < 0) tts.setLanguage(Locale.getDefault());
+        String name = ReminderStore.voiceName(context);
+        Set<android.speech.tts.Voice> voices = name.isEmpty() ? null : tts.getVoices();
+        if (voices != null) {
+            for (android.speech.tts.Voice voice : voices) {
+                if (voice.getName().equals(name)) {
+                    tts.setVoice(voice);
+                    break;
+                }
+            }
+        }
+        tts.setSpeechRate(ReminderStore.voiceRate(context));
+    }
+
     static void stopAll() {
         for (Runnable stop : stoppers) main.post(stop);
         main.post(waiting::clear);
@@ -82,7 +98,7 @@ final class Voice {
                 main.post(finish);
                 return;
             }
-            if (tts.setLanguage(Locale.UK) < 0) tts.setLanguage(Locale.getDefault());
+            useChosenVoice(app, tts);
             tts.setAudioAttributes(assistantAudio());
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override

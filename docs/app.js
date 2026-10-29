@@ -14,6 +14,7 @@ import { offlineAvailable, offlineStatus, downloadOffline, removeOffline } from 
 import { chat, briefing, weeklyLetter } from './js/brain.js';
 import { wireLearning } from './js/learning.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
+import { speechChunks, lastSentenceEnd } from './js/speech.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -32,8 +33,10 @@ const LANGUAGES = [
   ['te-IN', 'Telugu'],
   ['ta-IN', 'Tamil'],
 ];
-// Most natural-sounding voices first: Edge's natural British voices, then Chrome's and Apple's.
-const PREFERRED_VOICES = ['Microsoft Ryan Online', 'Microsoft Thomas Online', 'Google UK English Male', 'Microsoft George', 'Daniel'];
+// Most natural-sounding voices first: Edge's natural British voices, then Chrome's and Apple's. On Android, Google's
+// British voice that works offline: left to itself, Android swaps between its online and offline voices mid-reply.
+const PREFERRED_VOICES = ['Microsoft Ryan Online', 'Microsoft Thomas Online', 'en-gb-x-rjs-local', 'en-gb-x-gbd-local', 'Google UK English Male', 'Microsoft George', 'Daniel'];
+const ONLINE_VOICE_REST_MS = 10 * 60_000; // after an online voice fails, use an offline one for this long
 const PREFS_KEY = 'assistant.prefs';
 const ASKED_NOTIFICATIONS_KEY = 'assistant.askedNotifications';
 const REMINDER_POLL_MS = 15_000;
@@ -219,12 +222,9 @@ function addActions(node, actions) {
 
 const note = text => addMessage('system', text);
 
-// Index just past the last finished sentence (or line), or -1 if there is none yet.
-function lastSentenceEnd(text) {
-  let end = -1;
-  for (const match of text.matchAll(/[.!?]["')\]]*\s+|\n+/g)) end = match.index + match[0].length;
-  return end;
-}
+// While the voice is still talking, finished sentences wait until there are about this many characters, so they
+// go to the voice as one phrase: fewer, longer phrases sound smoother than many short ones.
+const PHRASE_CHARS = 90;
 
 // Shows a reply while it is still arriving and speaks each sentence as soon as it is complete
 // (`quiet`: shown only, e.g. the weekly letter, which is for reading).
@@ -244,7 +244,7 @@ function streamReply({ quiet = false } = {}) {
       transcript.scrollTop = transcript.scrollHeight;
       unspoken += delta;
       const end = lastSentenceEnd(unspoken);
-      if (end > 0) {
+      if (end > 0 && (!speaker.active || end >= PHRASE_CHARS)) {
         say(unspoken.slice(0, end));
         unspoken = unspoken.slice(end);
       }
@@ -338,15 +338,15 @@ function chime() {
 
 // ---------- Talking back (speech synthesis) ----------
 
-function forSpeech(text) {
-  return String(text)
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/https?:\/\/\S+/g, 'the link')
-    .replace(/[*_`#>|~]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+const isOnlineVoice = voice => voice?.localService === false;
+
+// The browser lists its voices a moment after the page opens (the phone, once Android's voice has started).
+// Speaking before then would use whatever voice comes first, and switch voices mid-reply.
+const voicesLoaded = new Promise(resolve => {
+  if (!('speechSynthesis' in window)) return resolve();
+  speechSynthesis.addEventListener('voiceschanged', resolve);
+  setTimeout(resolve, isNativeApp ? 4000 : 1500);
+});
 
 const speaker = {
   active: false,
@@ -354,50 +354,66 @@ const speaker = {
   generation: 0, // bumped by stop() so callbacks from cancelled speech are ignored
   voices: [],
   watchdog: null,
+  onlineFailedAt: 0,
 
+  // The chosen voice, else the most natural one available. An online voice only while it can work: not without
+  // a connection, nor for a while after one failed.
   pickVoice(name = prefs.voice) {
-    const chosen = name && this.voices.find(v => v.name === name);
+    const usable = this.voices.filter(v => !isOnlineVoice(v) || (navigator.onLine && Date.now() - this.onlineFailedAt > ONLINE_VOICE_REST_MS));
+    const chosen = name && usable.find(v => v.name === name);
     if (chosen) return chosen;
     for (const preferred of PREFERRED_VOICES) {
-      const hit = this.voices.find(v => v.name.startsWith(preferred));
+      const hit = usable.find(v => v.name.startsWith(preferred));
       if (hit) return hit;
     }
-    return this.voices.find(v => v.lang.replace('_', '-') === 'en-GB') || this.voices.find(v => v.lang.startsWith('en')) || null;
+    const steady = usable.filter(v => !/-language$/.test(v.name)); // Android's "any voice for the language"
+    return steady.find(v => v.lang.replace('_', '-') === 'en-GB') || steady.find(v => v.lang.startsWith('en')) || null;
   },
 
   speak(text, { voice = prefs.voice, rate = prefs.rate, force = false } = {}) {
     if ((!prefs.speak && !force) || !('speechSynthesis' in window)) return;
-    const clean = forSpeech(text);
-    if (!clean) return;
-    const chosen = this.pickVoice(voice);
+    const phrases = speechChunks(text);
+    if (!phrases.length) return;
     const generation = this.generation;
-    // Chrome cuts off long utterances, so speak one sentence at a time.
-    const sentences = (clean.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) ?? [clean]).map(s => s.trim()).filter(Boolean);
-    for (const sentence of sentences) {
-      const utterance = new SpeechSynthesisUtterance(sentence);
-      if (chosen) {
-        utterance.voice = chosen;
-        utterance.lang = chosen.lang;
-      } else if (isNativeApp) {
-        // The phone's own voice: British English, unless another language is chosen for listening.
-        utterance.lang = prefs.lang.startsWith('en') ? 'en-GB' : prefs.lang;
-      }
-      utterance.rate = rate;
-      utterance.onend = utterance.onerror = () => {
-        if (generation !== this.generation) return;
-        this.pending = Math.max(0, this.pending - 1);
-        if (!this.pending) this.finish();
-      };
-      this.pending++;
-      speechSynthesis.speak(utterance);
-    }
     this.active = true;
-    // Some browsers occasionally skip the "end" event; don't stay stuck in speaking mode.
-    clearInterval(this.watchdog);
-    this.watchdog = setInterval(() => {
-      if (!speechSynthesis.speaking && !speechSynthesis.pending) this.finish();
-    }, 1500);
     refresh();
+    const go = () => {
+      if (generation !== this.generation) return;
+      for (const phrase of phrases) this.say(phrase, voice, rate, generation);
+      // Some browsers occasionally skip the "end" event; don't stay stuck in speaking mode.
+      clearInterval(this.watchdog);
+      this.watchdog = setInterval(() => {
+        if (!speechSynthesis.speaking && !speechSynthesis.pending) this.finish();
+      }, 1500);
+    };
+    if (this.voices.length) go();
+    else voicesLoaded.then(go);
+  },
+
+  // One phrase. If an online voice fails (the connection dropped), it is said again with an offline voice.
+  say(phrase, voiceName, rate, generation) {
+    const chosen = this.pickVoice(voiceName);
+    const utterance = new SpeechSynthesisUtterance(phrase);
+    if (chosen) {
+      utterance.voice = chosen;
+      utterance.lang = chosen.lang;
+    } else if (isNativeApp) {
+      // The phone's own voice: British English, unless another language is chosen for listening.
+      utterance.lang = prefs.lang.startsWith('en') ? 'en-GB' : prefs.lang;
+    }
+    utterance.rate = rate;
+    utterance.onend = utterance.onerror = event => {
+      if (generation !== this.generation) return;
+      const failed = event?.type === 'error' && !['interrupted', 'canceled'].includes(event.error);
+      if (failed && isOnlineVoice(chosen)) {
+        this.onlineFailedAt = Date.now();
+        this.say(phrase, voiceName, rate, generation);
+      }
+      this.pending = Math.max(0, this.pending - 1);
+      if (!this.pending) this.finish();
+    };
+    this.pending++;
+    speechSynthesis.speak(utterance);
   },
 
   finish() {
@@ -413,12 +429,19 @@ const speaker = {
     if ('speechSynthesis' in window) speechSynthesis.cancel();
     this.finish();
   },
+
+  // The phone says some things by itself (reminders, callers): in the same voice and at the same speed.
+  shareVoice() {
+    if (!nativeAlarms?.setVoice || !this.voices.length) return;
+    nativeAlarms.setVoice({ name: this.pickVoice()?.name ?? '', rate: prefs.rate }).catch(() => {});
+  },
 };
 
 if ('speechSynthesis' in window) {
   speaker.voices = speechSynthesis.getVoices();
   speechSynthesis.addEventListener('voiceschanged', () => {
     speaker.voices = speechSynthesis.getVoices();
+    speaker.shareVoice();
   });
 }
 
@@ -939,14 +962,24 @@ function renderHistory() {
 
 // ---------- Settings ----------
 
+// Android names its voices like "en-gb-x-rjs-local": say which language, which voice, and whether it needs the
+// internet. Its "en-GB-language" entries (any voice for the language) aren't offered: they swap voices mid-reply.
+function voiceLabel(voice) {
+  const android = voice.name.match(/^[a-z]{2,3}-[a-z]{2}-x-([a-z]+)-(local|network)$/);
+  const language = LANGUAGES.find(([code]) => code.toLowerCase() === voice.lang.replace('_', '-').toLowerCase())?.[1] ?? voice.lang;
+  if (!android) return `${voice.name} (${voice.lang})`;
+  return `${language}, voice ${android[1].toUpperCase()}${android[2] === 'network' ? ', online' : ''}`;
+}
+
 function fillVoices(select) {
   select.replaceChildren(el('option', '', 'Automatic (best British voice)'));
   select.firstChild.value = '';
-  const voices = [...speaker.voices].sort(
-    (a, b) => Number(b.lang.startsWith('en')) - Number(a.lang.startsWith('en')) || a.name.localeCompare(b.name),
-  );
+  const ownLanguage = prefs.lang.split('-')[0];
+  const voices = [...speaker.voices]
+    .filter(v => !isNativeApp || ((v.lang.startsWith('en') || v.lang.startsWith(ownLanguage)) && !/-language$/.test(v.name)))
+    .sort((a, b) => Number(b.lang.startsWith('en')) - Number(a.lang.startsWith('en')) || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name));
   for (const voice of voices) {
-    const option = el('option', '', `${voice.name} (${voice.lang})`);
+    const option = el('option', '', voiceLabel(voice));
     option.value = voice.name;
     select.append(option);
   }
@@ -1538,6 +1571,7 @@ function saveSettings(event) {
     lang: fields.lang.value,
   });
   savePrefs();
+  speaker.shareVoice();
   // Synced, so every device (and the phone's alarms) checks in the same way.
   const synced = (key, value, fallback = '') => {
     if (value !== store.settings.get(key, fallback)) store.settings.set(key, value);
