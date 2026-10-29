@@ -71,6 +71,33 @@ function setup() {
   console.log('\nSETUP DONE');
 }
 
+// The release key (in %USERPROFILE%\.android\release, see its README.txt) plus its hand-over from the old test
+// key: Android 13+ takes the app as an update of earlier versions, keeping its data (key rotation, APK Signature
+// Scheme v3.1); older Androids still see the test key. Once a phone has such a version, every later one must be
+// signed this way, so there is no falling back to the test key while the folder exists.
+const RELEASE_KEYS = path.join(os.homedir(), '.android', 'release');
+
+function signWithReleaseKey(apk, alias) {
+  if (!fs.existsSync(path.join(RELEASE_KEYS, 'release.p12'))) {
+    console.log(`\nNo release keys in ${RELEASE_KEYS}: the app is signed with the test key only.`);
+    return;
+  }
+  const buildTools = path.join(env.ANDROID_HOME, 'build-tools');
+  const latest = fs.readdirSync(buildTools).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1);
+  const apksigner = `"${path.join(buildTools, latest, 'apksigner.bat')}"`;
+  const key = file => `"${path.join(RELEASE_KEYS, file)}"`;
+  const signed = `${apk}.signed`;
+  run(apksigner, [
+    'sign', '--ks', key('debug-original.keystore'), '--ks-key-alias', 'androiddebugkey', '--ks-pass', 'pass:android',
+    '--next-signer', '--ks', key('release.p12'), '--ks-key-alias', alias, '--ks-pass', `file:${key('keystore-password.txt')}`,
+    '--lineage', key(`${alias}.lineage`), '--out', `"${signed}"`, `"${apk}"`,
+  ]);
+  fs.renameSync(signed, apk);
+  fs.rmSync(`${signed}.idsig`, { force: true });
+  run(apksigner, ['verify', `"${apk}"`]);
+  console.log(`Signed with the release key "${alias}" (and the hand-over from the test key).`);
+}
+
 function build() {
   run('npx', ['cap', 'sync', 'android']);
   run(`"${path.join(android, 'gradlew.bat')}"`, ['assembleDebug', '--console=plain'], { cwd: android });
@@ -78,6 +105,7 @@ function build() {
   fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
   const target = path.join(root, 'dist', 'LightMoon.apk');
   fs.copyFileSync(apk, target);
+  signWithReleaseKey(target, 'lightmoon');
   console.log(`\nBUILD DONE: dist/LightMoon.apk (${(fs.statSync(target).size / 1_048_576).toFixed(1)} MB)`);
 }
 
