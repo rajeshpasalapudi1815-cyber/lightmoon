@@ -59,6 +59,16 @@ lives in the tray (pause, open LightMoon, quit), and logs only what it heard and
 `windows/build.sh` (Windows' own C# compiler) into `%USERPROFILE%\LightMoon`, then run `LightMoon Listener` from the
 Start menu; `--self-test` checks the recognizer with Windows' voice.
 
+The Listener also puts a small **orb** on the desktop, on top of other windows: it shows the next reminder
+("Take tablets · 9:30"), and when one goes off (or LightMoon checks in about it) it turns amber with **Done** and
+**Snooze 10 min**, so you can answer without opening LightMoon. Clicking the orb wakes LightMoon to talk. Drag it
+anywhere and it stays there; it steps aside while a film or presentation fills the screen; the tray menu (or a
+right-click on the orb) hides or shows it. The app tells the orb what's coming up and collects its answers through a
+tiny server the Listener runs on this computer only, at `http://127.0.0.1:47611` (`docs/js/desktop.js`,
+`windows/DesktopOrb.cs`); only LightMoon's own pages may use it. The first time, the browser may ask whether
+LightMoon may reach apps on this device: allow it. `windows/build.sh <folder>` builds a copy elsewhere to try out
+beside the real one (`--no-voice` for just its orb).
+
 ## Life Levelling
 
 LightMoon can connect to [Life Levelling](https://github.com/rajeshpasalapudi1815-cyber/life-levelling), the

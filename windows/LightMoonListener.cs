@@ -4,7 +4,8 @@
 //   - LightMoon minimized or behind other windows: brought to the front, then Space (LightMoon's "tap to talk").
 //   - LightMoon not open: opened in its Edge app window with ?action=talk, which starts listening.
 //   - LightMoon already in front: left alone (you're talking to it, or it's saying its own name).
-// It lives in the tray (pause, open LightMoon, quit) and starts with Windows. Build: windows/build.sh.
+// It lives in the tray (pause, open LightMoon, show or hide the orb, quit) and starts with Windows. Its desktop orb
+// shows the next reminder and answers it (DesktopOrb.cs). Build: windows/build.sh.
 // Written for the C# 5 compiler that comes with Windows (.NET Framework 4).
 using System;
 using System.Diagnostics;
@@ -33,7 +34,9 @@ static class LightMoonListener
 
     static SpeechRecognitionEngine engine;
     static NotifyIcon tray;
-    static ToolStripMenuItem listenItem;
+    static ToolStripMenuItem listenItem, orbItem;
+    static DesktopOrb orb;
+    static OrbBridge bridge;
     static bool paused;
     static DateTime lastWake = DateTime.MinValue;
     static SynchronizationContext ui;
@@ -44,35 +47,57 @@ static class LightMoonListener
         Directory.CreateDirectory(Folder);
         if (args.Length > 0 && args[0] == "--self-test") { Environment.Exit(SelfTest()); return; }
         if (args.Length > 0 && args[0] == "--wake") { Wake(); return; } // as if "LightMoon" had been heard (for testing)
+        bool voice = Array.IndexOf(args, "--no-voice") < 0; // just the orb (a test copy beside the real Listener)
 
         bool first;
-        using (new Mutex(true, "LightMoonListener", out first))
+        using (new Mutex(true, MutexName(), out first))
         {
             if (!first) return; // already running
+            SetProcessDPIAware(); // the orb's text sharp on large-text screens
             Application.EnableVisualStyles();
             ui = new WindowsFormsSynchronizationContext();
             SynchronizationContext.SetSynchronizationContext(ui);
             Log("starting");
             MakeTray();
-            try
-            {
-                engine = MakeEngine();
-                Log("recognizer ready");
-                engine.SetInputToDefaultAudioDevice();
-                Log("microphone ready");
-                engine.RecognizeAsync(RecognizeMode.Multiple);
-                Log("listening");
-            }
-            catch (Exception err)
-            {
-                Log("can't listen: " + err.Message);
-                tray.Text = "LightMoon Listener: no microphone";
-                tray.ShowBalloonTip(5000, "LightMoon Listener", "No microphone to listen with. Check Windows Settings → Privacy → Microphone.", ToolTipIcon.Warning);
-            }
+            orb = new DesktopOrb(Folder, Wake, ShowTrayMenu, Log);
+            bridge = new OrbBridge(orb, ui, Log);
+            bridge.Start();
+            if (voice) StartListening();
+            else { listenItem.Checked = false; listenItem.Enabled = false; tray.Text = "LightMoon Listener: orb only"; }
             Application.Run();
+            bridge.Stop();
+            orb.Save();
             if (engine != null) engine.Dispose();
             tray.Visible = false;
         }
+    }
+
+    static void StartListening()
+    {
+        try
+        {
+            engine = MakeEngine();
+            Log("recognizer ready");
+            engine.SetInputToDefaultAudioDevice();
+            Log("microphone ready");
+            engine.RecognizeAsync(RecognizeMode.Multiple);
+            Log("listening");
+        }
+        catch (Exception err)
+        {
+            Log("can't listen: " + err.Message);
+            tray.Text = "LightMoon Listener: no microphone";
+            tray.ShowBalloonTip(5000, "LightMoon Listener", "No microphone to listen with. Check Windows Settings → Privacy → Microphone.", ToolTipIcon.Warning);
+        }
+    }
+
+    // One Listener at a time. A copy built into another folder (windows/build.sh <folder>) is a separate one, so it
+    // can be tried out beside the real one.
+    static string MutexName()
+    {
+        string home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "LightMoon");
+        if (string.Equals(Folder.TrimEnd('\\'), home, StringComparison.OrdinalIgnoreCase)) return "LightMoonListener";
+        return "LightMoonListener " + Folder.Replace('\\', '/');
     }
 
     // The wake phrase as its own small grammar, plus free dictation so other speech is matched there instead of
@@ -177,6 +202,9 @@ static class LightMoonListener
         };
         menu.Items.Add(listenItem);
         menu.Items.Add("Open LightMoon", null, (s, e) => Wake());
+        orbItem = new ToolStripMenuItem("Hide the orb", null, (s, e) => orb.OrbShown = !orb.OrbShown);
+        menu.Items.Add(orbItem);
+        menu.Opening += (s, e) => orbItem.Text = orb.OrbShown ? "Hide the orb" : "Show the orb";
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (s, e) => Application.Exit());
         tray = new NotifyIcon
@@ -187,6 +215,14 @@ static class LightMoonListener
             Visible = true,
         };
         tray.DoubleClick += (s, e) => Wake();
+    }
+
+    // The tray menu at the pointer, the way the tray icon opens it (so it closes when you click elsewhere).
+    static void ShowTrayMenu()
+    {
+        var show = typeof(NotifyIcon).GetMethod("ShowContextMenu", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        if (show != null) show.Invoke(tray, null);
+        else tray.ContextMenuStrip.Show(Cursor.Position);
     }
 
     static Icon AppIcon()
@@ -266,6 +302,7 @@ static class LightMoonListener
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+    [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
     const int SW_RESTORE = 9;
     const byte VK_MENU = 0x12, VK_SPACE = 0x20;
     const uint KEYEVENTF_KEYUP = 0x2;
