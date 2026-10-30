@@ -67,7 +67,7 @@ function loadPrefs() {
   // sendAfterMs: how long a pause ends a spoken request (0 = only when the moon is tapped again).
   // followUp: after a spoken request, listen for the answer once the reply is said: 'questions' (when the
   // reply asks something), 'always', or 'off' (wait for a tap).
-  const defaults = { voice: '', rate: 1, speak: true, lang, handsFree: false, sendAfterMs: 2500, listenOnOpen: true, followUp: 'questions' };
+  const defaults = { voice: '', rate: 1, speak: true, lang, handsFree: false, sendAfterMs: 2500, listenOnOpen: true, followUp: 'questions', look: 'hud' };
   try {
     // Move preferences saved under the app's earlier names.
     for (const oldKey of ['vega.prefs', 'jarvis.prefs']) {
@@ -1032,6 +1032,7 @@ function openSettings() {
   const fields = $('#settingsForm').elements;
   fields.userName.value = state.profile.userName;
   fields.address.value = state.profile.address;
+  fields.look.value = prefs.look;
   fields.assistantName.value = state.profile.assistantName;
   fields.rate.value = prefs.rate;
   fields.speak.checked = prefs.speak;
@@ -1116,6 +1117,7 @@ function onSettingsHistory(event) {
 function onSettingsClosed() {
   if (settingsSteps > 0) history.go(-settingsSteps);
   settingsSteps = 0;
+  window.applyLook?.(prefs.look); // a look tried but not saved goes back
 }
 
 // A problem with something on another page: show that page, and the problem.
@@ -1177,6 +1179,12 @@ async function paintHealth() {
         alarms.batteryUnrestricted ? 'Unrestricted' : 'The phone may stop LightMoon in the background',
         alarms.batteryUnrestricted ? null : ['Fix', () => nativeAlarms.openBatterySettings().catch(() => {})]);
       row(alarms.backgroundSync ? 'ok' : 'warn', 'Background sync', alarms.backgroundSync ? 'Every 15 minutes' : 'Off until sync is set up');
+    }
+    const wake = wakeWord ? await wakeWord.status().catch(() => null) : null;
+    if (wake?.modelReady) {
+      row(wake.enabled && wake.listening ? 'ok' : wake.enabled ? 'warn' : 'bad', `Saying "${assistantName()}"`,
+        wake.enabled ? (wake.listening ? 'Listening for its name' : 'On, starts listening when the app is in the background') : 'Off: saying its name won\'t open the app',
+        wake.enabled ? null : ['Turn on', () => wakeWord.start().then(paintHealth).catch(() => openSettingsPage('voice'))]);
     }
     if (phoneState) {
       const wantsMessages = phoneState.readMessages !== 'off';
@@ -1741,6 +1749,7 @@ function saveSettings(event) {
     sendAfterMs: Number(fields.sendAfter.value),
     listenOnOpen: fields.listenOnOpen.checked,
     followUp: fields.followUp.value,
+    look: fields.look.value,
     lang: fields.lang.value,
   });
   savePrefs();
@@ -1857,6 +1866,7 @@ function wireUp() {
   $('#importFile').addEventListener('change', restoreBackup);
   $('#testVoice').addEventListener('click', () => sayInChosenVoice(`At your service, ${addressWord()}.`));
   $('#updateNow').addEventListener('click', () => updates.restart());
+  $('#lookSelect').addEventListener('change', event => window.applyLook?.(event.target.value));
   $('#healthAgain').addEventListener('click', paintHealth);
   $('#problemsCopy').addEventListener('click', async () => {
     try {

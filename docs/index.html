@@ -7,6 +7,7 @@
   <title>LightMoon</title>
   <meta name="description" content="Your personal AI assistant">
   <meta name="theme-color" content="#04070d">
+  <script src="js/look.js"></script>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -215,6 +216,16 @@
               </select>
             </label>
             <label>Assistant name <input name="assistantName" maxlength="30"><small>Also the wake word.</small></label>
+            <label>Look
+              <select name="look" id="lookSelect">
+                <option value="hud">Night HUD (the original)</option>
+                <option value="calm">Calm: soft and dark</option>
+                <option value="daylight">Daylight: light</option>
+                <option value="forest">Forest: deep green</option>
+                <option value="auto">Automatic: Calm or Daylight, like the phone</option>
+              </select>
+              <small>Changes straight away. Each device keeps its own.</small>
+            </label>
           </div>
 
           <div class="set-card">
