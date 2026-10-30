@@ -1594,7 +1594,7 @@ new MutationObserver(watchPanelIdle).observe(document.body, { attributes: true, 
 new MutationObserver(() => {
   if (!panelMode.on) return;
   const last = transcript.lastElementChild?.querySelector('.msg-text')?.textContent ?? '';
-  $('#panelText').textContent = last.length > 400 ? `…${last.slice(-400)}` : last;
+  $('#panelText').textContent = last.length > 160 ? `…${last.slice(-160)}` : last;
 }).observe(transcript, { childList: true, subtree: true, characterData: true });
 
 function listenAfterWake() {
@@ -2165,6 +2165,7 @@ function wireUp() {
   $('#wakeOff').addEventListener('click', () => wakeWord.stop().finally(() => paintWakeSettings()));
   $('#panelPref').addEventListener('change', () => wakeWord.panel({ on: $('#panelPref').checked }).catch(() => {}));
   $('#panelOpen').addEventListener('click', () => leavePanel({ full: true }));
+  $('#panelText').addEventListener('click', () => leavePanel({ full: true }));
   $('#panelClose').addEventListener('click', () => leavePanel());
   // A tap outside the panel goes back to the app behind it.
   document.addEventListener('click', event => {
