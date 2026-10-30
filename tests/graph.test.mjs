@@ -25,6 +25,18 @@ console.log('-- finding the chat');
 check('exact name wins over a longer one', () => assert.deepEqual(bestMatches(places, 'noc team').map(p => p.label), ['NOC Team']));
 check('first name finds the person', () => assert.equal(bestMatches(places, 'Akash')[0].label, 'Gunukonda, Akash | Saras America'));
 check('start of a name', () => assert.equal(bestMatches(places, 'Deeksha')[0].label, 'Deeksha Rao'));
+check('same-named chats: the one-to-one chat', () => {
+  const twins = [
+    { kind: 'chat', label: 'Kummari, Deeksha | Saras America', type: 'group', at: 5, id: 'g' },
+    { kind: 'chat', label: 'Kummari, Deeksha | Saras America', type: 'oneOnOne', at: 1, id: 'd' },
+  ];
+  assert.deepEqual(bestMatches(twins, 'Deeksha').map(p => p.id), ['d']);
+});
+check('same-named group chats: the latest', () => {
+  const twins = [{ kind: 'chat', label: 'Standup', type: 'group', at: 1, id: 'old' }, { kind: 'chat', label: 'Standup', type: 'group', at: 9, id: 'new' }];
+  assert.deepEqual(bestMatches(twins, 'standup').map(p => p.id), ['new']);
+});
+check('different names are still asked about', () => assert.equal(bestMatches([{ kind: 'chat', label: 'Akash R' }, { kind: 'chat', label: 'Akash S' }], 'Akash').length, 2));
 check('no match', () => assert.equal(bestMatches(places, 'Finance').length, 0));
 check('scores', () => assert.deepEqual([nameScore('NOC Team', 'NOC Team'), nameScore('NOC Team old', 'noc team'), nameScore('Gunukonda, Akash', 'akash')], [3, 2, 1]));
 

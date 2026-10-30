@@ -5,7 +5,7 @@
 // The matching and message-building helpers are plain functions, checked by tests/graph.test.mjs.
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
-const CACHE_KEY = 'assistant.graphChats'; // chat and channel names → ids, this device only
+const CACHE_KEY = 'assistant.graphChats2'; // chat and channel names → ids, this device only
 const CACHE_FOR_MS = 6 * 60 * 60_000;
 
 const lower = text => String(text ?? '').trim().toLowerCase();
@@ -28,7 +28,14 @@ export function nameScore(shown, said) {
 export function bestMatches(places, said) {
   const scored = places.map(place => ({ place, score: nameScore(place.label, said) })).filter(s => s.score > 0);
   const top = Math.max(0, ...scored.map(s => s.score));
-  return scored.filter(s => s.score === top).map(s => s.place);
+  const hits = scored.filter(s => s.score === top).map(s => s.place);
+  // Several chats with the very same name (her one-to-one chat and a small group with the same two people): the
+  // one-to-one chat, else the one used most recently. Different names still get asked about.
+  if (hits.length > 1 && hits.every(h => h.kind === 'chat' && lower(h.label) === lower(hits[0].label))) {
+    const direct = hits.filter(h => h.type === 'oneOnOne');
+    return [(direct.length ? direct : hits).reduce((a, b) => ((b.at ?? 0) > (a.at ?? 0) ? b : a))];
+  }
+  return hits;
 }
 
 export const escapeHtml = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -114,7 +121,12 @@ async function places() {
     for (const chat of data.value ?? []) {
       const others = (chat.members ?? []).filter(m => m.userId && m.userId !== self.id);
       const label = chat.topic || others.map(m => m.displayName).join(', ');
-      if (label) found.push({ kind: 'chat', label, id: chat.id, members: (chat.members ?? []).map(m => ({ id: m.userId, name: m.displayName })) });
+      if (label) {
+        found.push({
+          kind: 'chat', label, id: chat.id, type: chat.chatType, at: Date.parse(chat.lastUpdatedDateTime ?? '') || 0,
+          members: (chat.members ?? []).map(m => ({ id: m.userId, name: m.displayName })),
+        });
+      }
     }
     next = data['@odata.nextLink'];
   }

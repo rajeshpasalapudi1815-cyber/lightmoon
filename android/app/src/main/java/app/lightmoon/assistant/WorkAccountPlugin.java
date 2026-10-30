@@ -31,8 +31,9 @@ public class WorkAccountPlugin extends Plugin {
 
     static final String REDIRECT = "lightmoon://auth";
     private static final String PREFS = "lightmoon.work";
-    private static final String SCOPES = "openid profile offline_access User.Read User.ReadBasic.All Chat.ReadWrite ChatMessage.Send "
-        + "ChannelMessage.Send Team.ReadBasic.All Channel.ReadBasic.All Mail.Send";
+    // ".default": exactly the Microsoft Graph permissions listed in the app registration and approved there (by the
+    // user or their admin), so sign-in never asks for one nobody approved. graph.js says plainly if one is missing.
+    private static final String SCOPES = "openid profile offline_access https://graph.microsoft.com/.default";
 
     private static volatile WorkAccountPlugin active;
     private PluginCall waiting;
