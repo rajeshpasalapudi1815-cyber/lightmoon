@@ -1641,7 +1641,7 @@ function listenAfterWake() {
     if (!woke || !started || locked) return;
     speaker.stop();
     listener.autoStarted = true;
-    listenWhenFree = true;
+    listenWhenFree = 'follow-up'; // a beep the moment it's listening: words said before it would be lost
     refresh();
   });
 }
@@ -2389,7 +2389,7 @@ function greet(auto) {
     input.value = 'Add a task: ';
     input.focus();
   } else if (launch.action === 'talk') {
-    listenWhenFree = true;
+    listenWhenFree = 'follow-up'; // opened by the wake phrase: beep when listening
   } else {
     listenWhenFree = prefs.listenOnOpen;
     runBriefing(launch.action === 'briefing');

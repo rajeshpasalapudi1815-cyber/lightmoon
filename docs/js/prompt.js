@@ -4,8 +4,11 @@ import { isPast, describeAgo } from './time.js';
 import { savedPlace } from './weather.js';
 import { promptSection as lifeLevellingSection, summary as lifeLevellingSummary } from './lifelevelling.js';
 import { promptSection as phoneSection } from './phone.js';
+import { LIFE_WORDS } from './tools.js';
 
 const MAX_MEMORIES = 80;
+// Asking what to do or how the day/week looks: Life Levelling's plan helps.
+const PLANNING = /\b(plan|what (should|do) i|what's next|next step|my day|today|tonight|this week|tasks?|to-?dos?|priorit\w*|coach|motivat\w*|tired|stress\w*)\b/i;
 const MAX_TASKS = 40;
 
 function weekInShort() {
@@ -18,7 +21,9 @@ function weekInShort() {
     + `${goalNotes.length ? ` Goals: ${goalNotes.join('; ')}.` : ''}`;
 }
 
-export function buildSystemPrompt() {
+// focus: what the conversation is about just now; Life Levelling's details go in only when it's about that
+// (habits, health, money, plans), or when there's no focus (briefings, letters).
+export function buildSystemPrompt({ focus } = {}) {
   const { userName, address, assistantName } = profile();
   const name = userName || 'the user';
   const addressAs = address === 'name' ? userName || 'by their name' : address;
@@ -59,11 +64,13 @@ export function buildSystemPrompt() {
   // Sunday from 4 pm: the week in short, for the weekly review LightMoon offers.
   const now = new Date();
   const weekLine = now.getDay() === 0 && now.getHours() >= 16 ? weekInShort() : '';
-  const lifeLevelling = lifeLevellingSection();
+  const lifeTalk = focus == null || LIFE_WORDS.test(focus) || PLANNING.test(focus);
+  const lifeLevelling = lifeTalk ? lifeLevellingSection()
+    : lifeLevellingSection() && 'LIFE LEVELLING: connected. Its plan, habits, health and money show when they talk about those; for its tools call load_tools "life".';
   const lifeWhen = ['phone', 'desktop'].includes(lifeLevellingSummary()?.runsOn)
     ? 'Life Levelling is an app on their phone and computer: it applies what you send the next time one of them is open (within a minute if one is open now)'
     : 'Life Levelling applies what you send within a minute, while their computer is on';
-  const lifeGuidance = lifeLevelling ? `
+  const lifeGuidance = lifeTalk && lifeLevelling ? `
 - Life Levelling is connected (below): coach from readiness, today's plan, their weakest area, quests and the Mirror's patterns. Log water, sleep, mood, exercise, spending and habits with life_* tools; new to-dos go there (add_task only for timed reminders); delete only when asked. After 7 pm, if the day isn't closed, ask once how it went and log it with life_close_day.
 - ${lifeWhen}; say "done" or "logged".` : '';
 

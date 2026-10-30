@@ -201,12 +201,11 @@ const LINK_WORDS = /\b(links?|urls?|website|site|scam\w*|fraud\w*|phishing|genui
 // (or follow a routine), and load_tools lets the AI fetch a group it needs but wasn't given.
 export const LOAD_TOOLS = tool(
   'load_tools',
-  'Get more tools: "phone" (calls, texts, chat replies, calendar, alarms, focus, music, apps, maps, ringer) or "life" (Life Levelling: habits, health, spending, its tasks, closing the day). Call it first when you need one of those and it isn\'t in your list.',
-  { group: { type: 'string', enum: ['phone', 'life'] } },
+  'Get more tools: "phone" (calls, texts, chats, calendar, alarms, focus, driving, music, apps, maps), "life" (Life Levelling: habits, health, spending, its tasks, the day) or "more" (goals, routines, pronunciations, news, weather place, email drafts). Call it first when you need one that isn\'t in your list.',
+  { group: { type: 'string', enum: ['phone', 'life', 'more'] } },
   ['group'],
 );
-const PHONE_WORDS = /\b(call(ed|ing)?|ring|phone|texts?|sms|messages?|whats ?app|reply|calendar|meetings?|events?|schedule|alarms?|timer|wake me|flash ?light|torch|music|songs?|play|pause|skip|navigate|directions|maps?|open|focus|disturb|volume|ringer|silent|mute|battery|contacts?|number|missed|youtube|driving|drive|car|steps)\b/i;
-const LIFE_WORDS = /\b(water|drank|drink|sleep|slept|mood|exercise|work ?out|gym|ran|run|walk(ed)?|steps|spent|spend|expenses?|paid|rupees|habits?|quests?|xp|level|intention|close (my )?day|life levelling|meditat\w*|read(ing)? ([\w-]+ ){0,2}(book|pages|chapters?)|reading habit|journal|weight)\b/i;
+export const LIFE_WORDS = /\b(water|drank|drink|sleep|slept|mood|exercise|work ?out|gym|ran|run|walk(ed)?|steps|spent|spend|expenses?|paid|rupees|habits?|quests?|xp|level|intention|close (my )?day|life levelling|meditat\w*|read(ing)? ([\w-]+ ){0,2}(book|pages|chapters?)|reading habit|journal|weight)\b/i;
 
 // The tools for a request: the core ones, the groups this conversation needs, and load_tools for the rest.
 // `text`: the latest exchange (the user's last messages and LightMoon's last reply, so "yes" to "shall I call him?"
@@ -215,15 +214,46 @@ export function toolsFor(text, loaded = new Set()) {
   const phone = phoneTools();
   const life = lifeConnected() ? LIFE_TOOLS : [];
   const groups = new Set(loaded);
-  if (PHONE_WORDS.test(text)) groups.add('phone');
-  if (LIFE_WORDS.test(text)) groups.add('life');
   const lower = String(text).toLowerCase();
-  if (routines.list().some(r => r.trigger && lower.includes(r.trigger.toLowerCase()))) groups.add('phone').add('life');
-  const missing = (phone.length && !groups.has('phone')) || (life.length && !groups.has('life'));
+  const routine = routines.list().some(r => r.trigger && lower.includes(r.trigger.toLowerCase()));
+  if (LIFE_WORDS.test(text) || routine) groups.add('life');
+  // The phone's tools in parts, so "tell Gifty..." doesn't also carry the alarm, music and maps tools.
+  const phoneNames = new Set();
+  if (!groups.has('phone') && !routine) {
+    for (const [words, names] of PHONE_PARTS) if (words.test(text)) for (const name of names) phoneNames.add(name);
+  }
+  const phonePart = groups.has('phone') || routine ? phone : phone.filter(t => phoneNames.has(t.function.name));
+  // Rarely needed core tools come with the words that call for them (or with load_tools "more").
+  const core = TOOLS.filter(t => !EXTRA_TOOLS.has(t.function.name) || groups.has('more') || EXTRA_TOOLS.get(t.function.name).test(text));
+  const missing = (phone.length && phonePart.length < phone.length) || (life.length && !groups.has('life')) || core.length < TOOLS.length;
   const links = LINK_WORDS.test(text) || findLinks(text).length ? [CHECK_LINK] : [];
   if (COMPOSE_WORDS.test(text)) links.push(...(workSignedIn ? WORK_TOOLS : []), COMPOSE);
-  return [...TOOLS, ...links, ...(groups.has('life') ? life : []), ...(groups.has('phone') ? phone : []), ...(missing ? [LOAD_TOOLS] : [])];
+  return [...core, ...links, ...(groups.has('life') ? life : []), ...phonePart, ...(missing ? [LOAD_TOOLS] : [])];
 }
+
+// The phone tools a request needs, by its words.
+const PHONE_PARTS = [
+  [/\b(tell|message|msg|text|sms|whats ?app|reply|send|chat|call(ed|ing)?|ring|dial|missed|contact|number|who (is|was)|truecaller)\b/i,
+    ['phone_message', 'phone_messages', 'phone_call', 'phone_recent_calls', 'phone_number_info']],
+  [/\b(calendar|meetings?|events?|schedule|appointment|tomorrow|today|next week)\b/i, ['phone_calendar', 'phone_add_event']],
+  [/\b(alarms?|timer|wake me|remind me in|minutes?)\b/i, ['phone_alarm']],
+  [/\b(flash ?light|torch|volume|ringer|silent|vibrate|mute|louder|quieter)\b/i, ['phone_device']],
+  [/\b(focus|disturb|deep work|busy)\b/i, ['phone_focus']],
+  [/\b(driving|drive|car)\b/i, ['phone_driving']],
+  [/\b(music|songs?|play|pause|skip|next track|previous)\b/i, ['phone_media']],
+  [/\b(navigate|directions|maps?|route|how far)\b/i, ['phone_navigate']],
+  [/\b(search|youtube|google|find)\b/i, ['phone_search']],
+  [/\b(open|launch|start|app)\b/i, ['phone_open_app']],
+];
+// Core tools sent only when their words come up.
+const EXTRA_TOOLS = new Map([
+  ['add_goal', /\bgoals?\b/i], ['log_goal_progress', /\b(goals?|progress)\b/i], ['set_goal_status', /\bgoals?\b/i],
+  ['save_routine', /\broutines?\b|\bwhen i say\b/i], ['delete_routine', /\broutines?\b/i],
+  ['set_pronunciation', /\b(pronounc\w*|say(ing)? .{0,20}wrong|sounds? like)\b/i],
+  ['set_weather_place', /\b(i live|moved to|my city|weather (in|for)|weather place)\b/i],
+  ['news_headlines', /\b(news|headlines?)\b/i],
+  ['draft_email', /\b(e-?mails?|mails?)\b/i],
+]);
 
 function toId(value) {
   const id = String(value ?? '').trim().replace(/^\[?#/, '').replace(/\]$/, '');
