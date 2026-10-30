@@ -54,10 +54,19 @@ final class WakePhrases {
         return result;
     }
 
+    // Said just after LightMoon opened a draft in another app: send it (WakeWordService.expectSend).
+    static final List<String> SEND = Arrays.asList("send it", "send", "send it now", "okay send it", "ok send it", "yes send it", "yes send");
+
     // The recogniser's grammar: the chosen phrases, and "[unk]" for everything else.
     static String grammar(List<String> ids) {
+        return grammar(ids, new ArrayList<>());
+    }
+
+    // ... plus extra phrases (SEND while a draft waits).
+    static String grammar(List<String> ids, List<String> extra) {
         JSONArray words = new JSONArray();
         for (String phrase : phrases(ids)) words.put(phrase);
+        for (String phrase : extra) words.put(phrase);
         words.put("[unk]");
         return words.toString();
     }
@@ -71,6 +80,12 @@ final class WakePhrases {
             if (text.contains(" " + phrase + " ")) return true;
         }
         return false;
+    }
+
+    // Whether what it heard is only "send it" (or one of SEND), nothing else.
+    static boolean saysSend(String heard) {
+        String text = String.valueOf(heard).toLowerCase().replaceAll("[^a-z ]", " ").replaceAll("\\s+", " ").trim();
+        return SEND.contains(text);
     }
 
     // "Hey LightMoon", for the notification and Settings.

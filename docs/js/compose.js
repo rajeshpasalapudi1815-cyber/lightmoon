@@ -20,9 +20,13 @@ export const YES_ONLY = /^\W*(?:(?:yes|yeah|yep|yup|ya|ok(?:ay)?|sure|haan|ha|ji
 // A plain "send it" (also in Telugu: "pampu", "send cheyyi"), answered without the AI (tools.js quickReply).
 export const SEND_NOW = /^\W*(?:(?:ok(?:ay)?|yes|ya|haan|ha|sare|please|ji)[\s,.!]+)*(?:send|pampu|pampinchu)(?:\s+(?:it|that|this|now|please|cheyyi|chey|cheyandi|the (?:message|msg|mail|email|draft)))*\W*$/i;
 let lastDraft = null;
+let draftListener = null;
+// Told about each new draft (tools.js: the phone then listens for "send it" for a while).
+export const onDraft = listener => { draftListener = listener; };
 // chat: the chat it was typed into (when known), which must be the one on screen when Send is tapped.
 export function rememberDraft(kind, text, chat = '') {
   lastDraft = SEND_APPS[kind] && String(text ?? '').trim() ? { kind, apps: SEND_APPS[kind], text: String(text).trim(), chat, at: Date.now() } : null;
+  if (lastDraft) draftListener?.(lastDraft);
 }
 export const recentDraft = (now = Date.now()) => (lastDraft && now - lastDraft.at < DRAFT_FOR_MS ? lastDraft : null);
 const TEAMS_LINK = /^https:\/\/teams\.microsoft\.com\/l\//i;

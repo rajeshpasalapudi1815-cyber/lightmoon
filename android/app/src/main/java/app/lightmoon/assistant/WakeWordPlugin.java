@@ -173,6 +173,23 @@ public class WakeWordPlugin extends Plugin {
         });
     }
 
+    // { apps: [package...], text, chat?, seconds? }: LightMoon just opened this draft in another app; for a while
+    // "send it" is heard without the wake phrase and the Send helper sends it (only if it's switched on).
+    @PluginMethod
+    public void expectSend(PluginCall call) {
+        java.util.List<String> apps = new java.util.ArrayList<>();
+        try {
+            com.getcapacitor.JSArray given = call.getArray("apps");
+            for (int i = 0; given != null && i < given.length(); i++) apps.add(given.getString(i));
+        } catch (org.json.JSONException err) {
+            call.reject("apps must be a list.");
+            return;
+        }
+        Integer seconds = call.getInt("seconds", 30);
+        WakeWordService.expectSend(apps, call.getString("text", ""), call.getString("chat", ""), seconds == null ? 30 : seconds);
+        call.resolve();
+    }
+
     @PluginMethod
     public void takeWake(PluginCall call) {
         JSObject result = new JSObject();

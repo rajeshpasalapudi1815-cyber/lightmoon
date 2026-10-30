@@ -17,8 +17,11 @@ import { LIFE_TOOLS, lifeHandlers, isConnected as lifeConnected } from './lifele
 import { phoneTools, phoneHandlers, heardMessages } from './phone.js';
 import { lookUp, headlines } from './knowledge.js';
 import { findLinks, checkLink } from './links.js';
-import { planCompose, rememberDraft, recentDraft, SEND_NOW, YES_ONLY } from './compose.js';
-import { phone as phoneApp, workAccount } from './native.js';
+import { planCompose, rememberDraft, recentDraft, SEND_NOW, YES_ONLY, onDraft } from './compose.js';
+
+// A draft just opened in another app: the phone hears "send it" for 30 seconds without the wake phrase (app 1.19+).
+onDraft(draft => wakeWord?.expectSend?.({ apps: draft.apps, text: draft.text, chat: draft.chat ?? '', seconds: 30 }).catch(() => {}));
+import { phone as phoneApp, workAccount, wakeWord } from './native.js';
 import * as work from './graph.js';
 import { askFirst, runConfirmed, waitingConfirm, forgetConfirms } from './phone.js';
 

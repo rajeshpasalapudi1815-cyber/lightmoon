@@ -109,6 +109,54 @@ public class WakeWordService extends Service implements RecognitionListener {
         show(model == null ? "starting" : speech != null ? "listening" : justHeard ? "heard" : "paused");
     }
 
+    // ---------- "Send it" just after a draft opened ----------
+    // LightMoon opened a message it wrote in Teams, WhatsApp, Gmail or Outlook: for a short while "send it" is heard
+    // too, without the wake phrase, and the Send helper taps Send on that draft (SendHelper checks it's on screen).
+    private static volatile long sendUntil = 0;
+    private static volatile java.util.List<String> sendApps = new ArrayList<>();
+    private static volatile String sendText = "";
+    private static volatile String sendChat = "";
+
+    static void expectSend(java.util.List<String> apps, String text, String chat, int seconds) {
+        sendApps = new ArrayList<>(apps);
+        sendText = text == null ? "" : text;
+        sendChat = chat == null ? "" : chat;
+        sendUntil = SystemClock.elapsedRealtime() + Math.max(5, Math.min(seconds, 60)) * 1000L;
+        WakeWordService service = running;
+        if (service == null) return;
+        service.main.post(service::restartListening);
+        service.main.postDelayed(service::restartListening, Math.max(5, Math.min(seconds, 60)) * 1000L + 300);
+    }
+
+    private static boolean waitingToSend() {
+        return sendUntil > SystemClock.elapsedRealtime() && !sendText.isEmpty();
+    }
+
+    private void restartListening() {
+        stopListening();
+        update();
+    }
+
+    private boolean heardSend(String hypothesis, String field) {
+        if (!waitingToSend()) return false;
+        try {
+            return WakePhrases.saysSend(new JSONObject(hypothesis).optString(field));
+        } catch (JSONException err) {
+            return false;
+        }
+    }
+
+    private void send() {
+        java.util.List<String> apps = sendApps;
+        String text = sendText;
+        String chat = sendChat;
+        sendUntil = 0;
+        sendText = "";
+        chime();
+        if (SendHelper.isEnabled(this)) SendHelper.arm(apps, text, chat);
+        main.post(this::restartListening);
+    }
+
     // The wake phrases changed in Settings: listen for the new ones.
     static void phrasesChanged() {
         WakeWordService service = running;
@@ -133,7 +181,7 @@ public class WakeWordService extends Service implements RecognitionListener {
 
     private void startListening() {
         try {
-            recognizer = new Recognizer(model, SAMPLE_RATE, WakePhrases.grammar(phrases));
+            recognizer = new Recognizer(model, SAMPLE_RATE, waitingToSend() ? WakePhrases.grammar(phrases, WakePhrases.SEND) : WakePhrases.grammar(phrases));
             speech = new SpeechService(recognizer, SAMPLE_RATE);
             speech.startListening(this);
             holdAwake(true);
@@ -174,12 +222,14 @@ public class WakeWordService extends Service implements RecognitionListener {
 
     @Override
     public void onResult(String hypothesis) {
-        if (heard(hypothesis, "text")) wake();
+        if (heardSend(hypothesis, "text")) send();
+        else if (heard(hypothesis, "text")) wake();
     }
 
     @Override
     public void onFinalResult(String hypothesis) {
-        if (heard(hypothesis, "text")) wake();
+        if (heardSend(hypothesis, "text")) send();
+        else if (heard(hypothesis, "text")) wake();
     }
 
     @Override
