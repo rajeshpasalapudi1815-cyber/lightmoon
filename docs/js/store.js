@@ -207,6 +207,33 @@ export const pronunciations = {
   },
 };
 
+// What the user calls people, and who that is in their contacts or what their email address is:
+// { Mom: 'Lakshmi P', Chinnu: 'Ravi Kumar' }, one synced setting like the pronunciations.
+export const nicknames = {
+  all() {
+    try {
+      const saved = JSON.parse(settings.get('nicknames', '{}'));
+      return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+    } catch {
+      return {};
+    }
+  },
+  // Who a nickname stands for, in any case, or null.
+  lookUp(name) {
+    const wanted = String(name ?? '').trim().toLowerCase();
+    const match = Object.entries(this.all()).find(([nick]) => nick.toLowerCase() === wanted);
+    return match ? match[1] : null;
+  },
+  // An empty `who` forgets the nickname.
+  set(nickname, who) {
+    const nick = String(nickname).trim();
+    const saved = this.all();
+    for (const key of Object.keys(saved)) if (key.toLowerCase() === nick.toLowerCase()) delete saved[key];
+    if (who) saved[nick] = String(who).trim();
+    settings.set('nicknames', JSON.stringify(saved));
+  },
+};
+
 export function profile() {
   return {
     userName: settings.get('user_name'),

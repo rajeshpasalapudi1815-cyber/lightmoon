@@ -7,7 +7,7 @@
 // only reads back who and what, and the action runs when the AI calls again with that confirm_id after
 // the user has answered (a newer message from them). The stored action runs, not whatever the AI sends then.
 import { phone } from './native.js';
-import { messages as chat } from './store.js';
+import { messages as chat, nicknames } from './store.js';
 
 const REFRESH_AFTER_MS = 60_000;
 const WAIT_AT_MOST_MS = 2_500;
@@ -153,8 +153,10 @@ const looksLikeNumber = text => /^\+?[\d\s().-]{5,}$/.test(text);
 
 // { name, number, label } for a name or number, or an error the AI can ask about.
 async function findPerson(whom) {
-  const wanted = String(whom ?? '').trim();
-  if (!wanted) throw new Error('Who? Give a name or a number.');
+  const said = String(whom ?? '').trim();
+  if (!said) throw new Error('Who? Give a name or a number.');
+  // "Mom" may be saved as "Lakshmi P": the user's nicknames come first.
+  const wanted = nicknames.lookUp(said) ?? said;
   if (looksLikeNumber(wanted)) return { name: null, number: wanted.replace(/[\s().-]/g, '') };
   const { contacts } = await phone.contacts({ query: wanted });
   if (!contacts.length) throw new Error(`No contact matches "${wanted}". Ask the user for the name as saved, or the number.`);

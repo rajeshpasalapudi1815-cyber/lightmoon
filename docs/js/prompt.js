@@ -1,5 +1,5 @@
 // Builds the system prompt: LightMoon's personality plus a fresh snapshot of everything it knows.
-import { profile, memories, tasks, goals, routines, rhythm, settings } from './store.js';
+import { profile, memories, tasks, goals, routines, rhythm, settings, nicknames } from './store.js';
 import { isPast, describeAgo } from './time.js';
 import { savedPlace } from './weather.js';
 import { promptSection as lifeLevellingSection, summary as lifeLevellingSummary } from './lifelevelling.js';
@@ -65,6 +65,10 @@ export function buildSystemPrompt() {
 - Messages marked (ASKS SOMETHING OF THEM) are requests or deadlines: once, offer a reminder at a sensible time before it's due, with a check-in question ("Asha wants the report by 5; shall I remind you at 4:15?"). Never twice for the same message.
 - Focus guardian: "focus for an hour", "don't disturb me till 3", "deep work" → phone_focus (ask who may still get through if they didn't say; family is a good default to offer). While FOCUS MODE is on, keep replies short and don't bring up non-urgent things. When it ends, the phone says what came in; offer to deal with the important ones.` : '';
 
+  const nickPairs = Object.entries(nicknames.all());
+  const nicknameLine = nickPairs.length
+    ? `\n\nNICKNAMES (what they call people; calls, messages and emails understand these): ${nickPairs.map(([nick, who]) => `${nick} = ${who}`).join('; ')}`
+    : '';
   const routineLines = routines.list().map(r => `- [#${r.id}] "${r.trigger}": ${r.steps}`);
 
   const goalLines = goals.active().map(g => {
@@ -126,5 +130,5 @@ GOALS
 ${goalLines.join('\n') || '- None set yet.'}
 
 ROUTINES (when they say the phrase, do the steps)
-${routineLines.join('\n') || '- None yet.'}${buddyLine}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}${phone ? `\n\n${phone}` : ''}`;
+${routineLines.join('\n') || '- None yet.'}${nicknameLine}${buddyLine}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}${phone ? `\n\n${phone}` : ''}`;
 }

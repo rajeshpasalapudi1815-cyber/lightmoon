@@ -1,5 +1,15 @@
 // Tools the model can call to change LightMoon's memory, tasks and goals, and to check the weather.
-import { memories, tasks, goals, routines, pronunciations, messages as chat, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
+import { memories, tasks, goals, routines, pronunciations, nicknames, messages as chat, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
+
+// Hands a mailto: link to the system: the phone's mail app (the Android app passes it on), or the computer's.
+function openMailApp(url) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.rel = 'noopener';
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
 import { holdBack, callKey, saidYes } from './orders.js';
 import { normalizeTime, localStamp, prettyTime } from './time.js';
 import { findPlace, placeFromDevice, savedPlace, savePlace, weatherSummary } from './weather.js';
@@ -89,6 +99,25 @@ export const TOOLS = [
     ['trigger', 'steps'],
   ),
   tool('delete_routine', 'Delete a routine.', { id: ID }, ['id']),
+  tool(
+    'set_nickname',
+    'Remember what they call someone ("Mom is Lakshmi P in my contacts", "Chinnu is Ravi Kumar", "my boss is boss@company.com"), so calls, messages and emails find them by that name. An empty who forgets it.',
+    {
+      nickname: { type: 'string', description: 'What they call them, e.g. "Mom".' },
+      who: { type: 'string', description: 'The name as saved in their contacts, or an email address or number.' },
+    },
+    ['nickname'],
+  ),
+  tool(
+    'draft_email',
+    'Write an email and open their mail app with it filled in; they check it and tap Send there. "to" is an email address, or a nickname that stands for one; ask for the address if you don\'t know it.',
+    {
+      to: { type: 'string' },
+      subject: { type: 'string' },
+      body: { type: 'string', description: 'The whole email, in their voice, signed with their name.' },
+    },
+    ['to', 'body'],
+  ),
   tool(
     'set_pronunciation',
     'Your voice says a word wrong and they tell you how it sounds: save it, and say it that way from now on. An empty say_as goes back to normal.',
@@ -284,6 +313,26 @@ const handlers = {
     const { trigger } = routine; // removing empties the record
     routines.remove(routine.id);
     return `Deleted the routine "${trigger}"`;
+  },
+
+  set_nickname({ nickname, who }) {
+    const nick = toText(nickname, 'nickname', 40);
+    const person = String(who ?? '').trim().slice(0, 120);
+    nicknames.set(nick, person);
+    return person ? `"${nick}" is ${person}` : `Forgot the nickname "${nick}"`;
+  },
+
+  draft_email({ to, subject, body }) {
+    const said = toText(to, 'to', 120);
+    const address = nicknames.lookUp(said) ?? said;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+      throw new Error(`"${said}" isn't an email address. Ask the user for the address (and offer to remember it with set_nickname).`);
+    }
+    const text = toText(body, 'body', 4000);
+    const title = String(subject ?? '').trim().slice(0, 200);
+    const url = `mailto:${address}?${new URLSearchParams({ subject: title, body: text }).toString().replace(/\+/g, '%20')}`;
+    openMailApp(url);
+    return { text: `Email to ${address} opened in your mail app`, result: `The mail app is open with the email to ${address} filled in. Tell the user to check it and tap Send there; you haven't sent it.` };
   },
 
   set_pronunciation({ word, say_as: sayAs }) {

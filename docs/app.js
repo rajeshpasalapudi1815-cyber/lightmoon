@@ -1054,6 +1054,7 @@ function openSettings() {
   paintCloudSettings();
   paintRhythm();
   paintSayAs();
+  paintNicknames();
   paintHealth();
   paintOfflineBrain();
   paintPhoneSettings();
@@ -1547,6 +1548,24 @@ function sayInChosenVoice(text) {
   speaker.speak(text, { voice: fields.voice.value, rate: Number(fields.rate.value), force: true });
 }
 
+// What the user calls people, and who that is: each with Remove.
+function paintNicknames() {
+  const saved = Object.entries(store.nicknames.all()).sort(([a], [b]) => a.localeCompare(b));
+  const list = $('#nickList');
+  if (!saved.length) return void list.replaceChildren(el('li', 'say-as-empty', 'None yet.'));
+  list.replaceChildren(...saved.map(([nick, who]) => {
+    const remove = el('button', 'btn-ghost', 'Remove');
+    remove.type = 'button';
+    remove.addEventListener('click', () => {
+      store.nicknames.set(nick, '');
+      paintNicknames();
+    });
+    const row = el('li', 'say-as-row');
+    row.append(el('span', '', `${nick} → ${who}`), remove);
+    return row;
+  }));
+}
+
 // Words the user taught LightMoon to say their way, each with Test and Remove.
 function paintSayAs() {
   const saved = Object.entries(store.pronunciations.all()).sort(([a], [b]) => a.localeCompare(b));
@@ -1891,6 +1910,22 @@ function wireUp() {
     paintSayAs();
     sayInChosenVoice(word);
   });
+  $('#nickAdd').addEventListener('click', () => {
+    const nick = $('#nickName').value.trim();
+    const who = $('#nickWho').value.trim();
+    if (!nick || !who) return;
+    store.nicknames.set(nick, who);
+    $('#nickName').value = '';
+    $('#nickWho').value = '';
+    paintNicknames();
+  });
+  for (const field of ['#nickName', '#nickWho']) {
+    $(field).addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault(); // not the settings form's Save
+      $('#nickAdd').click();
+    });
+  }
   for (const field of ['#sayAsWord', '#sayAsSound']) {
     $(field).addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;

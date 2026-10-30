@@ -229,6 +229,20 @@
           </div>
 
           <div class="set-card">
+            <h3 class="card-title">People by nickname</h3>
+            <ul id="nickList" class="say-as-list"></ul>
+            <span class="row say-as-add">
+              <input id="nickName" maxlength="40" placeholder="Nickname, e.g. Mom" autocomplete="off" aria-label="Nickname">
+              <input id="nickWho" maxlength="120" placeholder="Saved as, e.g. Lakshmi P" autocomplete="off" aria-label="Name in contacts, email or number">
+              <button type="button" id="nickAdd" class="btn-ghost">Add</button>
+            </span>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>Say "call Mom" or "WhatsApp Chinnu" even when your contacts have other names. Write the name exactly as saved in your contacts, or an email address for emails. You can also just tell LightMoon: "Mom is Lakshmi P in my contacts". It syncs with your other devices.</p>
+            </details>
+          </div>
+
+          <div class="set-card">
             <h3 class="card-title">What LightMoon has learned</h3>
             <ul id="rhythmList" class="learned-list"></ul>
             <span class="row actions"><button type="button" id="rhythmForget" class="btn-ghost">Forget it and start again</button></span>
