@@ -15,6 +15,7 @@ import { chat, briefing, weeklyLetter } from './js/brain.js';
 import { wireLearning } from './js/learning.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 import { speechChunks, lastSentenceEnd } from './js/speech.js';
+import { genderOf, wantedGender, bestVoice } from './js/voices.js';
 import * as updates from './js/updates.js';
 import * as problems from './js/problems.js';
 
@@ -35,9 +36,8 @@ const LANGUAGES = [
   ['te-IN', 'Telugu'],
   ['ta-IN', 'Tamil'],
 ];
-// Most natural-sounding voices first: Edge's natural British voices, then Chrome's and Apple's. On Android, Google's
-// British voice that works offline: left to itself, Android swaps between its online and offline voices mid-reply.
-const PREFERRED_VOICES = ['Microsoft Ryan Online', 'Microsoft Thomas Online', 'en-gb-x-rjs-local', 'en-gb-x-gbd-local', 'Google UK English Male', 'Microsoft George', 'Daniel'];
+// The phone speaks with a female voice and the computer with a male one (js/voices.js), unless one is chosen.
+const VOICE_GENDER = wantedGender(isNativeApp);
 const ONLINE_VOICE_REST_MS = 10 * 60_000; // after an online voice fails, use an offline one for this long
 const PREFS_KEY = 'assistant.prefs';
 const ASKED_NOTIFICATIONS_KEY = 'assistant.askedNotifications';
@@ -75,7 +75,14 @@ function loadPrefs() {
       if (old !== null && localStorage.getItem(PREFS_KEY) === null) localStorage.setItem(PREFS_KEY, old);
       localStorage.removeItem(oldKey);
     }
-    return { ...defaults, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') };
+    const saved = { ...defaults, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') };
+    // Once, when voices were split into male and female: a voice of the other kind goes back to Automatic.
+    if (!saved.voiceGenderSet) {
+      if (saved.voice && genderOf(saved.voice) && genderOf(saved.voice) !== VOICE_GENDER) saved.voice = '';
+      saved.voiceGenderSet = true;
+      localStorage.setItem(PREFS_KEY, JSON.stringify(saved));
+    }
+    return saved;
   } catch {
     return defaults;
   }
@@ -368,10 +375,8 @@ const speaker = {
     const usable = this.voices.filter(v => !isOnlineVoice(v) || (navigator.onLine && Date.now() - this.onlineFailedAt > ONLINE_VOICE_REST_MS));
     const chosen = name && usable.find(v => v.name === name);
     if (chosen) return chosen;
-    for (const preferred of PREFERRED_VOICES) {
-      const hit = usable.find(v => v.name.startsWith(preferred));
-      if (hit) return hit;
-    }
+    const best = bestVoice(usable, VOICE_GENDER);
+    if (best) return best;
     const steady = usable.filter(v => !/-language$/.test(v.name)); // Android's "any voice for the language"
     return steady.find(v => v.lang.replace('_', '-') === 'en-GB') || steady.find(v => v.lang.startsWith('en')) || null;
   },
@@ -1004,12 +1009,17 @@ function voiceLabel(voice) {
   const android = voice.name.match(/^[a-z]{2,3}-[a-z]{2}-x-([a-z]+)-(local|network)$/);
   const language = LANGUAGES.find(([code]) => code.toLowerCase() === voice.lang.replace('_', '-').toLowerCase())?.[1] ?? voice.lang;
   if (!android) return `${voice.name} (${voice.lang})`;
-  return `${language}, voice ${android[1].toUpperCase()}${android[2] === 'network' ? ', online' : ''}`;
+  const kind = genderOf(voice);
+  return `${language}, ${kind ? `${kind} ` : ''}voice ${android[1].toUpperCase()}${android[2] === 'network' ? ', online' : ''}`;
 }
 
 function fillVoices(select) {
-  select.replaceChildren(el('option', '', 'Automatic (best British voice)'));
+  select.replaceChildren(el('option', '', `Automatic (best ${VOICE_GENDER} voice)`));
   select.firstChild.value = '';
+  const groups = { female: el('optgroup'), male: el('optgroup'), other: el('optgroup') };
+  groups.female.label = 'Female voices';
+  groups.male.label = 'Male voices';
+  groups.other.label = 'Other voices';
   const ownLanguage = prefs.lang.split('-')[0];
   const voices = [...speaker.voices]
     .filter(v => !isNativeApp || ((v.lang.startsWith('en') || v.lang.startsWith(ownLanguage)) && !/-language$/.test(v.name)))
@@ -1017,8 +1027,11 @@ function fillVoices(select) {
   for (const voice of voices) {
     const option = el('option', '', voiceLabel(voice));
     option.value = voice.name;
-    select.append(option);
+    groups[genderOf(voice) ?? 'other'].append(option);
   }
+  // This device's kind first.
+  const order = VOICE_GENDER === 'female' ? ['female', 'male', 'other'] : ['male', 'female', 'other'];
+  select.append(...order.map(kind => groups[kind]).filter(group => group.children.length));
   select.value = prefs.voice;
 }
 
