@@ -1309,6 +1309,9 @@ async function paintWakeSettings(message) {
   $('#wakeStatus').textContent = message ?? (status.enabled ? states[status.state] ?? 'On' : 'Off');
   $('#wakeOn').hidden = status.enabled;
   paintWakePhrases();
+  const panelState = await wakeWord.panel?.().catch(() => null); // app 1.12 and later
+  $('#panelRow').hidden = !panelState?.possible;
+  if (panelState) $('#panelPref').checked = panelState.usePanel;
   $('#wakeOff').hidden = !status.enabled;
   $('#wakeOpenSelf').hidden = !status.enabled || status.canOpenItself;
 }
@@ -1510,8 +1513,60 @@ function onPhoneSay({ say }) {
   if (!listener.capturing) speaker.speak(say, { force: true }); // never talk over the user
 }
 
-// True when the app was opened (or brought back) because the phone heard "LightMoon".
-const takeWake = async () => Boolean(wakeWord && (await wakeWord.takeWake().catch(() => null))?.wake);
+// True when the app was opened (or brought back) because the phone heard "LightMoon". Opened as the quick
+// panel, it shows as the panel.
+const takeWake = async () => {
+  const woke = wakeWord ? await wakeWord.takeWake().catch(() => null) : null;
+  if (woke?.panel) setPanelMode(true);
+  return Boolean(woke?.wake);
+};
+
+// ---------- Quick panel (Android 1.12): a small panel over the app the user is in ----------
+// The phone shows LightMoon see-through (MainActivity); here only the moon, what was heard and the reply show.
+// When it has been quiet for a few seconds after answering (or nothing was said), it goes back to that app.
+const PANEL_IDLE_MS = 5000;
+const panelMode = { on: false, timer: null };
+
+function setPanelMode(on) {
+  if (on && (!started || locked)) {
+    wakeWord?.leavePanel?.({ full: true }).catch(() => {}); // the lock or set-up needs the whole screen
+    on = false;
+  }
+  panelMode.on = on;
+  document.documentElement.classList.toggle('panel', on);
+  clearTimeout(panelMode.timer);
+  if (on) {
+    $('#panelText').textContent = '';
+    watchPanelIdle();
+  }
+}
+
+// Back to the app they were in (or, with full, the whole of LightMoon).
+function leavePanel({ full = false } = {}) {
+  if (!panelMode.on) return;
+  if (!full) {
+    speaker.stop();
+    listenWhenFree = false;
+    if (listener.capturing) listener.cancel();
+  }
+  setPanelMode(false);
+  wakeWord?.leavePanel?.({ full }).catch(() => {});
+}
+
+function watchPanelIdle() {
+  clearTimeout(panelMode.timer);
+  if (panelMode.on && document.body.dataset.state === 'idle' && !listenWhenFree) {
+    panelMode.timer = setTimeout(() => leavePanel(), PANEL_IDLE_MS);
+  }
+}
+
+new MutationObserver(watchPanelIdle).observe(document.body, { attributes: true, attributeFilter: ['data-state'] });
+// The panel shows what was said last: their words, then the reply as it comes.
+new MutationObserver(() => {
+  if (!panelMode.on) return;
+  const last = transcript.lastElementChild?.querySelector('.msg-text')?.textContent ?? '';
+  $('#panelText').textContent = last.length > 400 ? `…${last.slice(-400)}` : last;
+}).observe(transcript, { childList: true, subtree: true, characterData: true });
 
 function listenAfterWake() {
   takeWake().then(woke => {
@@ -2078,6 +2133,13 @@ function wireUp() {
   $('#phoneTest').addEventListener('click', testSpokenReminder);
   $('#wakeOn').addEventListener('click', turnOnWakeWord);
   $('#wakeOff').addEventListener('click', () => wakeWord.stop().finally(() => paintWakeSettings()));
+  $('#panelPref').addEventListener('change', () => wakeWord.panel({ on: $('#panelPref').checked }).catch(() => {}));
+  $('#panelOpen').addEventListener('click', () => leavePanel({ full: true }));
+  $('#panelClose').addEventListener('click', () => leavePanel());
+  // A tap outside the panel goes back to the app behind it.
+  document.addEventListener('click', event => {
+    if (panelMode.on && !event.target.closest('.core-wrap')) leavePanel();
+  });
   $('#wakeOpenSelf').addEventListener('click', () => wakeWord.openOverlaySettings().catch(() => {}));
   if (phone) {
     $('#allowCalendar').addEventListener('click', () => allowPhone(() => phone.requestCalendar(), 'calendar'));
@@ -2143,6 +2205,7 @@ function wireUp() {
       refreshPhone({ force: true });
     }
     if (!document.hidden) listenAfterWake();
+    if (document.hidden && panelMode.on) setPanelMode(false), wakeWord?.leavePanel?.({ full: true }).catch(() => {});
     if (!started) return;
     if (document.hidden) {
       hiddenAt = Date.now();

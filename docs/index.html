@@ -84,6 +84,11 @@
           <button id="core" class="reactor" aria-label="Tap to talk"><i></i><i></i><i></i><b></b></button>
           <p id="status" class="status" aria-live="polite">Standing by</p>
           <p id="caption" class="caption" aria-live="polite"></p>
+          <p id="panelText" class="panel-text" aria-live="polite"></p>
+          <div class="panel-bar">
+            <button type="button" id="panelOpen" class="btn-ghost">Open LightMoon</button>
+            <button type="button" id="panelClose" class="btn-ghost" aria-label="Close">Close</button>
+          </div>
           <div id="updateBar" class="update-bar" hidden>
             <span class="update-text">A new version of LightMoon is ready.</span>
             <button type="button" id="updateNow" class="btn-ghost">Restart</button>
@@ -322,6 +327,7 @@
               <button type="button" id="wakeOpenSelf" class="btn-ghost" hidden>Allow LightMoon to open itself</button>
               <button type="button" id="wakeOff" class="btn-ghost" hidden>Turn off</button>
             </span>
+            <label class="switch-row" id="panelRow" hidden>Answer in a small panel over the app I'm in <input type="checkbox" id="panelPref"></label>
             <div id="wakePhrases" hidden>
               <p class="hint">It wakes for any phrase switched on here, said as a whole:</p>
               <div id="wakePhraseList"></div>

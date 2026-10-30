@@ -32,6 +32,23 @@
 html, body { margin: 0; height: 100%; }
 [hidden] { display: none !important; }
 
+/* The quick panel (Android): only the moon, what it heard and said, over the app the user is in. */
+.panel-text, .panel-bar { display: none; }
+html.panel, html.panel body { background: transparent; }
+html.panel body::before { content: ''; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); }
+html.panel .topbar, html.panel .panels, html.panel #transcript, html.panel #composer, html.panel #updateBar, html.panel #caption { display: none !important; }
+html.panel .layout, html.panel .stage { background: none; }
+html.panel .core-wrap {
+  position: fixed; left: 12px; right: 12px; bottom: 16px; z-index: 5;
+  display: grid; grid-template-columns: 72px 1fr; align-items: center; gap: 4px 14px;
+  padding: 16px; border-radius: 22px; border: 1px solid rgba(var(--accent-rgb), 0.35);
+  background: var(--bg); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+html.panel body .core-wrap .reactor.reactor { width: 72px; height: 72px; grid-row: span 2; margin: 0; }
+html.panel .core-wrap .status { margin: 0; text-align: left; }
+html.panel .panel-text { display: block; margin: 0; max-height: 7.5em; overflow-y: auto; color: var(--text); text-align: left; }
+html.panel .panel-bar { display: flex; grid-column: 1 / -1; justify-content: flex-end; gap: 8px; }
+
 body {
   font: 15px/1.5 var(--body);
   color: var(--text);

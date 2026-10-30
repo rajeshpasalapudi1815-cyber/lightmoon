@@ -45,7 +45,10 @@ async function load() {
     phone.battery?.().catch(() => null) ?? null,
   ]);
   const steps = allowed.steps ? await phone.steps().then(r => r.steps, () => -1) : -1;
-  seen = { events, calls, messages, battery, steps, at: now };
+  // Email accounts start switched off (Settings → Messages and email), so "check my mail" can find nothing.
+  const sources = allowed.messages && phone.readingSources ? await phone.readingSources().catch(() => null) : null;
+  const mail = sources ? { accounts: (sources.accounts ?? []).length, on: (sources.accounts ?? []).filter(a => a.allowed).length } : null;
+  seen = { events, calls, messages, battery, steps, mail, at: now };
 }
 
 // ---------- What the AI is told ----------
@@ -102,6 +105,12 @@ export function promptSection() {
     lines.push(missed.length ? `Missed calls (last 24 h): ${missed.map(c => `${who(c)} ${dayWord(c.at).toLowerCase()} ${clock(c.at)}`).join('; ')}` : 'No missed calls in the last 24 hours.');
     const talked = finishedCalls();
     if (talked.length) lines.push(`Calls they just had: ${talked.join('; ')}`);
+  }
+  if (seen.mail?.accounts && !seen.mail.on) {
+    lines.push(`Email: none of their ${seen.mail.accounts} email accounts is switched on for you, so you can't see any email. If they ask about mail, `
+      + 'say exactly that and that they can switch on the accounts they want in Settings → Messages and email → Email accounts; never just say you have no access.');
+  } else if (seen.mail?.on) {
+    lines.push(`Email: ${seen.mail.on} account${seen.mail.on === 1 ? '' : 's'} switched on. You see only emails that arrived as notifications since then (in the list below), not their inbox or older mail; say so if they ask for more.`);
   }
   if (seen.steps >= 0) lines.push(`Steps today (phone's step counter): ${seen.steps.toLocaleString('en-IN')}.`);
   if (allowed.driving) {

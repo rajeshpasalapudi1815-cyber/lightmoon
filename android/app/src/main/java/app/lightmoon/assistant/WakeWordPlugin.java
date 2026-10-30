@@ -139,10 +139,45 @@ public class WakeWordPlugin extends Plugin {
         return result;
     }
 
+    // Whether the wake phrase opens the quick panel (Settings → Voice: on unless switched off).
+    static boolean usePanel(Context context) {
+        return MainActivity.panelPossible() && context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("panel", true);
+    }
+
+    // { on } chooses whether the wake phrase opens the quick panel -> { panel, possible, usePanel }; without "on",
+    // only reports. "panel" says whether LightMoon is showing as the panel right now.
+    @PluginMethod
+    public void panel(PluginCall call) {
+        Boolean on = call.getBoolean("on");
+        if (on != null) getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("panel", on).apply();
+        JSObject result = new JSObject();
+        result.put("panel", MainActivity.panel);
+        result.put("possible", MainActivity.panelPossible());
+        result.put("usePanel", usePanel(getContext()));
+        call.resolve(result);
+    }
+
+    // { full: true } turns the panel into the full app; otherwise goes back to the app the user was in.
+    @PluginMethod
+    public void leavePanel(PluginCall call) {
+        boolean full = Boolean.TRUE.equals(call.getBoolean("full", false));
+        getActivity().runOnUiThread(() -> {
+            try {
+                MainActivity activity = (MainActivity) getActivity();
+                if (full) activity.setPanel(false);
+                else activity.leavePanel();
+                call.resolve();
+            } catch (RuntimeException err) {
+                call.reject("Couldn't close the panel.");
+            }
+        });
+    }
+
     @PluginMethod
     public void takeWake(PluginCall call) {
         JSObject result = new JSObject();
         result.put("wake", pendingWake);
+        result.put("panel", MainActivity.panel);
         pendingWake = false;
         call.resolve(result);
     }
@@ -186,7 +221,7 @@ public class WakeWordPlugin extends Plugin {
         pendingWake = true;
         KeyguardManager keyguard = context.getSystemService(KeyguardManager.class);
         Class<?> screen = keyguard.isKeyguardLocked() ? UnlockActivity.class : MainActivity.class;
-        Intent open = new Intent(context, screen).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent open = new Intent(context, screen).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(MainActivity.EXTRA_PANEL, usePanel(context));
         // If Android blocks opening from the background, this notification is the way in.
         showHeard(context, open);
         try {

@@ -44,7 +44,8 @@ public class UnlockActivity extends Activity {
     }
 
     private void open() {
-        startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(MainActivity.EXTRA_PANEL, getIntent().getBooleanExtra(MainActivity.EXTRA_PANEL, false)));
         finish();
     }
 

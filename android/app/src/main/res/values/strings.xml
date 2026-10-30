@@ -4,4 +4,6 @@
     <string name="title_activity_main">LightMoon</string>
     <string name="package_name">app.lightmoon.assistant</string>
     <string name="custom_url_scheme">app.lightmoon.assistant</string>
+    <string name="shortcut_ask">Ask LightMoon</string>
+    <string name="shortcut_ask_long">Ask LightMoon over this screen</string>
 </resources>

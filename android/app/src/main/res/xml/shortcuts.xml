@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the LightMoon icon: "Ask LightMoon" opens the quick panel over whatever is on screen. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="ask"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_ask"
+        android:shortcutLongLabel="@string/shortcut_ask_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="app.lightmoon.assistant"
+            android:targetClass="app.lightmoon.assistant.MainActivity">
+            <extra android:name="app.lightmoon.assistant.PANEL" android:value="true" />
+            <extra android:name="app.lightmoon.assistant.LISTEN" android:value="true" />
+        </intent>
+    </shortcut>
+</shortcuts>
