@@ -751,6 +751,29 @@ public class PhonePlugin extends Plugin {
         });
     }
 
+    // { chat, text, send? }: the Send helper opens that Teams chat by name and types the text (and sends, if asked).
+    @PluginMethod
+    public void openTeamsChat(PluginCall call) {
+        if (!SendHelper.isEnabled(getContext())) {
+            call.reject("The Send helper is off. Switch it on in LightMoon's Settings → Phone → Send helper.");
+            return;
+        }
+        String chat = call.getString("chat", "").trim();
+        if (chat.isEmpty()) {
+            call.reject("Which chat?");
+            return;
+        }
+        boolean started = SendHelper.openChat(getContext(), chat, call.getString("text", ""), Boolean.TRUE.equals(call.getBoolean("send", false)));
+        if (!started) {
+            call.reject("Teams isn't installed, or the Send helper isn't running yet.");
+            return;
+        }
+        getActivity().runOnUiThread(() -> {
+            if (getActivity() instanceof MainActivity && MainActivity.panel) ((MainActivity) getActivity()).leavePanel();
+            call.resolve();
+        });
+    }
+
     // { name } -> { label }: opens the installed app whose name matches best.
     @PluginMethod
     public void openApp(PluginCall call) {

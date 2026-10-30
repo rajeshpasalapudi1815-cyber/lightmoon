@@ -527,31 +527,6 @@
               <p>The briefings are said at alarm volume, even with LightMoon closed: the weather (for your city above), meetings, reminders, and in the morning the calls and messages you missed overnight.</p>
             </details>
           </div>
-
-          <div class="set-card" id="sendHelperBox" hidden>
-            <div class="card-head"><h3 class="card-title">Send helper</h3><span id="sendHelperStatus" class="card-status"></span></div>
-            <p class="hint">When LightMoon writes a message for you in Teams, WhatsApp, Gmail or Outlook and you say "send it", the helper taps Send for you.</p>
-            <span class="row actions"><button type="button" id="sendHelperOn" class="btn-ghost">Switch on</button></span>
-            <details class="help">
-              <summary>How to switch it on, and what it can see</summary>
-              <p>Tap Switch on, then in Android's list tap "LightMoon Send helper" and turn it on. If Android says it's a restricted setting: open the phone's Settings → Apps → LightMoon → ⋮ (top right) → Allow restricted settings, then try again.</p>
-              <p>It works only in those four apps, only for about 15 seconds after you say "send it" about a message LightMoon wrote, and only when that message is on screen; it taps nothing but a button called Send. Android still describes it as able to see your screen, because that's how it finds the button.</p>
-            </details>
-          </div>
-
-          <div class="set-card" id="drivingBox" hidden>
-            <div class="card-head"><h3 class="card-title">Driving mode</h3><span id="drivingStatus" class="card-status"></span></div>
-            <p class="hint">While driving, every message is read out in full and LightMoon keeps its answers short, so you never need to look at the phone. Say "I'm driving" to turn it on, or let it come on by itself in your car.</p>
-            <span class="row actions">
-              <button type="button" id="drivingCar" class="btn-ghost">This is my car</button>
-              <button type="button" id="drivingForget" class="btn-ghost" hidden>Forget the car</button>
-              <button type="button" id="drivingEnd" class="btn-ghost" hidden>Stop driving mode</button>
-            </span>
-            <details class="help">
-              <summary>How it knows you're in the car</summary>
-              <p>Sit in the car with the phone connected to its Bluetooth and tap "This is my car". From then on, driving mode is on whenever the phone is connected to it. Earbuds and other speakers don't count.</p>
-            </details>
-          </div>
         </section>
 
         <!-- ---------- Phone ---------- -->
@@ -593,6 +568,53 @@
             <details class="help">
               <summary>"Reading messages" is greyed out?</summary>
               <p>If Android greys out LightMoon on the notification access screen ("restricted setting"), open phone Settings → Apps → LightMoon → ⋮ (top right) → Allow restricted settings, then try again. Android does this for apps installed outside the Play Store.</p>
+            </details>
+          </div>
+
+          <div class="set-card" id="workBox" hidden>
+            <div class="card-head"><h3 class="card-title">Microsoft work account</h3><span id="workStatus" class="card-status"></span></div>
+            <p class="hint">Signed in, LightMoon sends Teams messages (with real @mentions) and work email itself, after reading each one back for your yes.</p>
+            <label>Application (client) ID <input id="workClient" autocomplete="off" spellcheck="false" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
+            <label>Directory (tenant) ID <input id="workTenant" autocomplete="off" spellcheck="false" placeholder="optional"></label>
+            <span class="row actions">
+              <button type="button" id="workSignIn" class="btn-ghost">Sign in</button>
+              <button type="button" id="workSignOut" class="btn-ghost" hidden>Sign out</button>
+            </span>
+            <details class="help">
+              <summary>Setting it up (once, about 10 minutes)</summary>
+              <ol>
+                <li>On a computer, open portal.azure.com and sign in with your work account.</li>
+                <li>Microsoft Entra ID → App registrations → New registration. Name: LightMoon. Who can use it: "Accounts in this organizational directory only".</li>
+                <li>Redirect URI: choose "Public client/native (mobile &amp; desktop)" and enter <code>lightmoon://auth</code>. Register.</li>
+                <li>API permissions → Add a permission → Microsoft Graph → Delegated: Chat.ReadWrite, ChatMessage.Send, ChannelMessage.Send, Team.ReadBasic.All, Channel.ReadBasic.All, User.ReadBasic.All, Mail.Send (User.Read and offline_access may already be there).</li>
+                <li>Copy the Application (client) ID and Directory (tenant) ID from Overview into the boxes above, and tap Sign in.</li>
+              </ol>
+              <p>If Microsoft says you need an admin's approval, ask your IT admin to open the app registration's API permissions and tap "Grant admin consent". Your password is only ever typed on Microsoft's own page; LightMoon keeps just the sign-in key on this phone.</p>
+            </details>
+          </div>
+
+          <div class="set-card" id="sendHelperBox" hidden>
+            <div class="card-head"><h3 class="card-title">Send helper</h3><span id="sendHelperStatus" class="card-status"></span></div>
+            <p class="hint">When LightMoon writes a message for you in Teams, WhatsApp, Gmail or Outlook and you say "send it", the helper taps Send for you.</p>
+            <span class="row actions"><button type="button" id="sendHelperOn" class="btn-ghost">Switch on</button></span>
+            <details class="help">
+              <summary>How to switch it on, and what it can see</summary>
+              <p>Tap Switch on, then in Android's list tap "LightMoon Send helper" and turn it on. If Android says it's a restricted setting: open the phone's Settings → Apps → LightMoon → ⋮ (top right) → Allow restricted settings, then try again.</p>
+              <p>It works only in those four apps, only for about 15 seconds after you say "send it" about a message LightMoon wrote, and only when that message is on screen; it taps nothing but a button called Send. Android still describes it as able to see your screen, because that's how it finds the button.</p>
+            </details>
+          </div>
+
+          <div class="set-card" id="drivingBox" hidden>
+            <div class="card-head"><h3 class="card-title">Driving mode</h3><span id="drivingStatus" class="card-status"></span></div>
+            <p class="hint">While driving, every message is read out in full and LightMoon keeps its answers short, so you never need to look at the phone. Say "I'm driving" to turn it on, or let it come on by itself in your car.</p>
+            <span class="row actions">
+              <button type="button" id="drivingCar" class="btn-ghost">This is my car</button>
+              <button type="button" id="drivingForget" class="btn-ghost" hidden>Forget the car</button>
+              <button type="button" id="drivingEnd" class="btn-ghost" hidden>Stop driving mode</button>
+            </span>
+            <details class="help">
+              <summary>How it knows you're in the car</summary>
+              <p>Sit in the car with the phone connected to its Bluetooth and tap "This is my car". From then on, driving mode is on whenever the phone is connected to it. Earbuds and other speakers don't count.</p>
             </details>
           </div>
 

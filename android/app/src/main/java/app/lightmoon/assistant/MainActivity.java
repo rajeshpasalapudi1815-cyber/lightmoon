@@ -31,6 +31,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(FileSaverPlugin.class);
         registerPlugin(PhonePlugin.class);
         registerPlugin(OfflineBrainPlugin.class);
+        registerPlugin(WorkAccountPlugin.class);
         super.onCreate(savedInstanceState);
         WebView web = getBridge() == null ? null : getBridge().getWebView();
         if (web != null) web.setBackgroundColor(Color.TRANSPARENT); // the page paints its own background
@@ -60,6 +61,10 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (intent != null && intent.getData() != null && "lightmoon".equals(intent.getData().getScheme())) {
+            WorkAccountPlugin.handleRedirect(intent.getData()); // back from the Microsoft sign-in page
+            return;
+        }
         setPanel(wantsPanel(intent));
         takeListen(intent);
     }

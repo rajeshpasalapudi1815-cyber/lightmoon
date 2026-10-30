@@ -14,6 +14,11 @@ export const SEND_APPS = {
   email: ['com.google.android.gm', 'com.microsoft.office.outlook'],
 };
 const DRAFT_FOR_MS = 10 * 60_000;
+// A message that is only a yes ("yes", "ok send it", "haan ji", "sare"), nothing more: it answers LightMoon's
+// read-back on the phone itself (tools.js quickReply). "Yes, but make it Friday" is not one.
+export const YES_ONLY = /^\W*(?:(?:yes|yeah|yep|yup|ya|ok(?:ay)?|sure|haan|ha|ji|sare|sari|avunu|theek hai|go ahead|do it|confirm(?:ed)?|correct|please)[\s,.!]*)+(?:(?:send|pampu|pampinchu)(?:\s+(?:it|now|please|cheyyi|chey))*)?\W*$/i;
+// A plain "send it" (also in Telugu: "pampu", "send cheyyi"), answered without the AI (tools.js quickReply).
+export const SEND_NOW = /^\W*(?:(?:ok(?:ay)?|yes|ya|haan|ha|sare|please|ji)[\s,.!]+)*(?:send|pampu|pampinchu)(?:\s+(?:it|that|this|now|please|cheyyi|chey|cheyandi|the (?:message|msg|mail|email|draft)))*\W*$/i;
 let lastDraft = null;
 export function rememberDraft(kind, text) {
   lastDraft = SEND_APPS[kind] && String(text ?? '').trim() ? { kind, apps: SEND_APPS[kind], text: String(text).trim(), at: Date.now() } : null;
@@ -26,19 +31,20 @@ export const splitPeople = to => String(to ?? '').split(/\s*(?:,|;|\band\b|&)\s*
 
 // A plan for compose_message: { kind: 'link', url, app, copy?, note } | { kind: 'share', app, text, note } | { ask }.
 // lookUp turns a nickname into what it stands for (an email address, or a Teams chat or channel link).
-export function planCompose({ app, to = '', text, group = '', lookUp = () => null }) {
+// byName: the Send helper can open a Teams chat by its name (Android 1.15 and later, helper switched on).
+export function planCompose({ app, to = '', text, group = '', lookUp = () => null, byName = false }) {
   const words = String(text ?? '').trim();
   const where = String(app ?? '').trim();
   if (!words) return { ask: 'What should the message say?' };
   if (!where) return { ask: 'Which app should it go in?' };
-  if (/^teams$|microsoft teams/i.test(where)) return planTeams({ to, text: words, group, lookUp });
+  if (/^teams$|microsoft teams/i.test(where)) return planTeams({ to, text: words, group, lookUp, byName });
   return {
     kind: 'share', app: where, text: words,
     note: `${where} is open on its "share to" screen with the message in it (it's on the clipboard too): they pick ${to ? `the chat with ${to}` : 'the chat'} and tap Send. You can't pick the chat or send it for them.`,
   };
 }
 
-function planTeams({ to, text, group, lookUp }) {
+function planTeams({ to, text, group, lookUp, byName }) {
   const people = splitPeople(to);
   if (!people.length && !group) return { ask: 'Who is the Teams message for? Give a name, or the group or channel.' };
   // A saved link for a group chat or channel ("NOC Team" = its Teams link) opens that chat itself.
@@ -55,6 +61,14 @@ function planTeams({ to, text, group, lookUp }) {
     return {
       kind: 'link', app: 'Teams', url: target, copy: text,
       note: `Teams is opening ${group || people[0]}. Teams can't take a message ready-made for a group chat or channel link, so the message is on the clipboard: tell them to long-press the message box, tap Paste, check it and tap Send.${tagNote}`,
+    };
+  }
+  // No link or email, but the Send helper can find the chat by name in Teams itself.
+  const byNameChat = group || (people.length === 1 && !EMAIL.test(people[0]) && !(lookUp(people[0]) && EMAIL.test(lookUp(people[0]))) ? people[0] : '');
+  if (byName && byNameChat) {
+    return {
+      kind: 'chat', app: 'Teams', chat: byNameChat, text,
+      note: `Teams is opening "${byNameChat}" through its search and typing the message (the phone shows a note when it's ready). They check it; "send it" sends it.${tagNote}`,
     };
   }
   if (group && !people.length) {

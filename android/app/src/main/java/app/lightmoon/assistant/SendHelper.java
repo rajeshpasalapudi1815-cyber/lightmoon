@@ -25,6 +25,9 @@ import java.util.regex.Pattern;
 //   user just said to send it (docs/js/tools.js tap_send);
 // - it taps only when those words are on screen, and only a button called Send; then it disarms.
 // It reads nothing else and keeps nothing.
+// It can also open a Teams chat by its name and type LightMoon's message there (openChat), when the user asks
+// LightMoon to write to a chat it has no link for: it uses Teams' own search, the way the user would, step by step,
+// and gives up after 25 seconds. It stops at the typed message unless they asked to send it.
 public class SendHelper extends AccessibilityService {
 
     private static final long ARMED_FOR_MS = 15_000;
@@ -37,6 +40,168 @@ public class SendHelper extends AccessibilityService {
     private static volatile long armedUntil = 0;
 
     private final Handler main = new Handler(Looper.getMainLooper());
+
+    // ---------- Opening a Teams chat by name ----------
+    static final String TEAMS = "com.microsoft.teams";
+    private static final long CHAT_FOR_MS = 25_000;
+    private static final long STEP_MS = 700;
+    private static final Pattern SEARCH = Pattern.compile("^(search|search.*)$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern COMPOSE = Pattern.compile("(type|write) (a|your)? ?(new )?message|^message$|reply", Pattern.CASE_INSENSITIVE);
+    private String chatName = "";
+    private String chatText = "";
+    private boolean chatSend = false;
+    private String chatStep = "";
+    private long chatUntil = 0;
+    private int typeTries = 0;
+    private static final Pattern NOT_A_CHAT = Pattern.compile("search|result|[\"“”'‘’]", Pattern.CASE_INSENSITIVE);
+
+    // Opens Teams, finds the chat called chatName with Teams' search, and types the text (then Send, if asked).
+    static boolean openChat(Context context, String name, String text, boolean send) {
+        SendHelper service = running;
+        android.content.Intent launch = context.getPackageManager().getLaunchIntentForPackage(TEAMS);
+        if (service == null || launch == null) return false;
+        service.chatName = clean(name);
+        service.chatText = text == null ? "" : text.trim();
+        service.chatSend = send;
+        service.chatStep = "search";
+        service.chatUntil = SystemClock.elapsedRealtime() + CHAT_FOR_MS;
+        context.startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        service.main.postDelayed(service::chatTick, 1500);
+        return true;
+    }
+
+    private void chatTick() {
+        if (chatStep.isEmpty()) return;
+        if (SystemClock.elapsedRealtime() > chatUntil) {
+            Toast.makeText(this, "LightMoon couldn't find \"" + chatName + "\" in Teams. Please open it yourself.", Toast.LENGTH_LONG).show();
+            chatStep = "";
+            return;
+        }
+        AccessibilityNodeInfo root = teamsWindow();
+        if (root == null) android.util.Log.i("LightMoonSend", "no Teams window yet");
+        if (root != null) {
+            try {
+                chatStep(root);
+            } catch (RuntimeException err) {
+                // The screen changed under us; try again next tick.
+            }
+        }
+        if (!chatStep.isEmpty()) main.postDelayed(this::chatTick, STEP_MS);
+    }
+
+    private void chatStep(AccessibilityNodeInfo root) {
+        android.util.Log.i("LightMoonSend", "chat step: " + chatStep); // the step only, never names or text
+        switch (chatStep) {
+            case "search": {
+                AccessibilityNodeInfo box = findEditable(root, null);
+                if (box != null && box.isFocused()) {
+                    setText(box, chatName);
+                    chatStep = "pick";
+                    return;
+                }
+                AccessibilityNodeInfo search = findLabelled(root, SEARCH);
+                if (search != null) click(search);
+                return;
+            }
+            case "pick": {
+                // A result row that is the chat itself, not "Search for 'NOC Team'" or "No results for ...".
+                String wanted = firstPart(chatName.toLowerCase(Locale.ROOT));
+                AccessibilityNodeInfo hit = findText(root, node -> {
+                    if (node.isEditable() || node.getText() == null) return false;
+                    String shown = node.getText().toString();
+                    if (NOT_A_CHAT.matcher(shown).find()) return false;
+                    String name = firstPart(shown).toLowerCase(Locale.ROOT);
+                    return name.equals(wanted) || name.startsWith(wanted) || (" " + name.replace(",", " ") + " ").contains(" " + wanted + " ");
+                });
+                if (hit != null && click(hit)) {
+                    chatStep = "type";
+                    typeTries = 0;
+                }
+                return;
+            }
+            case "type": {
+                AccessibilityNodeInfo box = findEditable(root, COMPOSE);
+                if (box == null) {
+                    // Still on the search screen (that wasn't the chat): look for it again.
+                    if (++typeTries > 6) chatStep = "pick";
+                    return;
+                }
+                click(box);
+                setText(box, chatText);
+                if (chatSend) {
+                    arm(java.util.Collections.singletonList(TEAMS), chatText);
+                } else {
+                    Toast.makeText(this, "Message typed in Teams. Say \"send it\" to send.", Toast.LENGTH_SHORT).show();
+                }
+                chatStep = "";
+                return;
+            }
+            default:
+                chatStep = "";
+        }
+    }
+
+    // Teams' window on screen: the active one, or else any window of Teams (the active window can briefly be the
+    // keyboard or a system bar).
+    private AccessibilityNodeInfo teamsWindow() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root != null && root.getPackageName() != null && TEAMS.contentEquals(root.getPackageName())) return root;
+        for (android.view.accessibility.AccessibilityWindowInfo window : getWindows()) {
+            AccessibilityNodeInfo top = window.getRoot();
+            if (top != null && top.getPackageName() != null && TEAMS.contentEquals(top.getPackageName())) return top;
+        }
+        return null;
+    }
+
+    // "Gunukonda, Akash | Saras America" -> "Gunukonda, Akash".
+    private static String firstPart(String text) {
+        int bar = text.indexOf('|');
+        return (bar > 0 ? text.substring(0, bar) : text).trim();
+    }
+
+    private static boolean click(AccessibilityNodeInfo node) {
+        AccessibilityNodeInfo target = node;
+        while (target != null && !target.isClickable()) target = target.getParent();
+        return target != null && target.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+    }
+
+    private static void setText(AccessibilityNodeInfo box, String text) {
+        android.os.Bundle args = new android.os.Bundle();
+        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
+        box.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+    }
+
+    private interface Match { boolean test(AccessibilityNodeInfo node); }
+
+    private static AccessibilityNodeInfo findText(AccessibilityNodeInfo root, Match match) {
+        List<AccessibilityNodeInfo> queue = new ArrayList<>();
+        queue.add(root);
+        for (int i = 0; i < queue.size() && i < 3000; i++) {
+            AccessibilityNodeInfo node = queue.get(i);
+            if (node == null) continue;
+            if (node.isVisibleToUser() && match.test(node)) return node;
+            for (int c = 0; c < node.getChildCount(); c++) queue.add(node.getChild(c));
+        }
+        return null;
+    }
+
+    // An editable field; with hint, only one whose hint or description matches (the message box, not search).
+    private static AccessibilityNodeInfo findEditable(AccessibilityNodeInfo root, Pattern hint) {
+        return findText(root, node -> {
+            if (!node.isEditable()) return false;
+            if (hint == null) return true;
+            CharSequence said = android.os.Build.VERSION.SDK_INT >= 26 && node.getHintText() != null ? node.getHintText()
+                : node.getContentDescription() != null ? node.getContentDescription() : node.getText();
+            return said != null && hint.matcher(said.toString()).find();
+        });
+    }
+
+    private static AccessibilityNodeInfo findLabelled(AccessibilityNodeInfo root, Pattern label) {
+        return findText(root, node -> {
+            CharSequence said = node.getContentDescription() != null ? node.getContentDescription() : node.getText();
+            return said != null && label.matcher(said.toString().trim()).matches();
+        });
+    }
 
     static boolean isEnabled(Context context) {
         String enabled = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);

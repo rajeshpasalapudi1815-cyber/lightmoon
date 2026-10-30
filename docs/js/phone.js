@@ -169,7 +169,7 @@ function lastUserMessageAt() {
   return chat.recent(30).filter(m => m.role === 'user').at(-1)?.at ?? 0;
 }
 
-function askFirst(say, run) {
+export function askFirst(say, run) {
   const id = `c${Math.random().toString(36).slice(2, 6)}`;
   pending.set(id, { say, run, at: Date.now() });
   return {
@@ -178,7 +178,16 @@ function askFirst(say, run) {
   };
 }
 
-async function runConfirmed(id) {
+// The newest read-back still waiting for an answer (asked in LightMoon's last reply), or null.
+export function waitingConfirm() {
+  let newest = null;
+  for (const [id, item] of pending) {
+    if (Date.now() - item.at <= CONFIRM_FOR_MS && (!newest || item.at > newest.at)) newest = { id, at: item.at, say: item.say };
+  }
+  return newest;
+}
+
+export async function runConfirmed(id) {
   const item = pending.get(String(id));
   if (!item || Date.now() - item.at > CONFIRM_FOR_MS) {
     pending.delete(String(id));

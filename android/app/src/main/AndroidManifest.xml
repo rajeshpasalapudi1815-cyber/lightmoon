@@ -23,6 +23,14 @@
             </intent-filter>
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
 
+            <!-- Microsoft sends the browser back here after the work-account sign-in (WorkAccountPlugin). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="lightmoon" android:host="auth" />
+            </intent-filter>
+
         </activity>
 
         <!-- Spoken reminders: the alarm, the voice that says it, and setting alarms again after a restart. -->

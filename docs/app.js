@@ -1,6 +1,6 @@
 // LightMoon app: runs entirely on this device. Chat, voice, memory, tasks, goals and reminders are all
 // handled here; the only thing sent over the internet is the conversation, to the AI service.
-import { isNativeApp, nativeAlarms, wakeWord, fileSaver, phone } from './js/native.js'; // first: sets up voice in the Android app
+import { isNativeApp, nativeAlarms, wakeWord, fileSaver, phone, workAccount } from './js/native.js'; // first: sets up voice in the Android app
 import { refresh as refreshPhone } from './js/phone.js';
 import * as store from './js/store.js';
 import * as lock from './js/lock.js';
@@ -16,6 +16,7 @@ import { wireLearning } from './js/learning.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 import { speechChunks, lastSentenceEnd } from './js/speech.js';
 import { genderOf, wantedGender, bestVoice } from './js/voices.js';
+import { refreshWorkAccount } from './js/tools.js';
 import * as updates from './js/updates.js';
 import * as problems from './js/problems.js';
 
@@ -1420,6 +1421,7 @@ async function paintPhonePowers(message) {
   if (typeof status.streakGuard === 'string') $('#streakGuard').value = status.streakGuard;
   paintDriving();
   paintSendHelper();
+  paintWork();
   $('#allowCalls').closest('.perm-row').hidden = !status.telephony;
   $('#allowTexts').closest('.perm-row').hidden = !status.telephony;
   $('#allowSilence').closest('.perm-row').hidden = status.silence === undefined; // app versions before 1.4 can't silence
@@ -1501,6 +1503,32 @@ async function allowPhone(request, what) {
   }
   paintPhonePowers();
   refreshPhone({ force: true });
+}
+
+// The Microsoft work account (1.15 and later): sending Teams messages and work email straight from LightMoon.
+async function paintWork(message) {
+  const state = await workAccount?.status().catch(() => null);
+  $('#workBox').hidden = !state;
+  if (!state) return;
+  $('#workStatus').textContent = message ?? (state.signedIn ? `Signed in${state.account ? ` as ${state.account}` : ''}` : state.configured ? 'Not signed in' : 'Not set up');
+  if (!$('#workClient').value) $('#workClient').value = state.clientId ?? '';
+  if (!$('#workTenant').value && state.tenant !== 'organizations') $('#workTenant').value = state.tenant ?? '';
+  $('#workSignOut').hidden = !state.signedIn;
+}
+
+async function signInToWork() {
+  $('#settingsError').textContent = '';
+  try {
+    await workAccount.configure({ clientId: $('#workClient').value.trim(), tenant: $('#workTenant').value.trim() });
+    paintWork('Opening Microsoft sign-in...');
+    await workAccount.signIn();
+    await refreshWorkAccount();
+    note('Signed in to your work account. Try: "Tell NOC Team I\'m running late, tag Akash".');
+  } catch (err) {
+    $('#settingsError').textContent = err.message;
+  } finally {
+    paintWork();
+  }
 }
 
 // The Send helper (1.14 and later): switched on in Android's accessibility settings.
@@ -2187,6 +2215,8 @@ function wireUp() {
     $('#allowCalls').addEventListener('click', () => allowPhone(() => phone.requestCalls(), 'calls'));
     $('#allowTexts').addEventListener('click', () => allowPhone(() => phone.requestTexts(), 'texts'));
     $('#allowSteps').addEventListener('click', () => allowPhone(() => phone.requestSteps(), 'steps'));
+    $('#workSignIn').addEventListener('click', signInToWork);
+    $('#workSignOut').addEventListener('click', () => workAccount.signOut().then(refreshWorkAccount).finally(() => paintWork()));
     $('#sendHelperOn').addEventListener('click', () => phone.openSendHelperSettings().catch(err => { $('#settingsError').textContent = err.message; }));
     $('#drivingCar').addEventListener('click', () => phone.driving({ rememberCar: true })
       .then(s => paintDriving(`Your car: ${s.car}`), err => paintDriving(err.message)));

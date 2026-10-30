@@ -7,4 +7,4 @@
     android:accessibilityFeedbackType="feedbackGeneric"
     android:notificationTimeout="300"
     android:canRetrieveWindowContent="true"
-    android:accessibilityFlags="flagDefault" />
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows" />

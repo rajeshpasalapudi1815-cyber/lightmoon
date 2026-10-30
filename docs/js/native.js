@@ -22,6 +22,9 @@ export const fileSaver = isNativeApp ? plugins.FileSaver ?? null : null;
 // The phone itself: calendar, calls, texts and chat messages, apps, alarms, flashlight (PhonePlugin.java).
 export const phone = isNativeApp ? plugins.Phone ?? null : null;
 
+// The Microsoft work account (android/.../WorkAccountPlugin.java): sign-in and tokens for js/graph.js.
+export const workAccount = isNativeApp ? plugins.WorkAccount ?? null : null;
+
 // ---------- Talking: a speechSynthesis stand-in on Android text-to-speech ----------
 
 class NativeUtterance {

@@ -2,7 +2,7 @@
 // (Groq by default), streams the reply back as it is written, and runs any tools the model asks for.
 import { aiConfig, messages, DEFAULT_AI, SPARE_MODEL } from './store.js';
 import { buildSystemPrompt } from './prompt.js';
-import { toolsFor, LOAD_TOOLS, runTool } from './tools.js';
+import { toolsFor, LOAD_TOOLS, runTool, quickReply } from './tools.js';
 import { report } from './problems.js';
 import { weatherSummary } from './weather.js';
 import { refresh as refreshLifeLevelling } from './lifelevelling.js';
@@ -56,6 +56,11 @@ class BrainError extends Error {
 // heardAlso: other guesses of the speech recogniser at what was said, for the AI to weigh (not saved).
 export async function chat(text, { onText, heardAlso = [] } = {}) {
   messages.add('user', text);
+  const quick = await quickReply(text).catch(() => null); // "send it" after a draft: no AI needed
+  if (quick) {
+    onText?.(quick.reply);
+    return finish(quick.reply, quick.actions);
+  }
   // No internet: the offline brain on the phone answers, if it has been downloaded (offline.js).
   if (navigator.onLine === false) {
     const offline = await answerOffline({ onText });

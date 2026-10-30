@@ -62,4 +62,18 @@ check('an app the helper can\'t work in is not remembered', () => {
   assert.equal(recentDraft(), null);
 });
 
+const { SEND_NOW } = await import(pathToFileURL(`${repo}/docs/js/compose.js`));
+check('"send it" phrases, English and Telugu', () => assert.ok(['send it', 'Send it.', 'ok send it', 'yes, send', 'send it now', 'send cheyyi', 'pampu', 'ha send the message'].every(t => SEND_NOW.test(t))));
+check('longer requests still go to the AI', () => assert.ok(!['send it to Priya instead', 'send a message to Akash', "don't send it", 'send the report by 5'].some(t => SEND_NOW.test(t))));
+
+console.log('-- Teams chats by name (Send helper on)');
+check('an unknown group opens by name', () => {
+  const plan = planCompose({ app: 'Teams', group: 'IT Team', text: 'Hi, akkada unnava?', lookUp, byName: true });
+  assert.equal(plan.kind, 'chat');
+  assert.equal(plan.chat, 'IT Team');
+});
+check('an unknown person opens by name', () => assert.equal(planCompose({ app: 'Teams', to: 'Rajan Reddy', text: 'hi', lookUp, byName: true }).chat, 'Rajan Reddy'));
+check('a known email still uses the chat link', () => assert.equal(planCompose({ app: 'Teams', to: 'Akash', text: 'hi', lookUp, byName: true }).kind, 'link'));
+check('a saved channel link still wins', () => assert.equal(planCompose({ app: 'Teams', group: 'NOC Team', text: 'hi', lookUp, byName: true }).kind, 'link'));
+
 process.exit(failed ? 1 : 0);
