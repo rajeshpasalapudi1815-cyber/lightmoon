@@ -38,6 +38,7 @@ check('yes to "shall I delete it?"', () => assert.equal(holdBack('delete_task', 
 check('you typing the same words yourself', () => assert.equal(holdBack('add_task', { title: 'Buy 50 pineapples' }, { chat: [user('add a task to buy 50 pineapples')], heard: [impostor] }), null));
 check('no messages at all', () => assert.equal(holdBack('remember', { content: 'Favourite colour is purple.' }, { chat: [user('my favourite colour is purple')], heard: [] }), null));
 check('reading things is never held', () => assert.equal(holdBack('phone_messages', {}, { chat: askedNew, heard: [impostor] }), null));
+check('checking a link from a message is never held', () => assert.equal(holdBack('check_link', { text: 'see bit.ly/x' }, { chat: [user("is the link in Asha's message safe?")], heard: [{ from: 'WhatsApp, Asha', text: 'see bit.ly/x' }] }), null));
 check('calls and texts keep their own yes', () => assert.equal(holdBack('phone_message', { to: 'M1', text: 'Buy 50 pineapples' }, { chat: askedNew, heard: [impostor] }), null));
 check('a Telugu reminder with unrelated messages', () => assert.equal(holdBack('add_task', { title: 'Go to the gym', remind_at: '2026-10-31T07:00' }, { chat: [user('రేపు ఉదయం 7 గంటలకు జిమ్‌కి వెళ్ళమని గుర్తు చెయ్యి')], heard: [asha, mom] }), null));
 

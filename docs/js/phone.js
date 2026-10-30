@@ -9,6 +9,7 @@
 import { phone } from './native.js';
 import { messages as chat, nicknames } from './store.js';
 import { choosePerson, lookAlikeNotes, conversationsFrom } from './people.js';
+import { linkNote } from './links.js';
 
 const REFRESH_AFTER_MS = 60_000;
 const WAIT_AT_MOST_MS = 2_500;
@@ -108,7 +109,7 @@ export function promptSection() {
       : 'No new messages in the last 12 hours.');
     const notes = lookAlikeNotes(refs);
     lines.push(...refs.map(m => `  [${m.ref}] ${source(m)}, ${clock(m.at)}: "${shareable(m.text)}"${m.canReply ? '' : ' (no reply from here)'}`
-      + `${asksSomething(m) ? ' (ASKS SOMETHING OF THEM)' : ''}${notes[m.ref] ? ` (${notes[m.ref]})` : ''}`));
+      + `${asksSomething(m) ? ' (ASKS SOMETHING OF THEM)' : ''}${notes[m.ref] ? ` (${notes[m.ref]})` : ''}${linkNote(m.text) ? ` (${linkNote(m.text)})` : ''}`));
   }
   const can = [
     allowed.calendar && 'read and add calendar events',

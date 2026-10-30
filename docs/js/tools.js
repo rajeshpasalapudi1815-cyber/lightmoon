@@ -16,6 +16,7 @@ import { findPlace, placeFromDevice, savedPlace, savePlace, weatherSummary } fro
 import { LIFE_TOOLS, lifeHandlers, isConnected as lifeConnected } from './lifelevelling.js';
 import { phoneTools, phoneHandlers, heardMessages } from './phone.js';
 import { lookUp, headlines } from './knowledge.js';
+import { findLinks, checkLink } from './links.js';
 
 // What the model sends when the user means "where I am" rather than naming a city.
 const MEANS_HERE = /^(here|local|nearby)$|\b(my|current|this|our)\s+(location|city|place|area|town)\b|where i am/i;
@@ -131,7 +132,16 @@ export const TOOLS = [
 
 // The Life Levelling tools are offered only while Life Levelling is connected, the phone tools only in the
 // Android app (and only for what the user has allowed).
-export const currentTools = () => [...TOOLS, ...(lifeConnected() ? LIFE_TOOLS : []), ...phoneTools()];
+export const currentTools = () => [...TOOLS, CHECK_LINK, ...(lifeConnected() ? LIFE_TOOLS : []), ...phoneTools()];
+
+// Sent only when the talk is about a link (links.js), like the groups below.
+const CHECK_LINK = tool(
+  'check_link',
+  'Check a link they paste or ask about for signs of a scam, without opening it. Pass the link and any message it came with.',
+  { text: { type: 'string', description: 'The link, with the message around it if there was one.' } },
+  ['text'],
+);
+const LINK_WORDS = /\b(links?|urls?|website|site|scam\w*|fraud\w*|phishing|genuine|legit\w*|fake|suspicious)\b/i;
 
 // The full list is about 15,000 characters, sent with every request, and the free tier allows about 8,000 tokens a
 // minute per model. So the phone and Life Levelling tools go only with the requests that sound like they need them
@@ -157,7 +167,8 @@ export function toolsFor(text, loaded = new Set()) {
   const lower = String(text).toLowerCase();
   if (routines.list().some(r => r.trigger && lower.includes(r.trigger.toLowerCase()))) groups.add('phone').add('life');
   const missing = (phone.length && !groups.has('phone')) || (life.length && !groups.has('life'));
-  return [...TOOLS, ...(groups.has('life') ? life : []), ...(groups.has('phone') ? phone : []), ...(missing ? [LOAD_TOOLS] : [])];
+  const links = LINK_WORDS.test(text) || findLinks(text).length ? [CHECK_LINK] : [];
+  return [...TOOLS, ...links, ...(groups.has('life') ? life : []), ...(groups.has('phone') ? phone : []), ...(missing ? [LOAD_TOOLS] : [])];
 }
 
 function toId(value) {
@@ -333,6 +344,22 @@ const handlers = {
     const url = `mailto:${address}?${new URLSearchParams({ subject: title, body: text }).toString().replace(/\+/g, '%20')}`;
     openMailApp(url);
     return { text: `Email to ${address} opened in your mail app`, result: `The mail app is open with the email to ${address} filled in. Tell the user to check it and tap Send there; you haven't sent it.` };
+  },
+
+  check_link({ text }) {
+    const said = toText(text, 'text', 2000);
+    const links = findLinks(said);
+    if (!links.length) throw new Error("There's no link in that. Ask them to paste the whole link.");
+    const lines = links.map(link => {
+      const c = checkLink(link, said);
+      const verdict = { risky: 'LOOKS LIKE A SCAM', careful: 'NEEDS CARE', 'looks-real': "looks like the real site's address", unknown: 'nothing stands out' }[c.verdict];
+      return `${c.host}: ${verdict}${c.reasons.length ? `, because ${c.reasons.join('; ')}` : ''}.`;
+    });
+    return {
+      text: 'Checked the link',
+      result: `${lines.join('\n')}\nThis looks only at the address and the words, without opening it, so it can't promise a link is safe. `
+        + 'For a risky one: tell them not to open it or enter anything, and to check with the company through its own app or number.',
+    };
   },
 
   set_pronunciation({ word, say_as: sayAs }) {
