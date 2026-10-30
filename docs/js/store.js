@@ -14,6 +14,9 @@ export const DEFAULT_AI = {
   fallbackModel: 'openai/gpt-oss-20b',
 };
 
+// On Groq, a third model with its own per-minute allowance, asked when the main and backup are at theirs (brain.js).
+export const SPARE_MODEL = 'qwen/qwen3.8-27b';
+
 // Models Groq stopped serving to free accounts ("does not exist or you do not have access"), and what replaces them.
 const RETIRED_MODELS = { 'llama-3.1-8b-instant': DEFAULT_AI.fallbackModel };
 

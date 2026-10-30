@@ -1,8 +1,8 @@
 // The brain: sends the conversation straight from this device to an OpenAI-compatible chat API
 // (Groq by default), streams the reply back as it is written, and runs any tools the model asks for.
-import { aiConfig, messages } from './store.js';
+import { aiConfig, messages, DEFAULT_AI, SPARE_MODEL } from './store.js';
 import { buildSystemPrompt } from './prompt.js';
-import { currentTools, runTool } from './tools.js';
+import { toolsFor, LOAD_TOOLS, runTool } from './tools.js';
 import { report } from './problems.js';
 import { weatherSummary } from './weather.js';
 import { refresh as refreshLifeLevelling } from './lifelevelling.js';
@@ -10,9 +10,9 @@ import { refresh as refreshPhone } from './phone.js';
 import { learnFrom, answerLocally } from './learning.js';
 import { answerOffline } from './offline.js';
 
-const HISTORY_LIMIT = 10;
-const OLD_MESSAGE_CHARS = 600; // older messages are cut short: every request counts against the free tier's tokens per minute
-const MAX_WAIT_SECONDS = 30; // a second round right after the first can wait 10-25 s for the per-minute limit
+const HISTORY_LIMIT = 8;
+const OLD_MESSAGE_CHARS = 400; // older messages are cut short: every request counts against the free tier's tokens per minute
+const MAX_WAIT_SECONDS = 45; // when every model is at its per-minute limit, wait this long at most for one to reset
 const MAX_TOOL_ROUNDS = 8; // a routine can take several steps
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -69,15 +69,35 @@ export async function chat(text, { onText } = {}) {
     onText?.(delta);
   };
   try {
+    // The latest exchange decides which tool groups go with the request (tools.js toolsFor).
+    const exchange = messages.recent(4).filter(m => m.role !== 'system').map(m => m.content).join('\n');
+    const loaded = new Set();
+    let waitedAloud = false;
+    const onWait = () => {
+      if (!waitedAloud) onText?.('One moment. ');
+      waitedAloud = true;
+    };
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const reply = await complete(convo, currentTools(), emit, { onWait: () => onText?.('One moment. ') });
+      const tools = toolsFor(exchange, loaded);
+      const reply = await complete(convo, tools, emit, { onWait });
       if (!reply.tool_calls?.length) {
-        learnFrom(convo, currentTools(), reply); // our own model learns from the big one (see learning.js)
+        learnFrom(convo, tools, reply); // our own model learns from the big one (see learning.js)
         return finish(written.join(''), actions);
       }
 
       convo.push({ role: 'assistant', content: reply.content || null, tool_calls: reply.tool_calls });
       for (const call of reply.tool_calls) {
+        if (call.function?.name === LOAD_TOOLS.function.name) {
+          let group = '';
+          try {
+            group = JSON.parse(call.function.arguments || '{}').group ?? '';
+          } catch {
+            // Answered below.
+          }
+          if (['phone', 'life'].includes(group)) loaded.add(group);
+          convo.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, result: `The ${group} tools are in your list now.` }) });
+          continue;
+        }
         const outcome = await runTool(call.function?.name, call.function?.arguments);
         if (outcome.ok) actions.push(outcome.action);
         convo.push({
@@ -176,7 +196,8 @@ async function complete(convo, tools, onText, { onWait } = {}) {
   if (!ai.ready) throw new BrainError('no-key');
   const local = await answerLocally(convo, tools, onText); // our own model, for kinds it has proven reliable at
   if (local) return local;
-  const models = [...new Set([ai.model, ai.fallbackModel].filter(Boolean))];
+  const cost = estimateTokens(convo, tools);
+  const models = modelsInOrder(ai, cost);
   let emitted = false;
   const relay = delta => {
     emitted = true;
@@ -184,34 +205,72 @@ async function complete(convo, tools, onText, { onWait } = {}) {
   };
   let lastError;
   let mainError; // why the main model failed: worth more than "the backup model doesn't exist"
-  let waited = false;
   const worst = err => (mainError && err.missingModel ? mainError : err);
-  for (const model of models) {
-    let messages = convo;
-    let reminded = false;
-    for (;;) {
-      try {
-        return await request(ai, model, messages, tools, relay);
-      } catch (err) {
-        lastError = err;
-        if (!err.retryable || emitted) throw worst(err);
-        if (err.badToolCall && !reminded) {
-          reminded = true;
-          messages = [...messages, { role: 'system', content: TOOL_REMINDER }];
-        } else if (err.kind === 'too-large' && shorten(messages) !== messages) {
-          messages = shorten(messages);
-        } else if (err.waitSeconds !== null && err.waitSeconds <= MAX_WAIT_SECONDS && !waited) {
-          waited = true;
-          onWait?.();
-          await sleep(err.waitSeconds * 1000 + 500);
-        } else {
-          mainError ??= err;
-          break; // on to the backup model
+  for (let pass = 0; pass < 2; pass++) {
+    let waitFor = null; // the soonest any model's minute resets
+    for (const model of models) {
+      let messages = convo;
+      let reminded = false;
+      for (;;) {
+        try {
+          const reply = await request(ai, model, messages, tools, relay);
+          spend(model, estimateTokens(messages, tools) + estimateTokens([reply], null));
+          return reply;
+        } catch (err) {
+          lastError = err;
+          if (!err.retryable || emitted) throw worst(err);
+          if (err.badToolCall && !reminded) {
+            reminded = true;
+            messages = [...messages, { role: 'system', content: TOOL_REMINDER }];
+          } else if (err.kind === 'too-large' && shorten(messages) !== messages) {
+            messages = shorten(messages);
+          } else {
+            if (err.kind === 'rate-limit') {
+              spend(model, TOKENS_PER_MINUTE); // full for this minute: try the others first
+              waitFor = Math.min(waitFor ?? Infinity, err.waitSeconds ?? 20);
+            }
+            mainError ??= err;
+            break; // on to the next model
+          }
         }
       }
     }
+    // Every model is at its per-minute limit: wait for the soonest to reset, once, rather than go quiet.
+    if (pass > 0 || waitFor === null || waitFor > MAX_WAIT_SECONDS) break;
+    onWait?.();
+    await sleep(waitFor * 1000 + 500);
   }
   throw worst(lastError);
+}
+
+// ---------- Sharing the free tier's per-minute allowance between models ----------
+// Groq's free tier gives each model its own tokens per minute. LightMoon keeps a rough count of what it sent each
+// model in the last minute and asks one with room first; a 429 marks that model full for the minute.
+
+const TOKENS_PER_MINUTE = 8000;
+const spent = new Map(); // model -> [{ at, tokens }]
+
+// About 3.5 characters a token for this mix of English and JSON; enough to choose a model, not to bill.
+const estimateTokens = (messages, tools) => Math.ceil((JSON.stringify(messages).length + (tools ? JSON.stringify(tools).length : 0)) / 3.5);
+
+function spentLastMinute(model) {
+  const recent = (spent.get(model) ?? []).filter(entry => Date.now() - entry.at < 60_000);
+  spent.set(model, recent);
+  return recent.reduce((sum, entry) => sum + entry.tokens, 0);
+}
+
+function spend(model, tokens) {
+  spentLastMinute(model);
+  spent.get(model).push({ at: Date.now(), tokens });
+}
+
+// The main model, the backup, and on Groq a spare with its own allowance: those with room for this request first,
+// in that order.
+function modelsInOrder(ai, cost) {
+  const spare = ai.baseUrl === DEFAULT_AI.baseUrl ? SPARE_MODEL : null;
+  const models = [...new Set([ai.model, ai.fallbackModel, spare].filter(Boolean))];
+  const fits = model => spentLastMinute(model) + cost <= TOKENS_PER_MINUTE;
+  return [...models.filter(fits), ...models.filter(model => !fits(model))];
 }
 
 async function request(ai, model, convo, tools, onText) {

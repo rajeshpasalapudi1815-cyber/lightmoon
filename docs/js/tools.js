@@ -104,6 +104,33 @@ export const TOOLS = [
 // Android app (and only for what the user has allowed).
 export const currentTools = () => [...TOOLS, ...(lifeConnected() ? LIFE_TOOLS : []), ...phoneTools()];
 
+// The full list is about 15,000 characters, sent with every request, and the free tier allows about 8,000 tokens a
+// minute per model. So the phone and Life Levelling tools go only with the requests that sound like they need them
+// (or follow a routine), and load_tools lets the AI fetch a group it needs but wasn't given.
+export const LOAD_TOOLS = tool(
+  'load_tools',
+  'Get more tools: "phone" (calls, texts, chat replies, calendar, alarms, focus, music, apps, maps, ringer) or "life" (Life Levelling: habits, health, spending, its tasks, closing the day). Call it first when you need one of those and it isn\'t in your list.',
+  { group: { type: 'string', enum: ['phone', 'life'] } },
+  ['group'],
+);
+const PHONE_WORDS = /\b(call(ed|ing)?|ring|phone|texts?|sms|messages?|whats ?app|reply|calendar|meetings?|events?|schedule|alarms?|timer|wake me|flash ?light|torch|music|songs?|play|pause|skip|navigate|directions|maps?|open|focus|disturb|volume|ringer|silent|mute|battery|contacts?|number|missed|youtube)\b/i;
+const LIFE_WORDS = /\b(water|drank|drink|sleep|slept|mood|exercise|work ?out|gym|ran|run|walk(ed)?|steps|spent|spend|expenses?|paid|rupees|habits?|quests?|xp|level|intention|close (my )?day|life levelling|meditat\w*|read|reading|journal|weight)\b/i;
+
+// The tools for a request: the core ones, the groups this conversation needs, and load_tools for the rest.
+// `text`: the latest exchange (the user's last messages and LightMoon's last reply, so "yes" to "shall I call him?"
+// still gets the phone tools); `loaded`: groups the AI asked for with load_tools.
+export function toolsFor(text, loaded = new Set()) {
+  const phone = phoneTools();
+  const life = lifeConnected() ? LIFE_TOOLS : [];
+  const groups = new Set(loaded);
+  if (PHONE_WORDS.test(text)) groups.add('phone');
+  if (LIFE_WORDS.test(text)) groups.add('life');
+  const lower = String(text).toLowerCase();
+  if (routines.list().some(r => r.trigger && lower.includes(r.trigger.toLowerCase()))) groups.add('phone').add('life');
+  const missing = (phone.length && !groups.has('phone')) || (life.length && !groups.has('life'));
+  return [...TOOLS, ...(groups.has('life') ? life : []), ...(groups.has('phone') ? phone : []), ...(missing ? [LOAD_TOOLS] : [])];
+}
+
 function toId(value) {
   const id = String(value ?? '').trim().replace(/^\[?#/, '').replace(/\]$/, '');
   if (!/^[a-z0-9]{1,16}$/i.test(id)) throw new Error(`"${value}" is not a valid id.`);
