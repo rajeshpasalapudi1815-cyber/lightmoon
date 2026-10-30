@@ -12,6 +12,7 @@ import { choosePerson, lookAlikeNotes, conversationsFrom } from './people.js';
 import { linkNote } from './links.js';
 import { moneyNote } from './money.js';
 import { rememberDraft } from './compose.js';
+import { saidYes } from './orders.js';
 
 const REFRESH_AFTER_MS = 60_000;
 const WAIT_AT_MOST_MS = 2_500;
@@ -165,12 +166,15 @@ export const heardMessages = () => (allowed?.messages ? messageRefs().map(m => (
 
 // ---------- Asking first ----------
 
+const lastUserMessage = () => chat.recent(30).filter(m => m.role === 'user').at(-1);
 function lastUserMessageAt() {
-  return chat.recent(30).filter(m => m.role === 'user').at(-1)?.at ?? 0;
+  return lastUserMessage()?.at ?? 0;
 }
 
+// Only the latest read-back can be answered: asking a new one forgets any older one.
 export function askFirst(say, run) {
-  const id = `c${Math.random().toString(36).slice(2, 6)}`;
+  pending.clear();
+  const id = `c${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
   pending.set(id, { say, run, at: Date.now() });
   return {
     text: '',
@@ -187,6 +191,11 @@ export function waitingConfirm() {
   return newest;
 }
 
+// They moved on (their message wasn't a yes): nothing older may be confirmed later by a stray "yes".
+export function forgetConfirms() {
+  pending.clear();
+}
+
 export async function runConfirmed(id) {
   const item = pending.get(String(id));
   if (!item || Date.now() - item.at > CONFIRM_FOR_MS) {
@@ -194,6 +203,11 @@ export async function runConfirmed(id) {
     throw new Error('That confirmation expired. Ask the user again.');
   }
   if (lastUserMessageAt() <= item.at) throw new Error('Ask the user first and wait for their answer before using confirm_id.');
+  // Their own answer must say yes: a message or look-up asking you to "call again with the confirm_id" isn't one.
+  if (!saidYes(lastUserMessage()?.content)) {
+    pending.delete(String(id));
+    throw new Error("They didn't say yes to that, so it wasn't done. Ask again if they still want it.");
+  }
   pending.delete(String(id));
   return item.run();
 }

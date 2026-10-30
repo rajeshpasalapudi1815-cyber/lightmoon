@@ -53,6 +53,12 @@ const SCHEMA = [
      updated_at   INTEGER NOT NULL,
      failures     INTEGER NOT NULL DEFAULT 0,
      locked_until INTEGER NOT NULL DEFAULT 0)`,
+  // Push failures in a row per device: a device whose push service never answers is dropped (see sendDueReminders).
+  `CREATE TABLE IF NOT EXISTS device_failures (
+     space_id  TEXT NOT NULL,
+     device_id TEXT NOT NULL,
+     failures  INTEGER NOT NULL,
+     PRIMARY KEY (space_id, device_id))`,
   `CREATE TABLE IF NOT EXISTS backup_parts (
      backup_id TEXT NOT NULL,
      part      INTEGER NOT NULL,
@@ -79,6 +85,13 @@ const BACKUP_PART_CHARS = 500_000;             // D1 keeps each value under ~2 M
 const BACKUP_TRIES = 10;
 const BACKUP_LOCK_MS = 15 * 60_000;
 const MAX_REMINDERS = 500;
+// Limits so one space (or one caller) can't crowd out everyone else's reminders or use up the free plan.
+const MAX_DEVICES_PER_SPACE = 10;
+const MAX_PUSHES_PER_RUN = 40;
+const DROP_DEVICE_AFTER_FAILURES = 5;
+const REMINDER_PAST_MS = 60 * 60_000;            // a reminder up to an hour late is still sent
+const REMINDER_FUTURE_MS = 2 * 366 * 86_400_000; // and none more than two years ahead
+const BACKUP_REQUESTS_PER_MINUTE = 30;           // per caller address, per running copy of the worker
 const KEEP_SENT_REMINDERS_MS = 7 * 86_400_000;
 const KEEP_INBOX_MS = 7 * 86_400_000;
 const RETRY_PUSH_FOR_MS = 60 * 60_000;
@@ -157,6 +170,7 @@ async function route(request, env) {
   if (section === 'backups' && BACKUP_ID.test(space ?? '') && (!part || (part === 'meta' && !name))) {
     const key = request.headers.get('X-Backup-Key') ?? '';
     if (!BACKUP_KEY.test(key)) throw new HttpError(401, 'Backup key required');
+    limitBackupCalls(request);
     if (part === 'meta') {
       if (method === 'GET') return getBackupMeta(env, space, key);
       throw new HttpError(404, 'Not found');
@@ -197,18 +211,34 @@ const sha256Hex = async text => {
 };
 
 // Checks the key against the backup. Too many wrong keys lock it for a while, so a password can't be guessed here.
+// Every try is counted before the key is checked, in one statement, and no more than BACKUP_TRIES are let through
+// before the lock, even when guesses arrive all at once; a right key resets the count.
 async function checkBackupKey(env, row, key) {
   const now = Date.now();
-  if (row.locked_until > now) throw new HttpError(429, 'Too many wrong tries. Try again later.');
+  const counted = await env.DB.prepare(
+    'UPDATE backups SET failures = failures + 1 WHERE id = ? AND locked_until <= ? AND failures < ? RETURNING failures',
+  ).bind(row.id, now, BACKUP_TRIES).first();
+  if (!counted) throw new HttpError(429, 'Too many wrong tries. Try again later.');
   if ((await sha256Hex(key)) === row.auth_hash) {
-    if (row.failures) await env.DB.prepare('UPDATE backups SET failures = 0 WHERE id = ?').bind(row.id).run();
+    await env.DB.prepare('UPDATE backups SET failures = 0 WHERE id = ?').bind(row.id).run();
     return;
   }
-  const failures = row.failures + 1;
-  const lockedUntil = failures >= BACKUP_TRIES ? now + BACKUP_LOCK_MS : 0;
-  await env.DB.prepare('UPDATE backups SET failures = ?, locked_until = ? WHERE id = ?')
-    .bind(lockedUntil ? 0 : failures, lockedUntil, row.id).run();
+  if (counted.failures >= BACKUP_TRIES) {
+    await env.DB.prepare('UPDATE backups SET failures = 0, locked_until = ? WHERE id = ?').bind(now + BACKUP_LOCK_MS, row.id).run();
+  }
   throw new HttpError(403, 'Wrong key for this backup');
+}
+
+// A rough per-address limit on backup requests (per running copy of the worker), against guessing in bulk.
+const backupCalls = new Map();
+function limitBackupCalls(request) {
+  const who = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+  const minute = Math.floor(Date.now() / 60_000);
+  const seen = backupCalls.get(who);
+  const count = seen?.minute === minute ? seen.count + 1 : 1;
+  backupCalls.set(who, { minute, count });
+  if (backupCalls.size > 5000) backupCalls.clear();
+  if (count > BACKUP_REQUESTS_PER_MINUTE) throw new HttpError(429, 'Too many requests. Try again in a minute.');
 }
 
 async function getBackup(env, id, key) {
@@ -361,6 +391,8 @@ async function putDevice(env, space, device, { subscription }) {
   if (!localTesting && (!subscription.endpoint.startsWith('https://') || !PUSH_HOSTS.test(host))) {
     throw new HttpError(400, 'Unsupported push service');
   }
+  const others = await env.DB.prepare('SELECT COUNT(*) AS n FROM devices WHERE space_id = ? AND device_id != ?').bind(space, device).first();
+  if ((others?.n ?? 0) >= MAX_DEVICES_PER_SPACE) throw new HttpError(429, 'Too many devices for this space');
   // Pushes carry no content, so only the endpoint is kept.
   await env.DB.prepare(
     `INSERT INTO devices (space_id, device_id, subscription, updated_at) VALUES (?, ?, ?, ?)
@@ -376,11 +408,15 @@ async function deleteDevice(env, space, device) {
 
 // ---------- Reminder times (no titles) ----------
 
-async function putReminders(env, space, { reminders }) {
+async function putReminders(env, space, body) {
+  let { reminders } = body ?? {};
   if (!Array.isArray(reminders) || reminders.length > MAX_REMINDERS) throw new HttpError(400, 'Bad reminders');
   for (const r of reminders) {
     if (!REMINDER_ID.test(String(r?.id)) || !Number.isFinite(r?.at)) throw new HttpError(400, 'Bad reminder');
   }
+  // Long past or far ahead: nothing to send, so not kept (and they can't crowd the due list).
+  const now = Date.now();
+  reminders = reminders.filter(r => r.at >= now - REMINDER_PAST_MS && r.at <= now + REMINDER_FUTURE_MS);
   // Replace the space's pending schedule; a reminder already sent stays sent unless its time changed.
   const upsert = env.DB.prepare(
     `INSERT INTO reminders (space_id, reminder_id, due_at, sent) VALUES (?, ?, ?, 0)
@@ -395,29 +431,49 @@ async function putReminders(env, space, { reminders }) {
   return noContent();
 }
 
+const forgetDevice = (env, space, device) => env.DB.batch([
+  env.DB.prepare('DELETE FROM devices WHERE space_id = ? AND device_id = ?').bind(space, device),
+  env.DB.prepare('DELETE FROM device_failures WHERE space_id = ? AND device_id = ?').bind(space, device),
+]);
+
 async function sendDueReminders(env) {
   const now = Date.now();
-  const { results: due } = await env.DB.prepare('SELECT space_id, reminder_id, due_at FROM reminders WHERE sent = 0 AND due_at <= ? LIMIT 500')
-    .bind(now).all();
+  const { results: due } = await env.DB.prepare(
+    'SELECT space_id, reminder_id, due_at FROM reminders WHERE sent = 0 AND due_at <= ? AND due_at >= ? ORDER BY due_at LIMIT 500',
+  ).bind(now, now - RETRY_PUSH_FOR_MS - 5 * 60_000).all();
+  let pushes = 0;
   const finished = new Set(); // spaces whose devices were reached (or that have no devices to reach)
   for (const space of new Set(due.map(r => r.space_id))) {
-    const { results: devices } = await env.DB.prepare('SELECT device_id, subscription FROM devices WHERE space_id = ?').bind(space).all();
+    if (pushes >= MAX_PUSHES_PER_RUN) break; // the rest go next minute
+    const { results: devices } = await env.DB.prepare('SELECT device_id, subscription FROM devices WHERE space_id = ? LIMIT ?')
+      .bind(space, MAX_DEVICES_PER_SPACE).all();
+    pushes += devices.length;
     let delivered = devices.length === 0;
     for (const device of devices) {
       const status = await sendPush(env, JSON.parse(device.subscription)).catch(err => {
         console.error('push failed', err);
         return 0;
       });
-      if (status >= 200 && status < 300) delivered = true;
-      if (status === 404 || status === 410) {
+      if (status >= 200 && status < 300) {
+        delivered = true;
+        await env.DB.prepare('DELETE FROM device_failures WHERE space_id = ? AND device_id = ?').bind(space, device.device_id).run();
+      } else if (status === 404 || status === 410) {
         // The browser has dropped this subscription.
-        await env.DB.prepare('DELETE FROM devices WHERE space_id = ? AND device_id = ?').bind(space, device.device_id).run();
+        await forgetDevice(env, space, device.device_id);
+      } else if (status !== 429) {
+        // No answer or refused: after a few in a row (a made-up push address, say), the device is dropped.
+        const row = await env.DB.prepare(
+          `INSERT INTO device_failures (space_id, device_id, failures) VALUES (?, ?, 1)
+           ON CONFLICT(space_id, device_id) DO UPDATE SET failures = failures + 1 RETURNING failures`,
+        ).bind(space, device.device_id).first();
+        if ((row?.failures ?? 0) >= DROP_DEVICE_AFTER_FAILURES) await forgetDevice(env, space, device.device_id);
       }
     }
     if (delivered) finished.add(space);
   }
   // Undelivered reminders are tried again next minute, for up to an hour.
   const done = due.filter(r => finished.has(r.space_id) || r.due_at < now - RETRY_PUSH_FOR_MS);
+  await env.DB.prepare('UPDATE reminders SET sent = 1 WHERE sent = 0 AND due_at < ?').bind(now - RETRY_PUSH_FOR_MS - 5 * 60_000).run();
   const markSent = env.DB.prepare('UPDATE reminders SET sent = 1 WHERE space_id = ? AND reminder_id = ?');
   await env.DB.batch([
     ...done.map(r => markSent.bind(r.space_id, r.reminder_id)),

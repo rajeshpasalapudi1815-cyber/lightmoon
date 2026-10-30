@@ -20,7 +20,7 @@ import { findLinks, checkLink } from './links.js';
 import { planCompose, rememberDraft, recentDraft, SEND_NOW, YES_ONLY } from './compose.js';
 import { phone as phoneApp, workAccount } from './native.js';
 import * as work from './graph.js';
-import { askFirst, runConfirmed, waitingConfirm } from './phone.js';
+import { askFirst, runConfirmed, waitingConfirm, forgetConfirms } from './phone.js';
 
 // What the model sends when the user means "where I am" rather than naming a city.
 const MEANS_HERE = /^(here|local|nearby)$|\b(my|current|this|our)\s+(location|city|place|area|town)\b|where i am/i;
@@ -136,7 +136,7 @@ export const TOOLS = [
 
 // The Life Levelling tools are offered only while Life Levelling is connected, the phone tools only in the
 // Android app (and only for what the user has allowed).
-export const currentTools = () => [...TOOLS, CHECK_LINK, COMPOSE, TAP_SEND, ...(lifeConnected() ? LIFE_TOOLS : []), ...phoneTools()];
+export const currentTools = () => [...TOOLS, CHECK_LINK, COMPOSE, ...(lifeConnected() ? LIFE_TOOLS : []), ...phoneTools()];
 
 // Messages written into other apps for the user to send (compose.js); sent when the talk is about messaging.
 const COMPOSE = tool(
@@ -147,7 +147,6 @@ const COMPOSE = tool(
     app: { type: 'string', description: 'e.g. "Teams", "Slack".' },
     to: { type: 'string', description: 'Who: names, nicknames or emails, comma-separated.' },
     group: { type: 'string', description: 'Teams group chat or channel name, e.g. "NOC Team".' },
-    send: { type: 'boolean', description: 'Only when they said to send it straight away.' },
     text: { type: 'string', description: 'The message, tidied, in their voice.' },
   },
   ['app', 'text'],
@@ -187,12 +186,6 @@ const WORK_TOOLS = [
   ),
 ];
 
-// "Send it": the Send helper (Android, SendHelper.java) taps Send on the draft LightMoon just opened.
-const TAP_SEND = tool(
-  'tap_send',
-  'They said to send the draft you just opened in Teams, WhatsApp, Gmail or Outlook: the Send helper taps Send there. Only when they asked to send it.',
-  {},
-);
 
 // Sent only when the talk is about a link (links.js), like the groups below.
 const CHECK_LINK = tool(
@@ -228,7 +221,7 @@ export function toolsFor(text, loaded = new Set()) {
   if (routines.list().some(r => r.trigger && lower.includes(r.trigger.toLowerCase()))) groups.add('phone').add('life');
   const missing = (phone.length && !groups.has('phone')) || (life.length && !groups.has('life'));
   const links = LINK_WORDS.test(text) || findLinks(text).length ? [CHECK_LINK] : [];
-  if (COMPOSE_WORDS.test(text)) links.push(...(workSignedIn ? WORK_TOOLS : []), COMPOSE, TAP_SEND);
+  if (COMPOSE_WORDS.test(text)) links.push(...(workSignedIn ? WORK_TOOLS : []), COMPOSE);
   return [...TOOLS, ...links, ...(groups.has('life') ? life : []), ...(groups.has('phone') ? phone : []), ...(missing ? [LOAD_TOOLS] : [])];
 }
 
@@ -237,6 +230,17 @@ function toId(value) {
   if (!/^[a-z0-9]{1,16}$/i.test(id)) throw new Error(`"${value}" is not a valid id.`);
   return id;
 }
+
+const EMAIL_ADDRESS = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
+
+// Words from outside this conversation in this turn (shared content, look-up and news results): like messages,
+// they are other people's words, so the guard (orders.js) treats changes copied from them as needing a yes.
+const outsideWords = [];
+export function startTurn(shared = '') {
+  outsideWords.length = 0;
+  if (shared) outsideWords.push({ from: 'something they shared', text: String(shared).slice(0, 4000) });
+}
+const LOOK_UPS = new Set(['look_up', 'news_headlines']);
 
 function toText(value, field, max) {
   const text = String(value ?? '').trim();
@@ -390,6 +394,11 @@ const handlers = {
   set_nickname({ nickname, who }) {
     const nick = toText(nickname, 'nickname', 40);
     const person = String(who ?? '').trim().slice(0, 600); // room for a Teams channel link
+    const before = nicknames.lookUp(nick);
+    const asked = String(chat.recent(4).filter(m => m.role === 'user').at(-1)?.content ?? '').toLowerCase(); // their latest message
+    if (before && before !== person && !asked.includes(nick.toLowerCase())) {
+      throw new Error(`"${nick}" already means ${before}. Ask them before changing it.`);
+    }
     nicknames.set(nick, person);
     return person ? `"${nick}" is ${person}` : `Forgot the nickname "${nick}"`;
   },
@@ -397,25 +406,25 @@ const handlers = {
   draft_email({ to, subject, body }) {
     const said = toText(to, 'to', 120);
     const address = nicknames.lookUp(said) ?? said;
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+    if (!EMAIL_ADDRESS.test(address)) {
       throw new Error(`"${said}" isn't an email address. Ask the user for the address (and offer to remember it with set_nickname).`);
     }
     const text = toText(body, 'body', 4000);
     const title = String(subject ?? '').trim().slice(0, 200);
-    const url = `mailto:${address}?${new URLSearchParams({ subject: title, body: text }).toString().replace(/\+/g, '%20')}`;
+    const url = `mailto:${encodeURIComponent(address).replace('%40', '@')}?${new URLSearchParams({ subject: title, body: text }).toString().replace(/\+/g, '%20')}`;
     openMailApp(url);
     rememberDraft('email', text);
     return { text: `Email to ${address} opened in your mail app`, result: `The mail app is open with the email to ${address} filled in. Tell the user to check it and tap Send there; you haven't sent it.` };
   },
 
-  async compose_message({ app, to, group, text, send = false }) {
+  async compose_message({ app, to, group, text }) {
     const byName = Boolean(phoneApp?.openTeamsChat) && Boolean((await phoneApp.sendHelper?.().catch(() => null))?.enabled);
     const plan = planCompose({ app, to, group, text: toText(text, 'text', 2000), lookUp: name => nicknames.lookUp(name), byName });
     if (plan.ask) throw new Error(plan.ask);
     if (plan.kind === 'chat') {
-      await phoneApp.openTeamsChat({ chat: plan.chat, text: plan.text, send: send === true });
-      rememberDraft('teams', plan.text);
-      return { text: `Opening ${plan.chat} in Teams`, result: send === true ? `${plan.note} It will tap Send once it's typed.` : plan.note };
+      await phoneApp.openTeamsChat({ chat: plan.chat, text: plan.text, send: false });
+      rememberDraft('teams', plan.text, plan.chat);
+      return { text: `Opening ${plan.chat} in Teams`, result: plan.note };
     }
     if (plan.kind === 'link') {
       if (plan.app === 'Teams') rememberDraft('teams', plan.copy ?? text);
@@ -452,7 +461,7 @@ const handlers = {
   async work_email_send({ to, subject, body, confirm_id }) {
     if (confirm_id) return runConfirmed(confirm_id);
     const addresses = String(to ?? '').split(/\s*[,;]\s*/).filter(Boolean).map(name => nicknames.lookUp(name) ?? name);
-    const bad = addresses.filter(a => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a));
+    const bad = addresses.filter(a => !EMAIL_ADDRESS.test(a));
     if (!addresses.length || bad.length) throw new Error(`I need an email address for ${bad.join(', ') || 'who it goes to'}; ask, and offer to remember it with set_nickname.`);
     const title = toText(subject, 'subject', 200);
     const words = toText(body, 'body', 8000);
@@ -463,14 +472,19 @@ const handlers = {
   },
 
   async tap_send() {
+    // Only straight after their own "send it", for a draft opened before they said it (never on the AI's say-so).
+    const said = chat.recent(4).filter(m => m.role === 'user').at(-1);
     const draft = recentDraft();
+    if (!said || !SEND_NOW.test(String(said.content)) || (draft && said.at < draft.at)) {
+      throw new Error('Only they can send it, by saying "send it".');
+    }
     if (!draft) throw new Error("There's no draft you opened in the last ten minutes. The Send helper only sends a message LightMoon wrote; tell them to tap Send themselves.");
     if (!phoneApp?.tapSend) throw new Error('Tapping Send needs LightMoon app 1.14 or later on their phone; tell them to tap Send themselves.');
     const helper = await phoneApp.sendHelper().catch(() => ({ enabled: false }));
     if (!helper.enabled) {
       throw new Error("The Send helper is off, so they need to tap Send themselves. Tell them they can switch it on in Settings → Phone → Send helper, once.");
     }
-    await phoneApp.tapSend({ apps: draft.apps, text: draft.text });
+    await phoneApp.tapSend({ apps: draft.apps, text: draft.text, chat: draft.chat ?? '' });
     const where = { teams: 'Teams', whatsapp: 'WhatsApp', email: 'their mail app' }[draft.kind];
     return { text: `Sending in ${where}`, result: `Going back to ${where}; the Send helper taps Send if the message is still there. If it can't, the phone says so and they tap it.` };
   },
@@ -521,7 +535,7 @@ function aboutOf(name, args) {
 // asks, and the same call goes ahead only once the user has said yes.
 function mustAskFirst(name, args) {
   const recent = chat.recent(12);
-  const reason = holdBack(name, args, { chat: recent, heard: heardMessages(), about: aboutOf(name, args) });
+  const reason = holdBack(name, args, { chat: recent, heard: [...heardMessages(), ...outsideWords], about: aboutOf(name, args) });
   if (!reason) return null;
   const now = Date.now();
   for (const [key, at] of held) if (now - at > HOLD_FOR_MS) held.delete(key);
@@ -545,7 +559,9 @@ export async function quickReply(text) {
   const said = String(text ?? '');
   // A plain yes to a read-back LightMoon just asked ("Send to NOC Team on Teams: ...?"): do it now.
   const asked = waitingConfirm();
-  if (asked && (YES_ONLY.test(said) || SEND_NOW.test(said))) {
+  const lastAsked = String(chat.recent(4).filter(m => m.role === 'assistant').at(-1)?.content ?? '').toLowerCase();
+  const readBack = asked ? asked.say.toLowerCase().replace(/["'“”‘’]/g, '').slice(0, 30) : '';
+  if (asked && (YES_ONLY.test(said) || SEND_NOW.test(said)) && lastAsked.replace(/["'“”‘’]/g, '').includes(readBack)) {
     try {
       const done = await runConfirmed(asked.id);
       const reply = typeof done === 'string' ? done : done?.text || 'Done.';
@@ -554,7 +570,8 @@ export async function quickReply(text) {
       return { reply: `That didn't go through: ${err.message}`, actions: [] };
     }
   }
-  if (asked) return null; // something else waits for an answer: the AI handles it
+  if (asked && !saidYes(said)) forgetConfirms(); // they moved on: the old read-back can't be confirmed later
+  if (asked) return null; // a longer answer: the AI handles it (runConfirmed still needs their yes)
   if (!SEND_NOW.test(said) || !recentDraft()) return null;
   const out = await runTool('tap_send', {});
   if (!out.ok) return { reply: String(out.error ?? "I couldn't send it. Please tap Send yourself."), actions: [] };
@@ -562,6 +579,12 @@ export async function quickReply(text) {
 }
 
 export async function runTool(name, rawArgs) {
+  const outcome = await runToolInner(name, rawArgs);
+  if (LOOK_UPS.has(name) && outcome.ok) outsideWords.push({ from: name === 'look_up' ? 'a look-up' : 'the news', text: String(outcome.result ?? '').slice(0, 4000) });
+  return outcome;
+}
+
+async function runToolInner(name, rawArgs) {
   if (!Object.hasOwn(handlers, name)) return { ok: false, error: `Unknown tool "${name}".` };
   try {
     const args = typeof rawArgs === 'string' ? JSON.parse(rawArgs || '{}') : (rawArgs ?? {});

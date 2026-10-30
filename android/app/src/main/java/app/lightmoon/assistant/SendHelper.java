@@ -55,14 +55,15 @@ public class SendHelper extends AccessibilityService {
     private int typeTries = 0;
     private static final Pattern NOT_A_CHAT = Pattern.compile("search|result|[\"“”'‘’]", Pattern.CASE_INSENSITIVE);
 
-    // Opens Teams, finds the chat called chatName with Teams' search, and types the text (then Send, if asked).
+    // Opens Teams, finds the chat called chatName with Teams' search, and types the text. It never sends: that is
+    // the user's own "send it" afterwards (tapSend), which checks this chat is the one on screen.
     static boolean openChat(Context context, String name, String text, boolean send) {
         SendHelper service = running;
         android.content.Intent launch = context.getPackageManager().getLaunchIntentForPackage(TEAMS);
         if (service == null || launch == null) return false;
         service.chatName = clean(name);
         service.chatText = text == null ? "" : text.trim();
-        service.chatSend = send;
+        service.chatSend = false;
         service.chatStep = "search";
         service.chatUntil = SystemClock.elapsedRealtime() + CHAT_FOR_MS;
         context.startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -105,15 +106,24 @@ public class SendHelper extends AccessibilityService {
             }
             case "pick": {
                 // A result row that is the chat itself, not "Search for 'NOC Team'" or "No results for ...".
+                // Only a row whose name is the one asked for (or has it as a whole word: "Deeksha" in
+                // "Kummari, Deeksha"); if rows with different names match, it stops rather than guess.
                 String wanted = firstPart(chatName.toLowerCase(Locale.ROOT));
-                AccessibilityNodeInfo hit = findText(root, node -> {
+                List<AccessibilityNodeInfo> hits = findAll(root, node -> {
                     if (node.isEditable() || node.getText() == null) return false;
                     String shown = node.getText().toString();
                     if (NOT_A_CHAT.matcher(shown).find()) return false;
                     String name = firstPart(shown).toLowerCase(Locale.ROOT);
-                    return name.equals(wanted) || name.startsWith(wanted) || (" " + name.replace(",", " ") + " ").contains(" " + wanted + " ");
+                    return name.equals(wanted) || (" " + name.replace(",", " ") + " ").contains(" " + wanted + " ");
                 });
-                if (hit != null && click(hit)) {
+                java.util.Set<String> names = new java.util.HashSet<>();
+                for (AccessibilityNodeInfo hit : hits) names.add(firstPart(hit.getText().toString()).toLowerCase(Locale.ROOT));
+                if (names.size() > 1) {
+                    Toast.makeText(this, "Several Teams chats match \"" + chatName + "\". Please open the right one yourself.", Toast.LENGTH_LONG).show();
+                    chatStep = "";
+                    return;
+                }
+                if (!hits.isEmpty() && click(hits.get(0))) {
                     chatStep = "type";
                     typeTries = 0;
                 }
@@ -129,7 +139,7 @@ public class SendHelper extends AccessibilityService {
                 click(box);
                 setText(box, chatText);
                 if (chatSend) {
-                    arm(java.util.Collections.singletonList(TEAMS), chatText);
+                    arm(java.util.Collections.singletonList(TEAMS), chatText, chatName);
                 } else {
                     Toast.makeText(this, "Message typed in Teams. Say \"send it\" to send.", Toast.LENGTH_SHORT).show();
                 }
@@ -172,6 +182,19 @@ public class SendHelper extends AccessibilityService {
     }
 
     private interface Match { boolean test(AccessibilityNodeInfo node); }
+
+    private static List<AccessibilityNodeInfo> findAll(AccessibilityNodeInfo root, Match match) {
+        List<AccessibilityNodeInfo> found = new ArrayList<>();
+        List<AccessibilityNodeInfo> queue = new ArrayList<>();
+        queue.add(root);
+        for (int i = 0; i < queue.size() && i < 3000; i++) {
+            AccessibilityNodeInfo node = queue.get(i);
+            if (node == null) continue;
+            if (node.isVisibleToUser() && match.test(node)) found.add(node);
+            for (int c = 0; c < node.getChildCount(); c++) queue.add(node.getChild(c));
+        }
+        return found;
+    }
 
     private static AccessibilityNodeInfo findText(AccessibilityNodeInfo root, Match match) {
         List<AccessibilityNodeInfo> queue = new ArrayList<>();
@@ -216,10 +239,18 @@ public class SendHelper extends AccessibilityService {
         return false;
     }
 
-    // Ready to tap Send in one of these apps, on a draft containing these words, for the next few seconds.
-    static void arm(List<String> apps, String words) {
-        armedApps = new ArrayList<>(apps);
+    static final List<String> APPS = Arrays.asList(TEAMS, "com.whatsapp", "com.whatsapp.w4b", "com.google.android.gm", "com.microsoft.office.outlook");
+    private static volatile String armedChat = "";
+
+    // Ready to tap Send in one of these apps (only ever the four above), on a draft containing these words, in the
+    // chat called chat when given, for the next few seconds.
+    static void arm(List<String> apps, String words, String chat) {
+        List<String> allowed = new ArrayList<>(apps);
+        allowed.retainAll(APPS);
+        if (allowed.isEmpty()) return;
+        armedApps = allowed;
         armedWords = clean(words);
+        armedChat = chat == null ? "" : firstPart(clean(chat));
         armedUntil = SystemClock.elapsedRealtime() + ARMED_FOR_MS;
         SendHelper service = running;
         if (service != null) {
@@ -231,6 +262,7 @@ public class SendHelper extends AccessibilityService {
     private static void disarm() {
         armedUntil = 0;
         armedWords = "";
+        armedChat = "";
         armedApps = new ArrayList<>();
     }
 
@@ -257,6 +289,8 @@ public class SendHelper extends AccessibilityService {
         // Only the draft LightMoon wrote: its first words must be on screen.
         String start = armedWords.length() > 24 ? armedWords.substring(0, 24) : armedWords;
         if (!showsText(root, start)) return;
+        // And in the chat the draft was meant for: its name shows at the top of that chat.
+        if (!armedChat.isEmpty() && !showsName(root, armedChat)) return;
         AccessibilityNodeInfo send = findSend(root);
         if (send == null) return; // the screen may still be loading; the next event tries again
         AccessibilityNodeInfo target = send;
@@ -271,6 +305,13 @@ public class SendHelper extends AccessibilityService {
         if (armedUntil == 0 || armed()) return;
         disarm();
         Toast.makeText(this, "LightMoon couldn't find Send. Please tap it yourself.", Toast.LENGTH_LONG).show();
+    }
+
+    // The chat's name shown as a (non-editable) label, e.g. the header "Kummari, Deeksha".
+    private static boolean showsName(AccessibilityNodeInfo root, String name) {
+        String wanted = name.toLowerCase(Locale.ROOT);
+        return findText(root, node -> !node.isEditable() && node.getText() != null
+            && (" " + firstPart(node.getText().toString()).toLowerCase(Locale.ROOT).replace(",", " ") + " ").contains(" " + wanted + " ")) != null;
     }
 
     private static boolean showsText(AccessibilityNodeInfo root, String start) {

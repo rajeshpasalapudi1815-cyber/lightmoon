@@ -2,7 +2,9 @@ package app.lightmoon.assistant;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.provider.Telephony;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -21,12 +23,25 @@ final class ReadRules {
     private static final String PREFS = "lightmoon.reading";
     private static final int MAX_CHATS = 40; // the most recent chats offered in Settings
 
+    // Chat and email apps read unless switched off. Any other app posting "message" notifications starts switched
+    // off: one could pose as a chat ("Mom") to get the user's replies, so the user switches it on themselves.
+    static final Set<String> KNOWN_APPS = new HashSet<>(Arrays.asList(
+        "com.whatsapp", "com.whatsapp.w4b", "org.telegram.messenger", "org.thoughtcrime.securesms",
+        "com.google.android.apps.messaging", "com.samsung.android.messaging", "com.microsoft.teams",
+        "com.Slack", "com.google.android.apps.dynamite", "com.facebook.orca", "com.instagram.android",
+        "com.linkedin.android", "com.discord", "jp.naver.line.android", "com.viber.voip",
+        "com.google.android.gm", "com.microsoft.office.outlook"));
+
     private ReadRules() {}
+
+    static boolean known(Context context, String app) {
+        return KNOWN_APPS.contains(app) || app.equals(Telephony.Sms.getDefaultSmsPackage(context));
+    }
 
     // ---------- The rules ----------
 
     static synchronized boolean appAllowed(Context context, String app) {
-        return !names(context, "blockedApps").contains(app);
+        return known(context, app) ? !names(context, "blockedApps").contains(app) : names(context, "allowedOtherApps").contains(app);
     }
 
     static synchronized boolean accountAllowed(Context context, String account) {
@@ -38,7 +53,8 @@ final class ReadRules {
     }
 
     static synchronized void allowApp(Context context, String app, boolean allowed) {
-        change(context, "blockedApps", app, !allowed);
+        if (known(context, app)) change(context, "blockedApps", app, !allowed);
+        else change(context, "allowedOtherApps", app, allowed);
     }
 
     static synchronized void allowAccount(Context context, String account, boolean allowed) {

@@ -728,7 +728,7 @@ async function send(text, { context = null, byVoice = false, heardAlso = [] } = 
   refresh();
   try {
     const live = streamReply();
-    const out = await chat(context ? `${text}\n\nShared content:\n${context}` : text, { onText: live.push, heardAlso });
+    const out = await chat(text, { onText: live.push, heardAlso, shared: context ?? '' });
     live.done(out);
     applyState();
     if (byVoice && !out.error && shouldFollowUp(out.reply)) listenWhenFree = 'follow-up';
@@ -1935,7 +1935,13 @@ function saveSettings(event) {
   const apiKey = fields.apiKey.value.trim();
   if (/\s/.test(apiKey)) return void settingsProblem('ai', "That API key doesn't look right. Copy it again.");
   const baseUrl = fields.baseUrl.value.trim();
-  if (!/^https?:\/\/[^\s]+$/.test(baseUrl)) return void settingsProblem('ai', 'The API address must start with https://');
+  if (!/^https:\/\/[^\s]+$/.test(baseUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(baseUrl)) {
+    return void settingsProblem('ai', 'The API address must start with https://');
+  }
+  const hostOf = url => { try { return new URL(url).host; } catch { return ''; } };
+  if (!apiKey && hostOf(baseUrl) !== hostOf(store.aiConfig().baseUrl ?? '')) {
+    return void settingsProblem('ai', 'The API address changed: enter the API key for the new address too.');
+  }
 
   const langChanged = fields.lang.value !== prefs.lang;
   Object.assign(prefs, {

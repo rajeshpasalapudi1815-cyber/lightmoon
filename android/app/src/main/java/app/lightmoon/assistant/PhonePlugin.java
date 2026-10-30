@@ -38,6 +38,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import org.json.JSONArray;
@@ -644,8 +645,15 @@ public class PhonePlugin extends Plugin {
             call.reject("Which link?");
             return;
         }
+        Uri link = Uri.parse(url);
+        String scheme = link.getScheme() == null ? "" : link.getScheme().toLowerCase(Locale.ROOT);
+        if (!Arrays.asList("https", "mailto", "msteams").contains(scheme)) {
+            call.reject("LightMoon only opens web, email and Teams links.");
+            return;
+        }
         String[] app = findApp(call.getString("app", ""));
-        Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent view = new Intent(Intent.ACTION_VIEW, link).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        view.setSelector(null);
         String copy = call.getString("copy");
         if (copy != null && !copy.isEmpty()) copy(copy);
         try {
@@ -741,7 +749,7 @@ public class PhonePlugin extends Plugin {
             call.reject("Which draft?");
             return;
         }
-        SendHelper.arm(apps, text);
+        SendHelper.arm(apps, text, call.getString("chat", ""));
         getActivity().runOnUiThread(() -> {
             if (getActivity() instanceof MainActivity) ((MainActivity) getActivity()).leavePanel();
             else getActivity().moveTaskToBack(true);
