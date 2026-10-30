@@ -53,7 +53,8 @@ class BrainError extends Error {
 }
 
 // onText receives the reply piece by piece as it arrives, so the app can show and speak it straight away.
-export async function chat(text, { onText } = {}) {
+// heardAlso: other guesses of the speech recogniser at what was said, for the AI to weigh (not saved).
+export async function chat(text, { onText, heardAlso = [] } = {}) {
   messages.add('user', text);
   // No internet: the offline brain on the phone answers, if it has been downloaded (offline.js).
   if (navigator.onLine === false) {
@@ -62,6 +63,10 @@ export async function chat(text, { onText } = {}) {
   }
   await Promise.all([refreshLifeLevelling(), refreshPhone()]); // quick, and only every minute or two
   const convo = [systemMessage(), ...recentHistory()];
+  if (heardAlso.length) {
+    convo.push({ role: 'system', content: `Their last message was spoken and turned into text by speech recognition, which may have misheard. `
+      + `Its other guesses: ${heardAlso.map(guess => `"${guess}"`).join(', ')}. Go by what makes sense.` });
+  }
   const actions = [];
   const written = [];
   const emit = delta => {

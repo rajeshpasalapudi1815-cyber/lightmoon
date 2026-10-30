@@ -607,14 +607,10 @@ public class PhonePlugin extends Plugin {
 
     // ---------- Phone actions ----------
 
-    // { name } -> { label }: opens the installed app whose name matches best.
-    @PluginMethod
-    public void openApp(PluginCall call) {
-        String wanted = simplify(call.getString("name", ""));
-        if (wanted.isEmpty()) {
-            call.reject("Which app?");
-            return;
-        }
+    // The installed app whose name matches best: { package, label }, or null.
+    private String[] findApp(String name) {
+        String wanted = simplify(name);
+        if (wanted.isEmpty()) return null;
         PackageManager pm = getContext().getPackageManager();
         List<ResolveInfo> apps = pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0);
         ResolveInfo best = null;
@@ -630,7 +626,92 @@ public class PhonePlugin extends Plugin {
                 bestLabel = label;
             }
         }
-        Intent launch = best == null ? null : pm.getLaunchIntentForPackage(best.activityInfo.packageName);
+        return best == null ? null : new String[] { best.activityInfo.packageName, bestLabel };
+    }
+
+    // Puts text on the clipboard, for pasting where an app can't take it ready-made.
+    private void copy(String text) {
+        android.content.ClipboardManager clipboard = getContext().getSystemService(android.content.ClipboardManager.class);
+        if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText("LightMoon", text));
+    }
+
+    // { url, app?, copy? } -> { label }: opens a link (a Teams chat, a mailto:...) in that app if it's installed,
+    // else in whatever handles it; copy also puts that text on the clipboard. The user sends from there.
+    @PluginMethod
+    public void openLink(PluginCall call) {
+        String url = call.getString("url", "");
+        if (url.isEmpty()) {
+            call.reject("Which link?");
+            return;
+        }
+        String[] app = findApp(call.getString("app", ""));
+        Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        String copy = call.getString("copy");
+        if (copy != null && !copy.isEmpty()) copy(copy);
+        try {
+            if (app != null) {
+                try {
+                    getActivity().startActivity(new Intent(view).setPackage(app[0]));
+                    JSObject result = new JSObject();
+                    result.put("label", app[1]);
+                    call.resolve(result);
+                    return;
+                } catch (RuntimeException notThere) {
+                    // That app doesn't take this link: let Android choose.
+                }
+            }
+            getActivity().startActivity(view);
+            JSObject result = new JSObject();
+            result.put("label", "");
+            call.resolve(result);
+        } catch (RuntimeException err) {
+            call.reject("Nothing on this phone can open that link.");
+        }
+    }
+
+    // { text, app } -> { label }: shares the text into that app (its own "share to" screen, where the user picks
+    // the chat), or Android's share sheet when the app isn't found. The text is on the clipboard too.
+    @PluginMethod
+    public void shareText(PluginCall call) {
+        String text = call.getString("text", "");
+        if (text.isEmpty()) {
+            call.reject("What should it say?");
+            return;
+        }
+        copy(text);
+        Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text);
+        String[] app = findApp(call.getString("app", ""));
+        JSObject result = new JSObject();
+        try {
+            if (app != null) {
+                try {
+                    getActivity().startActivity(new Intent(send).setPackage(app[0]).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    result.put("label", app[1]);
+                    call.resolve(result);
+                    return;
+                } catch (RuntimeException notThere) {
+                    // It doesn't take shared text: offer every app that does.
+                }
+            }
+            getActivity().startActivity(Intent.createChooser(send, "Send with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            result.put("label", "");
+            call.resolve(result);
+        } catch (RuntimeException err) {
+            call.reject("Couldn't share the message.");
+        }
+    }
+
+    // { name } -> { label }: opens the installed app whose name matches best.
+    @PluginMethod
+    public void openApp(PluginCall call) {
+        if (simplify(call.getString("name", "")).isEmpty()) {
+            call.reject("Which app?");
+            return;
+        }
+        PackageManager pm = getContext().getPackageManager();
+        String[] found = findApp(call.getString("name", ""));
+        String bestLabel = found == null ? "" : found[1];
+        Intent launch = found == null ? null : pm.getLaunchIntentForPackage(found[0]);
         if (launch == null) {
             call.reject("There's no app called \"" + call.getString("name") + "\" on this phone.");
             return;

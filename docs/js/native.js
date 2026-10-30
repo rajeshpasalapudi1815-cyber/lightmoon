@@ -141,9 +141,10 @@ class NativeRecognition {
       this.handles.push(await recognizer.addListener('partialResults', ({ matches }) => {
         if (this.done || !matches?.[0]) return;
         this.heard = matches[0];
+        this.others = matches.slice(1, 3);
         this.emit(this.heard, false);
       }));
-      await recognizer.start({ language: this.lang, partialResults: true, popup: false, maxResults: 1 });
+      await recognizer.start({ language: this.lang, partialResults: true, popup: false, maxResults: 3 });
     } catch {
       return this.fail('network');
     }
@@ -168,7 +169,7 @@ class NativeRecognition {
   }
 
   emit(text, isFinal) {
-    const result = Object.assign([{ transcript: text }], { isFinal });
+    const result = Object.assign([{ transcript: text }, ...(this.others ?? []).map(other => ({ transcript: other }))], { isFinal });
     this.onresult?.({ resultIndex: 0, results: [result] });
   }
 

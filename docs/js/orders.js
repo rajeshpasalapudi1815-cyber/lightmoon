@@ -6,7 +6,7 @@
 // Tools that only look things up, and the two that already ask first every time (phone.js).
 const LEAVE_ALONE = new Set([
   'get_weather', 'look_up', 'check_link', 'news_headlines', 'phone_calendar', 'phone_recent_calls', 'phone_messages',
-  'phone_number_info', 'phone_search', 'phone_navigate', 'phone_open_app', 'phone_media', 'phone_call', 'phone_message', 'phone_driving',
+  'phone_number_info', 'phone_search', 'phone_navigate', 'phone_open_app', 'phone_media', 'phone_call', 'phone_message', 'phone_driving', 'compose_message',
 ]);
 // Tools that take something away, and those that answer a reminder.
 const TAKE_AWAY = new Set(['forget', 'delete_task', 'delete_routine', 'life_delete_task']);
@@ -14,7 +14,7 @@ const ANSWER = new Set(['complete_task', 'stop_checking_in', 'snooze_reminder', 
 
 const TAKE_AWAY_WORDS = /\b(forget|delete|remove|clear|erase|wipe|drop|cancel|scrap|undo|abandon|pause|give up|get rid|no longer|anymore|don'?t (need|want)|never ?mind)\b/i;
 const ANSWER_WORDS = /\b(yes|yeah|yep|yup|sure|ok|okay|done|did|finished|completed?|achieved|tick|mark|stop|later|snooze|not now|remind|minutes?|hours?|tonight|tomorrow|haan|avunu)\b/i;
-const YES = /^\W*(yes|yeah|yep|yup|sure|ok|okay|go ahead|please do|do it|haan|avunu)\b/i;
+const YES = /^\W*(yes|yeah|yep|yup|ya|sure|ok|okay|go ahead|please do|do it|send( it)?|go|correct|right|confirm(ed)?|haan|ha|ji|haan ji|theek hai|avunu|sare|sari)\b/i;
 
 // Words too common to say where an idea came from.
 const COMMON = new Set(('the and for you your yours with that this these those from have has had are was were will would can could '

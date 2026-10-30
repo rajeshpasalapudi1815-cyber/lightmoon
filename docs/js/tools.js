@@ -17,6 +17,8 @@ import { LIFE_TOOLS, lifeHandlers, isConnected as lifeConnected } from './lifele
 import { phoneTools, phoneHandlers, heardMessages } from './phone.js';
 import { lookUp, headlines } from './knowledge.js';
 import { findLinks, checkLink } from './links.js';
+import { planCompose } from './compose.js';
+import { phone as phoneApp } from './native.js';
 
 // What the model sends when the user means "where I am" rather than naming a city.
 const MEANS_HERE = /^(here|local|nearby)$|\b(my|current|this|our)\s+(location|city|place|area|town)\b|where i am/i;
@@ -105,7 +107,7 @@ export const TOOLS = [
     'Remember what they call someone ("Mom is Lakshmi P in my contacts", "Chinnu is Ravi Kumar", "my boss is boss@company.com"), so calls, messages and emails find them by that name. An empty who forgets it.',
     {
       nickname: { type: 'string', description: 'What they call them, e.g. "Mom".' },
-      who: { type: 'string', description: 'The name as saved in their contacts, or an email address or number.' },
+      who: { type: 'string', description: 'The name as saved in their contacts, an email address, a number, or a Teams chat or channel link.' },
     },
     ['nickname'],
   ),
@@ -132,7 +134,22 @@ export const TOOLS = [
 
 // The Life Levelling tools are offered only while Life Levelling is connected, the phone tools only in the
 // Android app (and only for what the user has allowed).
-export const currentTools = () => [...TOOLS, CHECK_LINK, ...(lifeConnected() ? LIFE_TOOLS : []), ...phoneTools()];
+export const currentTools = () => [...TOOLS, CHECK_LINK, COMPOSE, ...(lifeConnected() ? LIFE_TOOLS : []), ...phoneTools()];
+
+// Messages written into other apps for the user to send (compose.js); sent when the talk is about messaging.
+const COMPOSE = tool(
+  'compose_message',
+  'Write a message into another app, ready for them to check and send there: Teams (a person or several by work email, or a group chat or channel '
+    + 'saved by its link), Slack, Telegram, Signal, Google Chat, Instagram, LinkedIn and others. For WhatsApp and SMS use phone_message; for email, draft_email.',
+  {
+    app: { type: 'string', description: 'e.g. "Teams", "Slack".' },
+    to: { type: 'string', description: 'Who: names, nicknames or emails, comma-separated.' },
+    group: { type: 'string', description: 'Teams group chat or channel name, e.g. "NOC Team".' },
+    text: { type: 'string', description: 'The message, tidied, in their voice.' },
+  },
+  ['app', 'text'],
+);
+const COMPOSE_WORDS = /\b(teams|slack|telegram|signal|google chat|instagram|insta|linkedin|messenger|discord|draft|ping|message|tell|tag)\b/i;
 
 // Sent only when the talk is about a link (links.js), like the groups below.
 const CHECK_LINK = tool(
@@ -168,6 +185,7 @@ export function toolsFor(text, loaded = new Set()) {
   if (routines.list().some(r => r.trigger && lower.includes(r.trigger.toLowerCase()))) groups.add('phone').add('life');
   const missing = (phone.length && !groups.has('phone')) || (life.length && !groups.has('life'));
   const links = LINK_WORDS.test(text) || findLinks(text).length ? [CHECK_LINK] : [];
+  if (COMPOSE_WORDS.test(text)) links.push(COMPOSE);
   return [...TOOLS, ...links, ...(groups.has('life') ? life : []), ...(groups.has('phone') ? phone : []), ...(missing ? [LOAD_TOOLS] : [])];
 }
 
@@ -328,7 +346,7 @@ const handlers = {
 
   set_nickname({ nickname, who }) {
     const nick = toText(nickname, 'nickname', 40);
-    const person = String(who ?? '').trim().slice(0, 120);
+    const person = String(who ?? '').trim().slice(0, 600); // room for a Teams channel link
     nicknames.set(nick, person);
     return person ? `"${nick}" is ${person}` : `Forgot the nickname "${nick}"`;
   },
@@ -344,6 +362,25 @@ const handlers = {
     const url = `mailto:${address}?${new URLSearchParams({ subject: title, body: text }).toString().replace(/\+/g, '%20')}`;
     openMailApp(url);
     return { text: `Email to ${address} opened in your mail app`, result: `The mail app is open with the email to ${address} filled in. Tell the user to check it and tap Send there; you haven't sent it.` };
+  },
+
+  async compose_message({ app, to, group, text }) {
+    const plan = planCompose({ app, to, group, text: toText(text, 'text', 2000), lookUp: name => nicknames.lookUp(name) });
+    if (plan.ask) throw new Error(plan.ask);
+    if (plan.kind === 'link') {
+      if (phoneApp?.openLink) await phoneApp.openLink({ url: plan.url, app: plan.app, copy: plan.copy ?? '' });
+      else {
+        if (plan.copy) await navigator.clipboard?.writeText(plan.copy).catch(() => {});
+        openMailApp(plan.url); // on the computer: the browser hands Teams links to the Teams app
+      }
+    } else {
+      if (!phoneApp?.shareText) {
+        await navigator.clipboard?.writeText(plan.text).catch(() => {});
+        return { text: 'Message copied', result: `This device can't open ${plan.app} with the message, so it's copied: they paste it into ${plan.app} and send it.` };
+      }
+      await phoneApp.shareText({ text: plan.text, app: plan.app });
+    }
+    return { text: `${plan.app} opened with your message`, result: plan.note };
   },
 
   check_link({ text }) {

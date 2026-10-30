@@ -63,11 +63,12 @@ let audioCtx = null;
 // ---------- Small helpers ----------
 
 function loadPrefs() {
-  const lang = LANGUAGES.find(([code]) => code === navigator.language)?.[0] ?? 'en-US';
+  const inIndia = /^Asia\/(Kolkata|Calcutta)$/.test(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const lang = LANGUAGES.find(([code]) => code === navigator.language && !(inIndia && code === 'en-US'))?.[0] ?? (inIndia ? 'en-IN' : 'en-US');
   // sendAfterMs: how long a pause ends a spoken request (0 = only when the moon is tapped again).
   // followUp: after a spoken request, listen for the answer once the reply is said: 'questions' (when the
   // reply asks something), 'always', or 'off' (wait for a tap).
-  const defaults = { voice: '', rate: 1, speak: true, lang, handsFree: false, sendAfterMs: 2500, listenOnOpen: true, followUp: 'questions', look: 'hud' };
+  const defaults = { voice: '', rate: 1, speak: true, lang, handsFree: false, sendAfterMs: 2500, listenOnOpen: true, followUp: 'questions', look: 'hud', reviewSpeech: false };
   try {
     // Move preferences saved under the app's earlier names.
     for (const oldKey of ['vega.prefs', 'jarvis.prefs']) {
@@ -77,6 +78,12 @@ function loadPrefs() {
     }
     const saved = { ...defaults, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') };
     // Once, when voices were split into male and female: a voice of the other kind goes back to Automatic.
+    // Once: in India, listen as Indian English rather than US English.
+    if (!saved.langIndiaSet) {
+      if (inIndia && saved.lang === 'en-US') saved.lang = 'en-IN';
+      saved.langIndiaSet = true;
+      localStorage.setItem(PREFS_KEY, JSON.stringify(saved));
+    }
     if (!saved.voiceGenderSet) {
       if (saved.voice && genderOf(saved.voice) && genderOf(saved.voice) !== VOICE_GENDER) saved.voice = '';
       saved.voiceGenderSet = true;
@@ -208,6 +215,14 @@ function addMessage(kind, text, actions = [], { fromHistory = false } = {}) {
   if (kind.startsWith('assistant')) node.dataset.who = assistantName().toUpperCase();
   node.append(el('div', 'msg-text', text));
   addActions(node, actions);
+  if (kind === 'user') {
+    node.title = 'Tap to edit and send again';
+    node.addEventListener('click', () => {
+      if (busy) return note('Wait for this answer, then tap your message to fix it.');
+      input.value = text;
+      input.focus();
+    });
+  }
   transcript.append(node);
   transcript.scrollTop = transcript.scrollHeight;
   if (!fromHistory && !chatOpen()) {
@@ -538,6 +553,8 @@ const listener = {
     rec.lang = prefs.lang;
     rec.continuous = true;
     rec.interimResults = true;
+    rec.maxAlternatives = 3;
+    this.heardAlso = [];
     rec.onresult = event => this.onResult(event);
     rec.onerror = event => this.onError(event);
     rec.onend = () => this.onEnd(rec);
@@ -587,6 +604,9 @@ const listener = {
     const results = Array.from(event.results);
     if (this.mode === 'command') {
       const finals = results.filter(r => r.isFinal).map(r => r[0].transcript);
+      // The recogniser's other guesses at the latest words, for the AI (brain.js).
+      const latest = results.at(-1);
+      this.heardAlso = Array.from(latest ?? []).slice(1, 3).map(a => a.transcript).filter(Boolean);
       const interim = results.filter(r => !r.isFinal).map(r => r[0].transcript).join(' ');
       showHeard(`${joinPhrases([this.opening, ...finals])} ${interim}`.trim());
       this.waitForSilence(); // still talking: restart the pause timer
@@ -607,11 +627,19 @@ const listener = {
   finish() {
     clearTimeout(this.silenceTimer);
     const text = input.value.trim();
+    const heardAlso = this.heardAlso ?? [];
     this.capturing = false;
     this.stopRec();
     input.value = '';
     refresh();
-    if (text) send(text, { byVoice: true });
+    if (!text) return;
+    // "Let me check the words first": the words wait in the box to be corrected, and go when Send is tapped.
+    if (prefs.reviewSpeech && !panelMode.on) {
+      input.value = text;
+      showCaption('Check the words, then tap send', 'system');
+      return;
+    }
+    send(text, { byVoice: true, heardAlso });
   },
 
   cancel() {
@@ -687,7 +715,7 @@ function shouldFollowUp(reply) {
 }
 
 // `context` is shared content the message is about (from "Share to LightMoon"); `byVoice`: it was spoken.
-async function send(text, { context = null, byVoice = false } = {}) {
+async function send(text, { context = null, byVoice = false, heardAlso = [] } = {}) {
   text = text.trim();
   if (!text || busy) return;
   context ??= pendingShare;
@@ -699,7 +727,7 @@ async function send(text, { context = null, byVoice = false } = {}) {
   refresh();
   try {
     const live = streamReply();
-    const out = await chat(context ? `${text}\n\nShared content:\n${context}` : text, { onText: live.push });
+    const out = await chat(context ? `${text}\n\nShared content:\n${context}` : text, { onText: live.push, heardAlso });
     live.done(out);
     applyState();
     if (byVoice && !out.error && shouldFollowUp(out.reply)) listenWhenFree = 'follow-up';
@@ -1050,6 +1078,7 @@ function openSettings() {
   fields.rate.value = prefs.rate;
   fields.speak.checked = prefs.speak;
   fields.sendAfter.value = String(prefs.sendAfterMs);
+  fields.reviewSpeech.checked = prefs.reviewSpeech;
   fields.listenOnOpen.checked = prefs.listenOnOpen;
   fields.followUp.value = prefs.followUp;
   fields.reminderChecks.value = store.settings.get('reminder_checks', 'on');
@@ -1876,6 +1905,7 @@ function saveSettings(event) {
     rate: Number(fields.rate.value),
     speak: fields.speak.checked,
     sendAfterMs: Number(fields.sendAfter.value),
+    reviewSpeech: fields.reviewSpeech.checked,
     listenOnOpen: fields.listenOnOpen.checked,
     followUp: fields.followUp.value,
     look: fields.look.value,
