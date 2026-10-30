@@ -1,0 +1,68 @@
+/* The install page (install.html): same colours as the app, nothing else from it. */
+:root {
+  --bg: #04070d;
+  --panel: rgba(12, 22, 34, 0.86);
+  --line: rgba(63, 216, 255, 0.18);
+  --cyan: rgb(63, 216, 255);
+  --text: #d6eef8;
+  --muted: #8fb0c0;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  font: 16px/1.5 Inter, system-ui, sans-serif;
+  background:
+    radial-gradient(ellipse at 35% -10%, rgba(63, 216, 255, 0.16), transparent 60%),
+    linear-gradient(rgba(63, 216, 255, 0.04) 1px, transparent 1px) 0 0 / 44px 44px,
+    linear-gradient(90deg, rgba(63, 216, 255, 0.04) 1px, transparent 1px) 0 0 / 44px 44px,
+    var(--bg);
+}
+.wrap {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: max(24px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom));
+  display: grid;
+  gap: 16px;
+}
+.head { display: flex; align-items: center; gap: 16px; }
+.head img { border-radius: 16px; flex: none; }
+h1, h2 { font-family: Rajdhani, Inter, sans-serif; letter-spacing: 0.02em; margin: 0; }
+h1 { font-size: 30px; line-height: 1.1; }
+h2 { font-size: 22px; margin-bottom: 8px; }
+.sub { margin: 4px 0 0; color: var(--muted); }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px;
+}
+.card.main { border-color: rgba(63, 216, 255, 0.45); box-shadow: 0 0 40px rgba(63, 216, 255, 0.08); }
+.device { margin: 0 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--cyan); }
+p { margin: 8px 0; }
+ol { margin: 8px 0; padding-left: 22px; }
+li { margin: 6px 0; }
+.small { font-size: 14px; color: var(--muted); }
+.btn {
+  display: inline-block;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 24px;
+  background: var(--cyan);
+  color: #031018;
+  font: 600 16px Inter, system-ui, sans-serif;
+  text-decoration: none;
+  cursor: pointer;
+}
+.btn:hover { filter: brightness(1.1); }
+.btn:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.btn[hidden] { display: none; }
+details { border-top: 1px solid var(--line); padding: 10px 0; }
+details:first-of-type { border-top: 0; }
+summary { cursor: pointer; font-weight: 600; }
+a { color: var(--cyan); }
+#qr { display: block; margin: 12px auto; border-radius: 8px; max-width: 100%; height: auto; }
+.link { text-align: center; font-size: 14px; overflow-wrap: anywhere; }
+.foot { text-align: center; font-size: 14px; }

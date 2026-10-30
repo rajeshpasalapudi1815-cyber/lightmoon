@@ -32,8 +32,10 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const { request } = event;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
-  // Every page load (including shortcut and share links with their ?query) is the same app page.
-  const key = request.mode === 'navigate' ? './index.html' : request;
+  // Every page load (including shortcut and share links with their ?query) is the same app page, except the
+  // install page (install.html), which is its own page and must not take the app's place in the cache.
+  const appPage = request.mode === 'navigate' && !new URL(request.url).pathname.endsWith('/install.html');
+  const key = appPage ? './index.html' : request;
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);

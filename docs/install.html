@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.github.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Install LightMoon</title>
+  <meta name="description" content="Install LightMoon on your phone, tablet or computer.">
+  <meta name="theme-color" content="#04070d">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="install.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <img src="icons/icon-192.png" alt="" width="64" height="64">
+      <div>
+        <h1>Install LightMoon</h1>
+        <p class="sub">Your personal AI assistant, on any phone, tablet or computer.</p>
+      </div>
+    </header>
+
+    <!-- The right way in for the device this page was opened on (js/install.js fills it in). -->
+    <section class="card main" id="mainCard" aria-live="polite">
+      <p class="device" id="device">Checking your device…</p>
+      <h2 id="mainTitle">Install</h2>
+      <div id="mainBody"></div>
+    </section>
+
+    <section class="card" id="qrCard" hidden>
+      <h2>Install on your phone</h2>
+      <p>Point your phone's camera at this code to open this page there.</p>
+      <canvas id="qr" width="220" height="220" aria-label="QR code for this install page"></canvas>
+      <p class="link"><a id="pageLink" href="install.html"></a></p>
+    </section>
+
+    <section class="card">
+      <h2>Other devices</h2>
+
+      <details id="howAndroid">
+        <summary>Android phone or tablet</summary>
+        <p><a class="btn" id="apkLink2" href="https://github.com/rajeshpasalapudi1815-cyber/lightmoon/releases/latest/download/LightMoon.apk">Download LightMoon.apk</a></p>
+        <ol>
+          <li>Open the downloaded file (tap the download notification, or find it in Files → Downloads).</li>
+          <li>If Android asks, allow your browser to <b>install unknown apps</b>, then go back and tap <b>Install</b>.</li>
+          <li>If Play Protect warns about an unknown app, tap <b>More details → Install anyway</b>. LightMoon isn't on the Play Store, so Android always asks.</li>
+          <li>Open LightMoon. Installing a newer APK later updates it and keeps your data.</li>
+        </ol>
+        <p class="small">The Android app can do the most: the wake phrase ("Hey LightMoon"), calls, messages, notifications and the quick panel.</p>
+      </details>
+
+      <details id="howIphone">
+        <summary>iPhone or iPad</summary>
+        <ol>
+          <li>Open this page in <b>Safari</b>.</li>
+          <li>Tap the <b>Share</b> button (the square with an arrow).</li>
+          <li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>
+          <li>Open LightMoon from the new icon on your Home Screen.</li>
+        </ol>
+        <p class="small">On iPhone, LightMoon talks, listens when you tap it, and keeps your tasks and reminders. Apple doesn't let it hear a wake phrase or read your messages and calls.</p>
+      </details>
+
+      <details id="howComputer">
+        <summary>Windows, Mac, Linux or Chromebook</summary>
+        <ol>
+          <li>Open this page in <b>Chrome</b> or <b>Edge</b>.</li>
+          <li>Click <b>Install</b> at the top of this page, or the install icon at the right end of the address bar.</li>
+          <li>In Edge you can also use <b>⋯ → Apps → Install this site as an app</b>.</li>
+          <li>LightMoon opens in its own window and gets a Start menu, Dock or desktop icon.</li>
+        </ol>
+        <p class="small">On a Mac with Safari: <b>File → Add to Dock</b>. Firefox can't install apps; LightMoon still works in a Firefox tab.</p>
+      </details>
+    </section>
+
+    <p class="foot"><a href="./">Open LightMoon in the browser instead</a></p>
+  </main>
+  <script type="module" src="js/install.js"></script>
+</body>
+</html>
