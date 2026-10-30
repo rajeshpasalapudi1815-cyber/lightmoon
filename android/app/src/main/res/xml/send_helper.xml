@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Send helper (SendHelper.java): only these four apps, and only window changes in them. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/send_helper_description"
+    android:packageNames="com.microsoft.teams,com.whatsapp,com.whatsapp.w4b,com.google.android.gm,com.microsoft.office.outlook"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="300"
+    android:canRetrieveWindowContent="true"
+    android:accessibilityFlags="flagDefault" />

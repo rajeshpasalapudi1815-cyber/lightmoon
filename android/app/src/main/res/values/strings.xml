@@ -5,5 +5,7 @@
     <string name="package_name">app.lightmoon.assistant</string>
     <string name="custom_url_scheme">app.lightmoon.assistant</string>
     <string name="shortcut_ask">Ask LightMoon</string>
+    <string name="send_helper_label">LightMoon Send helper</string>
+    <string name="send_helper_description">Taps Send on a message LightMoon wrote for you in Teams, WhatsApp, Gmail or Outlook, only right after you tell LightMoon to send it, and only when your message is on screen. It works in those four apps only, reads nothing else and keeps nothing.</string>
     <string name="shortcut_ask_long">Ask LightMoon over this screen</string>
 </resources>

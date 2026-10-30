@@ -48,6 +48,18 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!-- Send helper: taps Send on a draft LightMoon wrote, after the user says "send it" (SendHelper.java). -->
+        <service
+            android:name=".SendHelper"
+            android:exported="true"
+            android:label="@string/send_helper_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/send_helper" />
+        </service>
+
         <!-- Quick-settings tile: shows whether LightMoon is listening for its wake phrases, and switches it. -->
         <service
             android:name=".WakeTile"

@@ -50,4 +50,16 @@ check('Slack goes through its share screen', () => {
 check('needs the words', () => assert.ok(planCompose({ app: 'Slack', text: '  ', lookUp }).ask));
 check('splits names', () => assert.deepEqual(splitPeople('Akash, Priya and Ravi'), ['Akash', 'Priya', 'Ravi']));
 
+console.log('-- "send it" only for the last draft');
+const { rememberDraft, recentDraft } = await import(pathToFileURL(`${repo}/docs/js/compose.js`));
+check('a Teams draft is remembered with its app', () => {
+  rememberDraft('teams', "I'm running late today");
+  assert.deepEqual(recentDraft().apps, ['com.microsoft.teams']);
+});
+check('forgotten after ten minutes', () => assert.equal(recentDraft(Date.now() + 11 * 60_000), null));
+check('an app the helper can\'t work in is not remembered', () => {
+  rememberDraft('slack', 'hi');
+  assert.equal(recentDraft(), null);
+});
+
 process.exit(failed ? 1 : 0);

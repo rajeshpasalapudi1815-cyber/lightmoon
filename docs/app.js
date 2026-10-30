@@ -1419,6 +1419,7 @@ async function paintPhonePowers(message) {
   $('#streakGuardRow').hidden = typeof status.streakGuard !== 'string';
   if (typeof status.streakGuard === 'string') $('#streakGuard').value = status.streakGuard;
   paintDriving();
+  paintSendHelper();
   $('#allowCalls').closest('.perm-row').hidden = !status.telephony;
   $('#allowTexts').closest('.perm-row').hidden = !status.telephony;
   $('#allowSilence').closest('.perm-row').hidden = status.silence === undefined; // app versions before 1.4 can't silence
@@ -1500,6 +1501,15 @@ async function allowPhone(request, what) {
   }
   paintPhonePowers();
   refreshPhone({ force: true });
+}
+
+// The Send helper (1.14 and later): switched on in Android's accessibility settings.
+async function paintSendHelper() {
+  const state = await phone.sendHelper?.().catch(() => null);
+  $('#sendHelperBox').hidden = !state;
+  if (!state) return;
+  $('#sendHelperStatus').textContent = state.enabled ? 'On' : 'Off';
+  $('#sendHelperOn').hidden = state.enabled;
 }
 
 // Driving mode (1.11 and later): which car turns it on, and whether it's on now.
@@ -2177,6 +2187,7 @@ function wireUp() {
     $('#allowCalls').addEventListener('click', () => allowPhone(() => phone.requestCalls(), 'calls'));
     $('#allowTexts').addEventListener('click', () => allowPhone(() => phone.requestTexts(), 'texts'));
     $('#allowSteps').addEventListener('click', () => allowPhone(() => phone.requestSteps(), 'steps'));
+    $('#sendHelperOn').addEventListener('click', () => phone.openSendHelperSettings().catch(err => { $('#settingsError').textContent = err.message; }));
     $('#drivingCar').addEventListener('click', () => phone.driving({ rememberCar: true })
       .then(s => paintDriving(`Your car: ${s.car}`), err => paintDriving(err.message)));
     $('#drivingForget').addEventListener('click', () => phone.driving({ carName: '' }).finally(() => paintDriving()));

@@ -701,6 +701,56 @@ public class PhonePlugin extends Plugin {
         }
     }
 
+    // The Send helper (SendHelper.java): { enabled } now.
+    @PluginMethod
+    public void sendHelper(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("enabled", SendHelper.isEnabled(getContext()));
+        call.resolve(result);
+    }
+
+    // Android's accessibility settings, where the user switches the Send helper on.
+    @PluginMethod
+    public void openSendHelperSettings(PluginCall call) {
+        try {
+            getActivity().startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            call.resolve();
+        } catch (RuntimeException err) {
+            call.reject("Couldn't open the accessibility settings.");
+        }
+    }
+
+    // { apps: [package...], text } : the user said "send it": arms the Send helper for that draft and goes back to
+    // the app it's in, where the helper taps Send if the words are on screen. -> { armed }.
+    @PluginMethod
+    public void tapSend(PluginCall call) {
+        if (!SendHelper.isEnabled(getContext())) {
+            call.reject("The Send helper is off. Switch it on in LightMoon's Settings → Phone → Send helper.");
+            return;
+        }
+        List<String> apps = new ArrayList<>();
+        try {
+            JSArray given = call.getArray("apps");
+            for (int i = 0; given != null && i < given.length(); i++) apps.add(given.getString(i));
+        } catch (JSONException err) {
+            call.reject("apps must be a list.");
+            return;
+        }
+        String text = call.getString("text", "");
+        if (apps.isEmpty() || text.trim().isEmpty()) {
+            call.reject("Which draft?");
+            return;
+        }
+        SendHelper.arm(apps, text);
+        getActivity().runOnUiThread(() -> {
+            if (getActivity() instanceof MainActivity) ((MainActivity) getActivity()).leavePanel();
+            else getActivity().moveTaskToBack(true);
+            JSObject result = new JSObject();
+            result.put("armed", true);
+            call.resolve(result);
+        });
+    }
+
     // { name } -> { label }: opens the installed app whose name matches best.
     @PluginMethod
     public void openApp(PluginCall call) {

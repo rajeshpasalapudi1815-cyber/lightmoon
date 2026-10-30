@@ -11,6 +11,7 @@ import { messages as chat, nicknames, settings } from './store.js';
 import { choosePerson, lookAlikeNotes, conversationsFrom } from './people.js';
 import { linkNote } from './links.js';
 import { moneyNote } from './money.js';
+import { rememberDraft } from './compose.js';
 
 const REFRESH_AFTER_MS = 60_000;
 const WAIT_AT_MOST_MS = 2_500;
@@ -430,6 +431,7 @@ export const phoneHandlers = {
     const person = await findPerson(to);
     if (via === 'whatsapp') {
       await call(phone.whatsapp({ number: withCountryCode(person.number), text: words }));
+      rememberDraft('whatsapp', words);
       return { text: `WhatsApp ready for ${person.name ?? person.number}`, result: 'WhatsApp is open with the message written in; the user taps send.' };
     }
     if (!allowed?.texts) throw new Error('Texting is off. Ask the user to allow it in Settings → Phone, or use via "whatsapp".');

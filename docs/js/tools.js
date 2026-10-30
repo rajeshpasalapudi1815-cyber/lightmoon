@@ -17,7 +17,7 @@ import { LIFE_TOOLS, lifeHandlers, isConnected as lifeConnected } from './lifele
 import { phoneTools, phoneHandlers, heardMessages } from './phone.js';
 import { lookUp, headlines } from './knowledge.js';
 import { findLinks, checkLink } from './links.js';
-import { planCompose } from './compose.js';
+import { planCompose, rememberDraft, recentDraft } from './compose.js';
 import { phone as phoneApp } from './native.js';
 
 // What the model sends when the user means "where I am" rather than naming a city.
@@ -134,7 +134,7 @@ export const TOOLS = [
 
 // The Life Levelling tools are offered only while Life Levelling is connected, the phone tools only in the
 // Android app (and only for what the user has allowed).
-export const currentTools = () => [...TOOLS, CHECK_LINK, COMPOSE, ...(lifeConnected() ? LIFE_TOOLS : []), ...phoneTools()];
+export const currentTools = () => [...TOOLS, CHECK_LINK, COMPOSE, TAP_SEND, ...(lifeConnected() ? LIFE_TOOLS : []), ...phoneTools()];
 
 // Messages written into other apps for the user to send (compose.js); sent when the talk is about messaging.
 const COMPOSE = tool(
@@ -149,7 +149,13 @@ const COMPOSE = tool(
   },
   ['app', 'text'],
 );
-const COMPOSE_WORDS = /\b(teams|slack|telegram|signal|google chat|instagram|insta|linkedin|messenger|discord|draft|ping|message|tell|tag)\b/i;
+const COMPOSE_WORDS = /\b(teams|slack|telegram|signal|google chat|instagram|insta|linkedin|messenger|discord|draft|ping|message|tell|tag|send)\b/i;
+// "Send it": the Send helper (Android, SendHelper.java) taps Send on the draft LightMoon just opened.
+const TAP_SEND = tool(
+  'tap_send',
+  'They said to send the draft you just opened in Teams, WhatsApp, Gmail or Outlook: the Send helper taps Send there. Only when they asked to send it.',
+  {},
+);
 
 // Sent only when the talk is about a link (links.js), like the groups below.
 const CHECK_LINK = tool(
@@ -185,7 +191,7 @@ export function toolsFor(text, loaded = new Set()) {
   if (routines.list().some(r => r.trigger && lower.includes(r.trigger.toLowerCase()))) groups.add('phone').add('life');
   const missing = (phone.length && !groups.has('phone')) || (life.length && !groups.has('life'));
   const links = LINK_WORDS.test(text) || findLinks(text).length ? [CHECK_LINK] : [];
-  if (COMPOSE_WORDS.test(text)) links.push(COMPOSE);
+  if (COMPOSE_WORDS.test(text)) links.push(COMPOSE, TAP_SEND);
   return [...TOOLS, ...links, ...(groups.has('life') ? life : []), ...(groups.has('phone') ? phone : []), ...(missing ? [LOAD_TOOLS] : [])];
 }
 
@@ -361,6 +367,7 @@ const handlers = {
     const title = String(subject ?? '').trim().slice(0, 200);
     const url = `mailto:${address}?${new URLSearchParams({ subject: title, body: text }).toString().replace(/\+/g, '%20')}`;
     openMailApp(url);
+    rememberDraft('email', text);
     return { text: `Email to ${address} opened in your mail app`, result: `The mail app is open with the email to ${address} filled in. Tell the user to check it and tap Send there; you haven't sent it.` };
   },
 
@@ -368,6 +375,7 @@ const handlers = {
     const plan = planCompose({ app, to, group, text: toText(text, 'text', 2000), lookUp: name => nicknames.lookUp(name) });
     if (plan.ask) throw new Error(plan.ask);
     if (plan.kind === 'link') {
+      if (plan.app === 'Teams') rememberDraft('teams', plan.copy ?? text);
       if (phoneApp?.openLink) await phoneApp.openLink({ url: plan.url, app: plan.app, copy: plan.copy ?? '' });
       else {
         if (plan.copy) await navigator.clipboard?.writeText(plan.copy).catch(() => {});
@@ -381,6 +389,19 @@ const handlers = {
       await phoneApp.shareText({ text: plan.text, app: plan.app });
     }
     return { text: `${plan.app} opened with your message`, result: plan.note };
+  },
+
+  async tap_send() {
+    const draft = recentDraft();
+    if (!draft) throw new Error("There's no draft you opened in the last ten minutes. The Send helper only sends a message LightMoon wrote; tell them to tap Send themselves.");
+    if (!phoneApp?.tapSend) throw new Error('Tapping Send needs LightMoon app 1.14 or later on their phone; tell them to tap Send themselves.');
+    const helper = await phoneApp.sendHelper().catch(() => ({ enabled: false }));
+    if (!helper.enabled) {
+      throw new Error("The Send helper is off, so they need to tap Send themselves. Tell them they can switch it on in Settings → Phone → Send helper, once.");
+    }
+    await phoneApp.tapSend({ apps: draft.apps, text: draft.text });
+    const where = { teams: 'Teams', whatsapp: 'WhatsApp', email: 'their mail app' }[draft.kind];
+    return { text: `Sending in ${where}`, result: `Going back to ${where}; the Send helper taps Send if the message is still there. If it can't, the phone says so and they tap it.` };
   },
 
   check_link({ text }) {
