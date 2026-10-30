@@ -234,6 +234,27 @@ export const nicknames = {
   },
 };
 
+// Words the speech recogniser gets wrong for this user, learnt when they fix a spoken message (hearing.js):
+// { pulav: 'pull up' }, one synced setting like the nicknames.
+export const mishearings = {
+  all() {
+    try {
+      const saved = JSON.parse(settings.get('mishearings', '{}'));
+      return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+    } catch {
+      return {};
+    }
+  },
+  save(fixes) {
+    settings.set('mishearings', JSON.stringify(fixes));
+  },
+  forget(heard) {
+    const saved = this.all();
+    delete saved[heard];
+    this.save(saved);
+  },
+};
+
 export function profile() {
   return {
     userName: settings.get('user_name'),

@@ -9,6 +9,7 @@ import { refresh as refreshLifeLevelling } from './lifelevelling.js';
 import { refresh as refreshPhone } from './phone.js';
 import { learnFrom, answerLocally } from './learning.js';
 import { answerOffline } from './offline.js';
+import { saidAgain } from './hearing.js';
 
 const HISTORY_LIMIT = 8;
 const OLD_MESSAGE_CHARS = 400; // older messages are cut short: every request counts against the free tier's tokens per minute
@@ -56,6 +57,7 @@ class BrainError extends Error {
 // heardAlso: other guesses of the speech recogniser at what was said, for the AI to weigh (not saved).
 // shared: something they shared into LightMoon (a page, a message): shown to the AI as other people's words.
 export async function chat(text, { onText, heardAlso = [], shared = '' } = {}) {
+  const before = messages.recent(3).filter(m => m.role === 'user').at(-1);
   messages.add('user', shared ? `${text}\n(They shared something with this.)` : text);
   startTurn(shared);
   const quick = await quickReply(text).catch(() => null); // "send it" after a draft: no AI needed
@@ -77,6 +79,10 @@ export async function chat(text, { onText, heardAlso = [], shared = '' } = {}) {
   if (heardAlso.length) {
     convo.push({ role: 'system', content: `Their last message was spoken and turned into text by speech recognition, which may have misheard. `
       + `Its other guesses: ${heardAlso.map(guess => `"${guess}"`).join(', ')}. Go by what makes sense.` });
+  }
+  if (before && saidAgain(text, before.content, Date.now() - (before.at ?? 0))) {
+    convo.push({ role: 'system', content: 'They just said nearly the same thing again, so your last answer missed. Don\'t repeat it: do exactly what they asked now, '
+      + 'or if you can\'t tell what they want, ask one short question about it.' });
   }
   const actions = [];
   const written = [];

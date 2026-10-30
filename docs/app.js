@@ -17,6 +17,7 @@ import { localStamp, today, isPast, toDate } from './js/time.js';
 import { speechChunks, lastSentenceEnd } from './js/speech.js';
 import { genderOf, wantedGender, bestVoice } from './js/voices.js';
 import { refreshWorkAccount, awaitingYes } from './js/tools.js';
+import { learnedFix, applyFixes, withFix } from './js/hearing.js';
 import * as updates from './js/updates.js';
 import * as problems from './js/problems.js';
 
@@ -58,6 +59,7 @@ let started = false; // user has tapped Initialize
 let locked = false; // the lock screen is showing
 let hiddenAt = 0; // when the app last went into the background
 let pendingShare = null; // shared content the next question is about
+let fixingHeard = ''; // spoken words put in the box to be fixed: what the user changes in them is learnt
 let listenWhenFree = false; // start listening once the briefing, greeting or reply has been spoken ('follow-up': with a chime)
 let audioCtx = null;
 
@@ -211,7 +213,7 @@ function showCaption(text, kind = '') {
 }
 
 // `fromHistory`: shown again on start-up, not something new.
-function addMessage(kind, text, actions = [], { fromHistory = false } = {}) {
+function addMessage(kind, text, actions = [], { fromHistory = false, spoken = false } = {}) {
   const node = el('div', `msg ${kind}`);
   if (kind.startsWith('assistant')) node.dataset.who = assistantName().toUpperCase();
   node.append(el('div', 'msg-text', text));
@@ -221,6 +223,7 @@ function addMessage(kind, text, actions = [], { fromHistory = false } = {}) {
     node.addEventListener('click', () => {
       if (busy) return note('Wait for this answer, then tap your message to fix it.');
       input.value = text;
+      fixingHeard = spoken ? text : '';
       input.focus();
     });
   }
@@ -246,6 +249,28 @@ function addActions(node, actions) {
 }
 
 const note = text => addMessage('system', text);
+
+// The user fixed words that were heard wrong: learnt, so the next time they're fixed by themselves.
+function learnHearing(text) {
+  const heard = fixingHeard;
+  fixingHeard = '';
+  const fix = heard && learnedFix(heard, text);
+  if (!fix) return;
+  store.mishearings.save(withFix(store.mishearings.all(), fix));
+  const node = el('div', 'msg system');
+  const undo = el('button', 'btn-ghost', 'Undo');
+  undo.type = 'button';
+  undo.addEventListener('click', () => {
+    store.mishearings.forget(fix.heard);
+    node.remove();
+  });
+  node.append(el('div', 'msg-text', `Got it: when I hear "${fix.heard}", you mean "${fix.meant}". I'll fix it myself next time.`), undo);
+  transcript.append(node);
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+// What was heard, with the words this user taught it put right.
+const putRight = text => applyFixes(text, store.mishearings.all()).text;
 
 // While the voice is still talking, finished sentences wait until there are about this many characters, so they
 // go to the voice as one phrase: fewer, longer phrases sound smoother than many short ones.
@@ -627,8 +652,8 @@ const listener = {
   // The request is complete: stop listening and send what was said (if anything).
   finish() {
     clearTimeout(this.silenceTimer);
-    const text = input.value.trim();
-    const heardAlso = this.heardAlso ?? [];
+    const text = putRight(input.value.trim());
+    const heardAlso = (this.heardAlso ?? []).map(putRight);
     this.capturing = false;
     this.stopRec();
     input.value = '';
@@ -637,6 +662,7 @@ const listener = {
     // "Let me check the words first": the words wait in the box to be corrected, and go when Send is tapped.
     if (prefs.reviewSpeech && !panelMode.on) {
       input.value = text;
+      fixingHeard = text;
       showCaption('Check the words, then tap send', 'system');
       return;
     }
@@ -723,7 +749,7 @@ async function send(text, { context = null, byVoice = false, heardAlso = [] } = 
   pendingShare = null;
   input.placeholder = 'Type a message, or tap the core to talk';
   if (speaker.active) speaker.stop();
-  addMessage('user', text);
+  addMessage('user', text, [], { spoken: byVoice });
   busy = true;
   refresh();
   try {
@@ -1097,6 +1123,7 @@ function openSettings() {
   paintCloudSettings();
   paintRhythm();
   paintSayAs();
+  paintMishearings();
   paintNicknames();
   paintHealth();
   paintOfflineBrain();
@@ -1766,6 +1793,23 @@ function paintSayAs() {
   }));
 }
 
+function paintMishearings() {
+  const saved = Object.entries(store.mishearings.all()).sort(([a], [b]) => a.localeCompare(b));
+  const list = $('#mishearList');
+  if (!saved.length) return void list.replaceChildren(el('li', 'say-as-empty', 'None yet.'));
+  list.replaceChildren(...saved.map(([heard, meant]) => {
+    const remove = el('button', 'btn-ghost', 'Remove');
+    remove.type = 'button';
+    remove.addEventListener('click', () => {
+      store.mishearings.forget(heard);
+      paintMishearings();
+    });
+    const row = el('li', 'say-as-row');
+    row.append(el('span', '', `"${heard}" → ${meant}`), remove);
+    return row;
+  }));
+}
+
 function paintRhythm() {
   const { insights } = store.rhythm();
   const list = $('#rhythmList');
@@ -2043,6 +2087,7 @@ function wireUp() {
     const text = input.value;
     input.value = '';
     if (text.trim()) setChatOpen(true); // typed messages are read, not heard: show the reply
+    if (!busy) learnHearing(text);
     send(text);
   });
   $('#chatBtn').addEventListener('click', () => setChatOpen(!chatOpen()));
