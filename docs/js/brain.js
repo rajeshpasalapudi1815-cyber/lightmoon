@@ -12,7 +12,7 @@ import { answerOffline } from './offline.js';
 
 const HISTORY_LIMIT = 8;
 const OLD_MESSAGE_CHARS = 400; // older messages are cut short: every request counts against the free tier's tokens per minute
-const MAX_WAIT_SECONDS = 45; // when every model is at its per-minute limit, wait this long at most for one to reset
+const MAX_WAIT_SECONDS = 62; // when every model is at its per-minute limit, wait for one to reset (a minute at most)
 const MAX_TOOL_ROUNDS = 8; // a routine can take several steps
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -223,8 +223,10 @@ async function complete(convo, tools, onText, { onWait } = {}) {
             reminded = true;
             messages = [...messages, { role: 'system', content: TOOL_REMINDER }];
           } else if (err.kind === 'too-large' && shorten(messages) !== messages) {
+            learnLimit(model, err.message);
             messages = shorten(messages);
           } else {
+            if (err.kind === 'too-large') learnLimit(model, err.message);
             if (err.kind === 'rate-limit') {
               spend(model, TOKENS_PER_MINUTE); // full for this minute: try the others first
               waitFor = Math.min(waitFor ?? Infinity, err.waitSeconds ?? 20);
@@ -269,8 +271,18 @@ function spend(model, tokens) {
 function modelsInOrder(ai, cost) {
   const spare = ai.baseUrl === DEFAULT_AI.baseUrl ? SPARE_MODEL : null;
   const models = [...new Set([ai.model, ai.fallbackModel, spare].filter(Boolean))];
-  const fits = model => spentLastMinute(model) + cost <= TOKENS_PER_MINUTE;
-  return [...models.filter(fits), ...models.filter(model => !fits(model))];
+  const fits = model => spentLastMinute(model) + cost <= (limits.get(model) ?? TOKENS_PER_MINUTE);
+  const canEver = model => cost <= (limits.get(model) ?? TOKENS_PER_MINUTE) * 0.9; // this request is too big for it
+  const usable = models.filter(canEver);
+  const pool = usable.length ? usable : models;
+  return [...pool.filter(fits), ...pool.filter(model => !fits(model))];
+}
+
+// A model whose whole allowance is smaller than the request answers 413 "Limit 6000, Requested 6543": remember it.
+const limits = new Map();
+function learnLimit(model, detail) {
+  const limit = Number(/Limit (\d+)/i.exec(detail)?.[1]);
+  if (limit) limits.set(model, limit);
 }
 
 async function request(ai, model, convo, tools, onText) {
