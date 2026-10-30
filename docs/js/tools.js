@@ -555,13 +555,26 @@ function mustAskFirst(name, args) {
 
 // "Send it" right after LightMoon opened a draft: done here, at once, without asking the AI (which may be at its
 // per-minute limit just then). Anything more than a plain "send it" goes to the AI as usual.
+// Whether LightMoon has just read something back and waits for their yes (the panel keeps listening for it).
+export const awaitingYes = () => Boolean(waitingConfirm());
+
+// "Open WhatsApp", "launch Teams": done here at once, without the AI (nothing else in the sentence).
+const OPEN_APP = /^(?!.*\b(?:and|then|to)\b)\W*(?:please\s+|hey\s+lightmoon,?\s+)?(?:open|launch|start)\s+(?:the\s+|my\s+)?([a-z0-9][a-z0-9 .&'’-]{0,30}?)(?:\s+app)?\W*$/i;
+// What speech recognition often makes of app names.
+const APP_ALIASES = {
+  "tm's": 'Teams', tms: 'Teams', team: 'Teams', 'team s': 'Teams', 'microsoft teams': 'Teams',
+  'whats app': 'WhatsApp', "what's app": 'WhatsApp', 'what’s app': 'WhatsApp', watsapp: 'WhatsApp', whatsup: 'WhatsApp',
+  'g mail': 'Gmail', 'you tube': 'YouTube', 'insta': 'Instagram', 'phone pay': 'PhonePe', 'phonepay': 'PhonePe',
+  'life leveling': 'Life Levelling', 'light moon': 'LightMoon',
+};
+
 export async function quickReply(text) {
   const said = String(text ?? '');
   // A plain yes to a read-back LightMoon just asked ("Send to NOC Team on Teams: ...?"): do it now.
   const asked = waitingConfirm();
-  const lastAsked = String(chat.recent(4).filter(m => m.role === 'assistant').at(-1)?.content ?? '').toLowerCase();
-  const readBack = asked ? asked.say.toLowerCase().replace(/["'“”‘’]/g, '').slice(0, 30) : '';
-  if (asked && (YES_ONLY.test(said) || SEND_NOW.test(said)) && lastAsked.replace(/["'“”‘’]/g, '').includes(readBack)) {
+  const lastReply = chat.recent(4).filter(m => m.role === 'assistant').at(-1);
+  const replyAsked = Boolean(asked && lastReply && (lastReply.at ?? 0) >= asked.at && /\?/.test(String(lastReply.content)));
+  if (asked && replyAsked && (YES_ONLY.test(said) || SEND_NOW.test(said))) {
     try {
       const done = await runConfirmed(asked.id);
       const reply = typeof done === 'string' ? done : done?.text || 'Done.';
@@ -572,6 +585,12 @@ export async function quickReply(text) {
   }
   if (asked && !saidYes(said)) forgetConfirms(); // they moved on: the old read-back can't be confirmed later
   if (asked) return null; // a longer answer: the AI handles it (runConfirmed still needs their yes)
+  const app = OPEN_APP.exec(said)?.[1];
+  if (app && phoneApp?.openApp) {
+    const out = await runTool('phone_open_app', { name: APP_ALIASES[app.toLowerCase()] ?? app });
+    if (out.ok) return { reply: `${out.action?.text ?? 'Opened'}.`, actions: [out.action].filter(Boolean) };
+    return null; // no such app here: the AI can work out what they meant
+  }
   if (!SEND_NOW.test(said) || !recentDraft()) return null;
   const out = await runTool('tap_send', {});
   if (!out.ok) return { reply: String(out.error ?? "I couldn't send it. Please tap Send yourself."), actions: [] };

@@ -252,7 +252,9 @@ async function complete(convo, tools, onText, { onWait } = {}) {
         }
       }
     }
-    // Every model is at its per-minute limit: wait for the soonest to reset, once, rather than go quiet.
+    // Every model is at its per-minute limit, or the only one with room was too small for this request: wait for
+    // the soonest to have room again, once, rather than go quiet.
+    if (waitFor === null) waitFor = secondsUntilRoom(models, cost);
     if (pass > 0 || waitFor === null || waitFor > MAX_WAIT_SECONDS) break;
     onWait?.();
     await sleep(waitFor * 1000 + 500);
@@ -274,6 +276,25 @@ function spentLastMinute(model) {
   const recent = (spent.get(model) ?? []).filter(entry => Date.now() - entry.at < 60_000);
   spent.set(model, recent);
   return recent.reduce((sum, entry) => sum + entry.tokens, 0);
+}
+
+// How long until one of these models has room for a request of this size (null: none ever will).
+function secondsUntilRoom(models, cost) {
+  let soonest = null;
+  for (const model of models) {
+    const limit = limits.get(model) ?? TOKENS_PER_MINUTE;
+    if (cost > limit * 0.9) continue;
+    const entries = (spent.get(model) ?? []).filter(entry => Date.now() - entry.at < 60_000).sort((a, b) => a.at - b.at);
+    let total = entries.reduce((sum, entry) => sum + entry.tokens, 0);
+    let wait = 0;
+    for (const entry of entries) {
+      if (total + cost <= limit) break;
+      total -= entry.tokens;
+      wait = Math.ceil((entry.at + 60_000 - Date.now()) / 1000);
+    }
+    soonest = Math.min(soonest ?? Infinity, Math.max(wait, 1));
+  }
+  return soonest;
 }
 
 function spend(model, tokens) {

@@ -16,7 +16,7 @@ import { wireLearning } from './js/learning.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 import { speechChunks, lastSentenceEnd } from './js/speech.js';
 import { genderOf, wantedGender, bestVoice } from './js/voices.js';
-import { refreshWorkAccount } from './js/tools.js';
+import { refreshWorkAccount, awaitingYes } from './js/tools.js';
 import * as updates from './js/updates.js';
 import * as problems from './js/problems.js';
 
@@ -731,7 +731,7 @@ async function send(text, { context = null, byVoice = false, heardAlso = [] } = 
     const out = await chat(text, { onText: live.push, heardAlso, shared: context ?? '' });
     live.done(out);
     applyState();
-    if (byVoice && !out.error && shouldFollowUp(out.reply)) listenWhenFree = 'follow-up';
+    if (byVoice && !out.error && (shouldFollowUp(out.reply) || awaitingYes())) listenWhenFree = 'follow-up';
   } finally {
     busy = false;
     refresh();
@@ -1592,6 +1592,7 @@ const takeWake = async () => {
 // The phone shows LightMoon see-through (MainActivity); here only the moon, what was heard and the reply show.
 // When it has been quiet for a few seconds after answering (or nothing was said), it goes back to that app.
 const PANEL_IDLE_MS = 5000;
+const PANEL_WAIT_FOR_YES_MS = 20_000; // a read-back is waiting for their yes
 const panelMode = { on: false, timer: null };
 
 function setPanelMode(on) {
@@ -1623,7 +1624,7 @@ function leavePanel({ full = false } = {}) {
 function watchPanelIdle() {
   clearTimeout(panelMode.timer);
   if (panelMode.on && document.body.dataset.state === 'idle' && !listenWhenFree) {
-    panelMode.timer = setTimeout(() => leavePanel(), PANEL_IDLE_MS);
+    panelMode.timer = setTimeout(() => leavePanel(), awaitingYes() ? PANEL_WAIT_FOR_YES_MS : PANEL_IDLE_MS);
   }
 }
 
