@@ -215,7 +215,7 @@
                 <option value="name">By my name</option>
               </select>
             </label>
-            <label>Assistant name <input name="assistantName" maxlength="30"><small>Also the wake word.</small></label>
+            <label>Assistant name <input name="assistantName" maxlength="30"><small>What it calls itself. The wake phrases always say "LightMoon".</small></label>
             <label>Look
               <select name="look" id="lookSelect">
                 <option value="hud">Night HUD (the original)</option>
@@ -316,15 +316,20 @@
           </div>
 
           <div class="set-card" id="wakeBox" hidden>
-            <div class="card-head"><h3 class="card-title">Wake word</h3><span id="wakeStatus" class="card-status"></span></div>
+            <div class="card-head"><h3 class="card-title">Wake phrases</h3><span id="wakeStatus" class="card-status"></span></div>
             <span class="row actions">
               <button type="button" id="wakeOn" class="btn-ghost">Turn on</button>
               <button type="button" id="wakeOpenSelf" class="btn-ghost" hidden>Allow LightMoon to open itself</button>
               <button type="button" id="wakeOff" class="btn-ghost" hidden>Turn off</button>
             </span>
+            <div id="wakePhrases" hidden>
+              <p class="hint">It wakes for any phrase switched on here, said as a whole:</p>
+              <div id="wakePhraseList"></div>
+            </div>
             <details class="help">
               <summary>How it works</summary>
-              <p>With the app closed, say "LightMoon", wait for the chime, then speak. It opens ready to listen; on a locked phone it asks for your fingerprint first. It listens only for its name, entirely on this phone (the first time, it downloads a 41 MB offline voice model). It uses some battery, and Android shows a microphone dot while it listens.</p>
+              <p>With the app closed, say one of your wake phrases ("Hey LightMoon", "Are you there, LightMoon"), wait for the chime, then speak. It opens ready to listen; on a locked phone it asks for your fingerprint first. It listens only for those phrases, entirely on this phone (the first time, it downloads a 41 MB offline voice model), and nothing is recorded or sent.</p>
+              <p>To see whether it's listening: its notification says "Listening", "Paused: LightMoon is open" or "Heard you", and Android shows a green microphone dot while it listens. For a switch like the camera and microphone ones, pull down the quick settings, tap the pencil and add the "LightMoon ears" tile.</p>
             </details>
           </div>
         </section>

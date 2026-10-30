@@ -1292,10 +1292,35 @@ async function paintWakeSettings(message) {
   if (!wakeWord) return;
   const status = await wakeWord.status().catch(() => null);
   if (!status) return void ($('#wakeStatus').textContent = 'Not available');
-  $('#wakeStatus').textContent = message ?? (status.enabled ? 'On' : 'Off');
+  const states = { listening: 'On, listening now', paused: 'On, paused while the app is open', heard: 'On, just heard you', starting: 'On, getting ready' };
+  $('#wakeStatus').textContent = message ?? (status.enabled ? states[status.state] ?? 'On' : 'Off');
   $('#wakeOn').hidden = status.enabled;
+  paintWakePhrases();
   $('#wakeOff').hidden = !status.enabled;
   $('#wakeOpenSelf').hidden = !status.enabled || status.canOpenItself;
+}
+
+// Which phrases wake it (LightMoon 1.10 and later; older apps keep listening for "LightMoon" alone).
+async function paintWakePhrases() {
+  const list = await wakeWord.phrases?.().then(r => r.phrases, () => null);
+  $('#wakePhrases').hidden = !list;
+  if (!list) return;
+  const box = $('#wakePhraseList');
+  box.replaceChildren(...list.map(({ id, phrase, on }) => {
+    const row = document.createElement('label');
+    row.className = 'switch-row';
+    const input = Object.assign(document.createElement('input'), { type: 'checkbox', checked: on, value: id });
+    input.addEventListener('change', async () => {
+      const ids = [...box.querySelectorAll('input:checked')].map(i => i.value);
+      if (!ids.length) {
+        input.checked = true;
+        return note('Keep at least one wake phrase on.');
+      }
+      await wakeWord.setPhrases({ ids }).catch(err => note(err.message));
+    });
+    row.append(id === 'name' ? `${phrase} on its own (wakes more easily, also by mistake)` : phrase, input);
+    return row;
+  }));
 }
 
 async function turnOnWakeWord() {
@@ -1315,7 +1340,7 @@ async function turnOnWakeWord() {
       }
     }
     status = await wakeWord.start();
-    note('Wake word on. Leave the app, say "LightMoon", wait for the chime, then speak.');
+    note('Wake phrases on. Leave the app, say "Hey LightMoon", wait for the chime, then speak.');
     if (!status.canOpenItself) {
       note('One more step: in Settings, tap "Allow LightMoon to open itself" so it can open when it hears you. Until then it shows a notification to tap.');
     }

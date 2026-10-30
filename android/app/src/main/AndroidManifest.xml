@@ -47,6 +47,19 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!-- Quick-settings tile: shows whether LightMoon is listening for its wake phrases, and switches it. -->
+        <service
+            android:name=".WakeTile"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_moon"
+            android:label="LightMoon ears"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data android:name="android.service.quicksettings.ACTIVE_TILE" android:value="false" />
+        </service>
+
         <!-- Phone: meetings said before they start, who's calling, and new messages (through notification access). -->
         <receiver android:name=".MeetingReceiver" android:exported="false" />
         <receiver android:name=".BriefingReceiver" android:exported="false" />

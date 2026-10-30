@@ -102,6 +102,43 @@ public class WakeWordPlugin extends Plugin {
         call.resolve();
     }
 
+    // { phrases: [{ id, phrase, on }] }: the wake phrases there are, and which are switched on.
+    @PluginMethod
+    public void phrases(PluginCall call) {
+        call.resolve(phraseList());
+    }
+
+    // { ids: ["hey", "there"] }: switches on those phrases (the rest off) and listens for them straight away.
+    @PluginMethod
+    public void setPhrases(PluginCall call) {
+        java.util.List<String> ids = new java.util.ArrayList<>();
+        try {
+            com.getcapacitor.JSArray given = call.getArray("ids");
+            for (int i = 0; given != null && i < given.length(); i++) ids.add(given.getString(i));
+        } catch (org.json.JSONException err) {
+            call.reject("ids must be a list of phrase ids.");
+            return;
+        }
+        WakePhrases.choose(getContext(), ids);
+        WakeWordService.phrasesChanged();
+        call.resolve(phraseList());
+    }
+
+    private JSObject phraseList() {
+        java.util.List<String> on = WakePhrases.chosen(getContext());
+        com.getcapacitor.JSArray list = new com.getcapacitor.JSArray();
+        for (java.util.Map.Entry<String, String> choice : WakePhrases.CHOICES.entrySet()) {
+            JSObject item = new JSObject();
+            item.put("id", choice.getKey());
+            item.put("phrase", WakePhrases.spoken(choice.getValue()));
+            item.put("on", on.contains(choice.getKey()));
+            list.put(item);
+        }
+        JSObject result = new JSObject();
+        result.put("phrases", list);
+        return result;
+    }
+
     @PluginMethod
     public void takeWake(PluginCall call) {
         JSObject result = new JSObject();
@@ -116,6 +153,7 @@ public class WakeWordPlugin extends Plugin {
         status.put("modelReady", WakeModel.ready(context));
         status.put("enabled", isEnabled(context));
         status.put("listening", WakeWordService.running != null);
+        status.put("state", WakeWordService.running != null ? WakeWordService.state : "off");
         status.put("microphone", ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED);
         status.put("canOpenItself", Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || Settings.canDrawOverlays(context));
         return status;
@@ -127,6 +165,7 @@ public class WakeWordPlugin extends Plugin {
 
     static void setEnabled(Context context, boolean on) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("enabled", on).apply();
+        WakeTile.refresh(context);
     }
 
     // Called when LightMoon opens: Android doesn't allow listening to start by itself after a restart,

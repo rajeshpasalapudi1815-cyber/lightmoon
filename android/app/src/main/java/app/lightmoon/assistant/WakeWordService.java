@@ -19,6 +19,8 @@ import android.os.SystemClock;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.json.JSONException;
@@ -28,21 +30,23 @@ import org.vosk.Recognizer;
 import org.vosk.android.RecognitionListener;
 import org.vosk.android.SpeechService;
 
-// Listens for "LightMoon" while the app is closed or in the background, entirely on the phone (Vosk),
-// and opens LightMoon ready to talk when it hears it. It only listens for that name: a small grammar
-// makes everything else "unknown", and nothing is recorded or sent anywhere.
-// While LightMoon is on screen it pauses, so the app's own listening has the microphone.
+// Listens for the wake phrases ("hey LightMoon", "are you there, LightMoon": WakePhrases) while the app is closed or
+// in the background, entirely on the phone (Vosk), and opens LightMoon ready to talk when it hears one. A small
+// grammar makes everything else "unknown", and nothing is recorded or sent anywhere.
+// While LightMoon is on screen it pauses, so the app's own listening has the microphone. Its notification and the
+// quick-settings tile (WakeTile) always say which it is doing: listening, paused, or just heard you.
 public class WakeWordService extends Service implements RecognitionListener {
 
     static final String ACTION_STOP = "app.lightmoon.assistant.WAKE_STOP";
     private static final String CHANNEL = "wake";
     private static final int NOTIFICATION = 2;
-    private static final String GRAMMAR = "[\"light moon\", \"[unk]\"]";
     private static final float SAMPLE_RATE = 16000f;
     private static final long REARM_AFTER_MS = 4000;
     private static final long RETRY_AFTER_ERROR_MS = 5000;
 
     static volatile WakeWordService running;
+    // "starting", "listening", "paused" (LightMoon is open), "heard" (just woke); what the notification and tile show.
+    static volatile String state = "off";
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService loader = Executors.newSingleThreadExecutor();
@@ -53,6 +57,7 @@ public class WakeWordService extends Service implements RecognitionListener {
     private PowerManager.WakeLock awake;
     private long lastWake;
     private long resumeAt;
+    private List<String> phrases;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -72,6 +77,7 @@ public class WakeWordService extends Service implements RecognitionListener {
             return START_NOT_STICKY;
         }
         running = this;
+        phrases = WakePhrases.chosen(this);
         if (model == null) loader.execute(this::loadModel);
         else update();
         return START_NOT_STICKY;
@@ -99,11 +105,35 @@ public class WakeWordService extends Service implements RecognitionListener {
         boolean wanted = model != null && !MainActivity.visible && SystemClock.elapsedRealtime() >= resumeAt;
         if (wanted && speech == null) startListening();
         else if (!wanted && speech != null) stopListening();
+        boolean justHeard = SystemClock.elapsedRealtime() < resumeAt && !MainActivity.visible;
+        show(model == null ? "starting" : speech != null ? "listening" : justHeard ? "heard" : "paused");
+    }
+
+    // The wake phrases changed in Settings: listen for the new ones.
+    static void phrasesChanged() {
+        WakeWordService service = running;
+        if (service == null) return;
+        service.main.post(() -> {
+            service.phrases = WakePhrases.chosen(service);
+            service.stopListening();
+            service.update();
+        });
+    }
+
+    private void show(String now) {
+        if (now.equals(state)) return;
+        state = now;
+        try {
+            getSystemService(NotificationManager.class).notify(NOTIFICATION, notification());
+        } catch (RuntimeException err) {
+            // The notification stays as it was.
+        }
+        WakeTile.refresh(this);
     }
 
     private void startListening() {
         try {
-            recognizer = new Recognizer(model, SAMPLE_RATE, GRAMMAR);
+            recognizer = new Recognizer(model, SAMPLE_RATE, WakePhrases.grammar(phrases));
             speech = new SpeechService(recognizer, SAMPLE_RATE);
             speech.startListening(this);
             holdAwake(true);
@@ -164,9 +194,9 @@ public class WakeWordService extends Service implements RecognitionListener {
         update();
     }
 
-    private static boolean heard(String hypothesis, String field) {
+    private boolean heard(String hypothesis, String field) {
         try {
-            return new JSONObject(hypothesis).optString(field).contains("light moon");
+            return WakePhrases.matches(new JSONObject(hypothesis).optString(field), phrases);
         } catch (JSONException err) {
             return false;
         }
@@ -178,6 +208,7 @@ public class WakeWordService extends Service implements RecognitionListener {
         lastWake = now;
         resumeAt = now + REARM_AFTER_MS; // if the app doesn't open (e.g. unlock cancelled), listen again soon
         stopListening();
+        show("heard");
         chime();
         WakeWordPlugin.wakeUp(this);
         main.postDelayed(refresh, REARM_AFTER_MS);
@@ -198,10 +229,34 @@ public class WakeWordService extends Service implements RecognitionListener {
         PendingIntent tap = PendingIntent.getActivity(this, 1, open, PendingIntent.FLAG_IMMUTABLE);
         Intent stop = new Intent(this, WakeWordService.class).setAction(ACTION_STOP);
         PendingIntent turnOff = PendingIntent.getService(this, 2, stop, PendingIntent.FLAG_IMMUTABLE);
+        List<String> said = new ArrayList<>();
+        for (String phrase : WakePhrases.phrases(phrases == null ? WakePhrases.chosen(this) : phrases)) said.add("“" + WakePhrases.spoken(phrase) + "”");
+        String title;
+        String text;
+        switch (state) {
+            case "listening":
+                title = "Listening for " + said.get(0);
+                text = "Only for " + String.join(", ", said) + ", on this phone. Nothing is recorded or sent.";
+                break;
+            case "heard":
+                title = "Heard you: opening LightMoon";
+                text = "Listening again in a few seconds.";
+                break;
+            case "paused":
+                title = "Paused: LightMoon is open";
+                text = "The app is using the microphone itself. Listening resumes when you leave it.";
+                break;
+            default:
+                title = "Getting ready to listen";
+                text = "Loading the voice model on this phone.";
+        }
         return new NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_moon)
-            .setContentTitle("Say “LightMoon” to talk")
-            .setContentText("Listening for its name only, on this phone.")
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setContentIntent(tap)
@@ -219,6 +274,8 @@ public class WakeWordService extends Service implements RecognitionListener {
     @Override
     public void onDestroy() {
         running = null;
+        state = "off";
+        WakeTile.refresh(this);
         main.removeCallbacksAndMessages(null);
         stopListening();
         loader.shutdownNow();
