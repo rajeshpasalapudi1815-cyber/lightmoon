@@ -6,7 +6,7 @@
 // Tools that only look things up, and the two that already ask first every time (phone.js).
 const LEAVE_ALONE = new Set([
   'get_weather', 'look_up', 'check_link', 'news_headlines', 'phone_calendar', 'phone_recent_calls', 'phone_messages',
-  'phone_number_info', 'phone_search', 'phone_navigate', 'phone_open_app', 'phone_media', 'phone_call', 'phone_message',
+  'phone_number_info', 'phone_search', 'phone_navigate', 'phone_open_app', 'phone_media', 'phone_call', 'phone_message', 'phone_driving',
 ]);
 // Tools that take something away, and those that answer a reminder.
 const TAKE_AWAY = new Set(['forget', 'delete_task', 'delete_routine', 'life_delete_task']);

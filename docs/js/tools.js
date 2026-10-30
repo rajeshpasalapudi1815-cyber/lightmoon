@@ -152,7 +152,7 @@ export const LOAD_TOOLS = tool(
   { group: { type: 'string', enum: ['phone', 'life'] } },
   ['group'],
 );
-const PHONE_WORDS = /\b(call(ed|ing)?|ring|phone|texts?|sms|messages?|whats ?app|reply|calendar|meetings?|events?|schedule|alarms?|timer|wake me|flash ?light|torch|music|songs?|play|pause|skip|navigate|directions|maps?|open|focus|disturb|volume|ringer|silent|mute|battery|contacts?|number|missed|youtube)\b/i;
+const PHONE_WORDS = /\b(call(ed|ing)?|ring|phone|texts?|sms|messages?|whats ?app|reply|calendar|meetings?|events?|schedule|alarms?|timer|wake me|flash ?light|torch|music|songs?|play|pause|skip|navigate|directions|maps?|open|focus|disturb|volume|ringer|silent|mute|battery|contacts?|number|missed|youtube|driving|drive|car|steps)\b/i;
 const LIFE_WORDS = /\b(water|drank|drink|sleep|slept|mood|exercise|work ?out|gym|ran|run|walk(ed)?|steps|spent|spend|expenses?|paid|rupees|habits?|quests?|xp|level|intention|close (my )?day|life levelling|meditat\w*|read|reading|journal|weight)\b/i;
 
 // The tools for a request: the core ones, the groups this conversation needs, and load_tools for the rest.

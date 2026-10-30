@@ -246,7 +246,9 @@ public class MessageListener extends NotificationListenerService {
     }
 
     private void announce(List<JSONObject> fresh) {
-        String mode = PhonePrefs.readMessages(this);
+        // Driving: every message is read out in full, so there's no reason to look at the phone.
+        boolean driving = Driving.active(this);
+        String mode = driving ? "full" : PhonePrefs.readMessages(this);
         if ("off".equals(mode) || !PhonePrefs.maySpeakNow(this)) return;
         if (Focus.active(this)) {
             // Focus mode: only the people let through are announced; the rest is summed up when it ends.
@@ -272,6 +274,7 @@ public class MessageListener extends NotificationListenerService {
         } else {
             say = PhonePrefs.address(this) + ", " + app + " message from " + from + ".";
         }
+        if (driving) say += fresh.size() == 1 ? " Say hey LightMoon to reply." : " Say hey LightMoon to hear them.";
         if (MainActivity.visible && PhonePlugin.tellApp("messageArrived", say)) return;
         Voice.say(this, say, null);
     }

@@ -55,6 +55,7 @@ import org.json.JSONException;
             alias = "calls"
         ),
         @Permission(strings = { Manifest.permission.SEND_SMS, Manifest.permission.READ_CONTACTS }, alias = "texts"),
+        @Permission(strings = { Manifest.permission.ACTIVITY_RECOGNITION }, alias = "steps"),
     }
 )
 public class PhonePlugin extends Plugin {
@@ -129,6 +130,10 @@ public class PhonePlugin extends Plugin {
         status.put("briefingMorning", Briefings.time(getContext(), Briefings.MORNING));
         status.put("briefingEvening", Briefings.time(getContext(), Briefings.EVENING));
         status.put("focusUntil", Focus.active(getContext()) ? Focus.until(getContext()) : 0);
+        status.put("driving", Driving.why(getContext()));
+        status.put("steps", Steps.available(getContext()) && Steps.allowed(getContext()));
+        status.put("stepCounter", Steps.available(getContext()));
+        status.put("streakGuard", Streaks.time(getContext()));
         return status;
     }
 
@@ -168,6 +173,26 @@ public class PhonePlugin extends Plugin {
         else requestPermissionForAlias("texts", call, "answered");
     }
 
+    @PluginMethod
+    public void requestSteps(PluginCall call) {
+        if (Steps.allowed(getContext())) call.resolve(currentStatus());
+        else requestPermissionForAlias("steps", call, "answered");
+    }
+
+    // -> { steps } today, or -1 when the phone can't tell.
+    @PluginMethod
+    public void steps(PluginCall call) {
+        new Thread(() -> {
+            try {
+                JSObject result = new JSObject();
+                result.put("steps", Steps.today(getContext()));
+                call.resolve(result);
+            } catch (RuntimeException err) {
+                call.reject("Couldn't read the step counter.");
+            }
+        }, "lightmoon-steps-read").start();
+    }
+
     @PermissionCallback
     private void answered(PluginCall call) {
         call.resolve(currentStatus());
@@ -205,6 +230,8 @@ public class PhonePlugin extends Plugin {
         if (calls != null) edit.putBoolean("announceCalls", calls);
         String messages = call.getString("readMessages");
         if ("off".equals(messages) || "sender".equals(messages) || "full".equals(messages)) edit.putString("readMessages", messages);
+        String streak = call.getString("streakGuard");
+        if (streak != null && (streak.isEmpty() || streak.matches("\\d{2}:\\d{2}"))) edit.putString("streakGuard", streak);
         String address = call.getString("address");
         if (address != null && !address.trim().isEmpty()) edit.putString("address", address.trim());
         for (String kind : new String[] { Briefings.MORNING, Briefings.EVENING }) {
@@ -805,6 +832,36 @@ public class PhonePlugin extends Plugin {
             call.resolve(result);
         } catch (RuntimeException err) {
             call.reject("Couldn't start focus mode.");
+        }
+    }
+
+    // { minutes } starts driving mode for a while, { end: true } stops it, { rememberCar: true } takes the Bluetooth
+    // audio connected now as their car (or { carName }; "" forgets it) -> { driving, until, car, connected }.
+    @PluginMethod
+    public void driving(PluginCall call) {
+        try {
+            Context context = getContext();
+            if (Boolean.TRUE.equals(call.getBoolean("end", false))) Driving.end(context);
+            Integer minutes = intArg(call, "minutes", null);
+            if (minutes != null && minutes > 0) Driving.start(context, System.currentTimeMillis() + Math.min(minutes, 720) * 60_000L);
+            java.util.List<String> connected = Driving.connectedAudio(context);
+            String carName = call.getString("carName");
+            if (carName != null) Driving.rememberCar(context, carName);
+            else if (Boolean.TRUE.equals(call.getBoolean("rememberCar", false))) {
+                if (connected.isEmpty()) {
+                    call.reject("No Bluetooth audio is connected right now. Connect the phone to the car first.");
+                    return;
+                }
+                Driving.rememberCar(context, connected.get(0));
+            }
+            JSObject result = new JSObject();
+            result.put("driving", Driving.why(context));
+            result.put("until", Driving.until(context));
+            result.put("car", Driving.car(context));
+            result.put("connected", new com.getcapacitor.JSArray(connected));
+            call.resolve(result);
+        } catch (RuntimeException err) {
+            call.reject("Couldn't change driving mode.");
         }
     }
 

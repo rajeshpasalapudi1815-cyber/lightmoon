@@ -499,9 +499,34 @@
                 <button type="button" id="briefingEveningTest" class="btn-ghost">Hear it now</button>
               </span>
             </label>
+            <label id="streakGuardRow" hidden>Habit streak guard
+              <select id="streakGuard">
+                <option value="">off</option>
+                <option value="20:00">8:00 PM</option>
+                <option value="20:30">8:30 PM</option>
+                <option value="21:00">9:00 PM</option>
+                <option value="21:30">9:30 PM</option>
+                <option value="22:00">10:00 PM</option>
+              </select>
+              <small>If Life Levelling shows habits still open by then, the phone says so once, so a streak isn't lost by forgetting.</small>
+            </label>
             <details class="help">
               <summary>What it says</summary>
               <p>The briefings are said at alarm volume, even with LightMoon closed: the weather (for your city above), meetings, reminders, and in the morning the calls and messages you missed overnight.</p>
+            </details>
+          </div>
+
+          <div class="set-card" id="drivingBox" hidden>
+            <div class="card-head"><h3 class="card-title">Driving mode</h3><span id="drivingStatus" class="card-status"></span></div>
+            <p class="hint">While driving, every message is read out in full and LightMoon keeps its answers short, so you never need to look at the phone. Say "I'm driving" to turn it on, or let it come on by itself in your car.</p>
+            <span class="row actions">
+              <button type="button" id="drivingCar" class="btn-ghost">This is my car</button>
+              <button type="button" id="drivingForget" class="btn-ghost" hidden>Forget the car</button>
+              <button type="button" id="drivingEnd" class="btn-ghost" hidden>Stop driving mode</button>
+            </span>
+            <details class="help">
+              <summary>How it knows you're in the car</summary>
+              <p>Sit in the car with the phone connected to its Bluetooth and tap "This is my car". From then on, driving mode is on whenever the phone is connected to it. Earbuds and other speakers don't count.</p>
             </details>
           </div>
         </section>
@@ -529,6 +554,11 @@
               <div class="perm-row">
                 <span class="perm-text"><span class="perm-name">Reading messages</span><small>Notices WhatsApp, SMS, Telegram and Signal messages, and replies</small></span>
                 <button type="button" id="allowMessages" class="btn-ghost">Allow</button>
+                <span class="perm-ok">Allowed</span>
+              </div>
+              <div class="perm-row">
+                <span class="perm-text"><span class="perm-name">Steps</span><small>Counts your steps today with the phone's step counter, for coaching and Life Levelling</small></span>
+                <button type="button" id="allowSteps" class="btn-ghost">Allow</button>
                 <span class="perm-ok">Allowed</span>
               </div>
               <div class="perm-row">

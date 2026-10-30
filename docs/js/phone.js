@@ -7,9 +7,10 @@
 // only reads back who and what, and the action runs when the AI calls again with that confirm_id after
 // the user has answered (a newer message from them). The stored action runs, not whatever the AI sends then.
 import { phone } from './native.js';
-import { messages as chat, nicknames } from './store.js';
+import { messages as chat, nicknames, settings } from './store.js';
 import { choosePerson, lookAlikeNotes, conversationsFrom } from './people.js';
 import { linkNote } from './links.js';
+import { moneyNote } from './money.js';
 
 const REFRESH_AFTER_MS = 60_000;
 const WAIT_AT_MOST_MS = 2_500;
@@ -43,7 +44,8 @@ async function load() {
     allowed.messages ? phone.messages({ since: now - 12 * HOUR }).then(r => r.messages, () => []) : [],
     phone.battery?.().catch(() => null) ?? null,
   ]);
-  seen = { events, calls, messages, battery, at: now };
+  const steps = allowed.steps ? await phone.steps().then(r => r.steps, () => -1) : -1;
+  seen = { events, calls, messages, battery, steps, at: now };
 }
 
 // ---------- What the AI is told ----------
@@ -98,6 +100,13 @@ export function promptSection() {
   if (allowed.calls) {
     const missed = seen.calls.filter(c => c.type === 'missed').slice(0, MAX_MISSED);
     lines.push(missed.length ? `Missed calls (last 24 h): ${missed.map(c => `${who(c)} ${dayWord(c.at).toLowerCase()} ${clock(c.at)}`).join('; ')}` : 'No missed calls in the last 24 hours.');
+    const talked = finishedCalls();
+    if (talked.length) lines.push(`Calls they just had: ${talked.join('; ')}`);
+  }
+  if (seen.steps >= 0) lines.push(`Steps today (phone's step counter): ${seen.steps.toLocaleString('en-IN')}.`);
+  if (allowed.driving) {
+    lines.push(`DRIVING MODE is on${allowed.driving === 'car' ? ' (they are in their car)' : ''}: they can't look at the screen. Answer in one or two short sentences, `
+      + 'read messages out when asked, never ask them to read or tap anything unless they have stopped, and keep anything long for later.');
   }
   if (allowed.focusUntil > Date.now()) {
     lines.push(`FOCUS MODE until ${clock(allowed.focusUntil)}: calls and messages are held (except people let through) and summed up when it ends. Don't interrupt them with non-urgent things.`);
@@ -109,7 +118,7 @@ export function promptSection() {
       : 'No new messages in the last 12 hours.');
     const notes = lookAlikeNotes(refs);
     lines.push(...refs.map(m => `  [${m.ref}] ${source(m)}, ${clock(m.at)}: "${shareable(m.text)}"${m.canReply ? '' : ' (no reply from here)'}`
-      + `${asksSomething(m) ? ' (ASKS SOMETHING OF THEM)' : ''}${notes[m.ref] ? ` (${notes[m.ref]})` : ''}${linkNote(m.text) ? ` (${linkNote(m.text)})` : ''}`));
+      + `${asksSomething(m) ? ' (ASKS SOMETHING OF THEM)' : ''}${notes[m.ref] ? ` (${notes[m.ref]})` : ''}${linkNote(m.text) ? ` (${linkNote(m.text)})` : ''}${moneyNote(m.text) ? ` (${moneyNote(m.text)})` : ''}`));
   }
   const can = [
     allowed.calendar && 'read and add calendar events',
@@ -119,6 +128,26 @@ export function promptSection() {
     'open apps, control music, navigate, search the web or YouTube, set alarms and timers, the flashlight, volume and ringer',
   ].filter(Boolean);
   return `PHONE (this phone, now; you can ${can.join(', ')})\n${lines.join('\n')}`;
+}
+
+// After-call notes: calls of a minute or more with a saved contact that ended in the last two hours. The first
+// time one is shown it is marked, so LightMoon asks once whether there is anything to remember or follow up; the
+// calls already offered are kept in a synced setting, so another device doesn't ask again.
+const AFTER_CALL_MS = 2 * HOUR;
+function finishedCalls() {
+  const recent = seen.calls.filter(c => c.name && c.type !== 'missed' && c.type !== 'rejected' && (c.seconds ?? 0) >= 60
+    && Date.now() - (c.at + c.seconds * 1000) < AFTER_CALL_MS);
+  if (!recent.length) return [];
+  let asked = [];
+  try {
+    asked = JSON.parse(settings.get('calls_asked', '[]'));
+  } catch {
+    asked = [];
+  }
+  const fresh = recent.filter(c => !asked.includes(c.at));
+  if (fresh.length) settings.set('calls_asked', JSON.stringify([...asked, ...fresh.map(c => c.at)].slice(-30)));
+  return recent.map(c => `${c.type} call with ${c.name}, ${Math.round(c.seconds / 60)} min, ended ${clock(c.at + c.seconds * 1000)}`
+    + `${fresh.includes(c) ? ' (AFTER-CALL: ask once)' : ''}`);
 }
 
 // The messages the AI was shown, and who sent each: for tools.js to tell what came from a message (orders.js).
@@ -271,6 +300,12 @@ export function phoneTools() {
       allow: { type: 'string', description: 'People who may still get through, comma-separated, e.g. "Mom, Asha".' },
       quiet: { type: 'boolean', description: 'Also turn on Do Not Disturb. Default true.' },
       end: { type: 'boolean' },
+    }),
+    tool('phone_driving', 'Driving mode: messages read out in full and short answers. minutes turns it on ("I am driving"); end: true stops it; '
+      + 'remember_car: true takes the car the phone is connected to now, so it comes on by itself there.', {
+      minutes: { type: 'integer', minimum: 10, maximum: 720, description: 'Default 120.' },
+      end: { type: 'boolean' },
+      remember_car: { type: 'boolean' },
     }),
     tool('phone_media', 'Control the music or video playing.', {
       action: { type: 'string', enum: ['play', 'pause', 'toggle', 'next', 'previous'] },
@@ -460,6 +495,16 @@ export const phoneHandlers = {
       text: `Focus until ${clock(out.until)}`,
       result: `Focus mode on until ${clock(out.until)}${through ? `; letting through: ${through}` : ''}${out.quiet ? '; Do Not Disturb is on' : ''}.${extra}`,
     };
+  },
+
+  async phone_driving({ minutes, end = false, remember_car: rememberCar = false }) {
+    if (!phone.driving) throw new Error('Driving mode needs LightMoon app 1.11 or later; tell the user to update it from the releases page.');
+    const args = end ? { end: true } : rememberCar ? { rememberCar: true } : { minutes: Math.min(Math.max(Math.round(Number(minutes) || 120), 10), 720) };
+    const state = await call(phone.driving(args));
+    seen.at = 0; // read the status again
+    if (end) return 'Driving mode off';
+    if (rememberCar) return { text: `Your car: ${state.car}`, result: `Saved "${state.car}" as their car: driving mode now comes on by itself whenever the phone connects to it.` };
+    return { text: `Driving mode until ${clock(state.until)}`, result: `Driving mode on until ${clock(state.until)}: messages are read out in full. Keep your answers short.` };
   },
 
   async phone_media({ action }) {

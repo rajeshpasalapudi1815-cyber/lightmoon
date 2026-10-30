@@ -95,7 +95,10 @@ public class SyncWorker extends Worker {
         String code = sync.getString("code", null);
         if (url == null || spaceId == null || code == null) return Result.success();
         try {
-            JSONObject data = downloadWithAnswers(context, url.replaceAll("/+$", "") + "/spaces/" + spaceId + "/data", code);
+            String space = url.replaceAll("/+$", "") + "/spaces/" + spaceId;
+            Streaks.checkNow(context, space + "/feeds/lifelevelling", code);
+            Steps.today(context); // keeps the day's starting point close to midnight
+            JSONObject data = downloadWithAnswers(context, space + "/data", code);
             if (data == null) return Result.success(); // nothing synced yet
             ReminderStore.replaceAll(context, merge(data, ReminderStore.all(context)), ReminderStore.hideText(context));
             return Result.success();
@@ -259,6 +262,10 @@ public class SyncWorker extends Worker {
 
     static String localStamp(long at) {
         return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.ROOT).format(new Date(at));
+    }
+
+    static String fetch(String address) throws IOException {
+        return download(address);
     }
 
     // Returns the response, or null when the cloud has no copy (404).

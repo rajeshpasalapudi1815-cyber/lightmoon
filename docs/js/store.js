@@ -5,7 +5,7 @@ import { localStamp, today } from './time.js';
 import { reminderLine, checkInsOf, checkInLine, checksIn } from './announce.js';
 import { kindOf, learnRhythm } from './rhythm.js';
 
-export const MEMORY_CATEGORIES = ['preference', 'person', 'routine', 'goal', 'health', 'work', 'fact', 'other'];
+export const MEMORY_CATEGORIES = ['preference', 'person', 'routine', 'goal', 'health', 'work', 'fact', 'place', 'other'];
 export const GOAL_STATUSES = ['active', 'achieved', 'dropped'];
 export const DEFAULT_AI = {
   baseUrl: 'https://api.groq.com/openai/v1',
@@ -355,6 +355,11 @@ export const tasks = {
   open: () => live('tasks').filter(t => !t.done).sort((a, b) => whenOf(a).localeCompare(whenOf(b)) || byCreated(a, b)),
   doneToday: () =>
     live('tasks').filter(t => t.done && t.done_at?.startsWith(today())).sort((a, b) => b.done_at.localeCompare(a.done_at)),
+  // Finished in the last so many days, newest first (for the weekly review).
+  doneSince: days => {
+    const from = localStamp(new Date(Date.now() - days * 86_400_000)).slice(0, 10);
+    return live('tasks').filter(t => t.done && t.done_at && t.done_at.slice(0, 10) >= from).sort((a, b) => b.done_at.localeCompare(a.done_at));
+  },
   get: id => find('tasks', id),
   // `announce` is what to say out loud when the reminder goes off. `checkIn` is the question to ask afterwards
   // until they answer (null: a plain one), or false for a heads-up that needs no answer.

@@ -1369,6 +1369,11 @@ async function paintPhonePowers(message) {
   $('#allowTexts').hidden = status.texts;
   $('#allowMessages').hidden = status.messages;
   $('#allowSilence').hidden = status.silence !== false;
+  $('#allowSteps').hidden = status.steps !== false;
+  $('#allowSteps').closest('.perm-row').hidden = status.steps === undefined || !status.stepCounter; // 1.11 and later, phones with a counter
+  $('#streakGuardRow').hidden = typeof status.streakGuard !== 'string';
+  if (typeof status.streakGuard === 'string') $('#streakGuard').value = status.streakGuard;
+  paintDriving();
   $('#allowCalls').closest('.perm-row').hidden = !status.telephony;
   $('#allowTexts').closest('.perm-row').hidden = !status.telephony;
   $('#allowSilence').closest('.perm-row').hidden = status.silence === undefined; // app versions before 1.4 can't silence
@@ -1452,8 +1457,20 @@ async function allowPhone(request, what) {
   refreshPhone({ force: true });
 }
 
+// Driving mode (1.11 and later): which car turns it on, and whether it's on now.
+async function paintDriving(message) {
+  const state = await phone.driving?.().catch(() => null);
+  $('#drivingBox').hidden = !state;
+  if (!state) return;
+  const why = { manual: 'On now', car: `On: in ${state.car}` }[state.driving];
+  $('#drivingStatus').textContent = message ?? why ?? (state.car ? `Your car: ${state.car}` : 'No car yet');
+  $('#drivingForget').hidden = !state.car;
+  $('#drivingEnd').hidden = state.driving !== 'manual';
+}
+
 function savePhoneChoices() {
   phone.configure({
+    ...($('#streakGuardRow').hidden ? {} : { streakGuard: $('#streakGuard').value }),
     meetingLead: Number($('#meetingLead').value),
     announceCalls: $('#announceCalls').value === 'true',
     readMessages: $('#readMessages').value,
@@ -2053,10 +2070,15 @@ function wireUp() {
     $('#allowCalendar').addEventListener('click', () => allowPhone(() => phone.requestCalendar(), 'calendar'));
     $('#allowCalls').addEventListener('click', () => allowPhone(() => phone.requestCalls(), 'calls'));
     $('#allowTexts').addEventListener('click', () => allowPhone(() => phone.requestTexts(), 'texts'));
+    $('#allowSteps').addEventListener('click', () => allowPhone(() => phone.requestSteps(), 'steps'));
+    $('#drivingCar').addEventListener('click', () => phone.driving({ rememberCar: true })
+      .then(s => paintDriving(`Your car: ${s.car}`), err => paintDriving(err.message)));
+    $('#drivingForget').addEventListener('click', () => phone.driving({ carName: '' }).finally(() => paintDriving()));
+    $('#drivingEnd').addEventListener('click', () => phone.driving({ end: true }).finally(() => paintDriving()));
     // Notification access is granted on Android's own screen; the box repaints when the user comes back.
     $('#allowMessages').addEventListener('click', () => phone.openMessageAccess().catch(err => { $('#settingsError').textContent = err.message; }));
     $('#allowSilence').addEventListener('click', () => phone.openSilenceAccess().catch(err => { $('#settingsError').textContent = err.message; }));
-    for (const id of ['#meetingLead', '#announceCalls', '#readMessages', '#briefingMorning', '#briefingEvening']) {
+    for (const id of ['#meetingLead', '#announceCalls', '#readMessages', '#briefingMorning', '#briefingEvening', '#streakGuard']) {
       $(id).addEventListener('change', savePhoneChoices);
     }
     for (const kind of ['morning', 'evening']) {

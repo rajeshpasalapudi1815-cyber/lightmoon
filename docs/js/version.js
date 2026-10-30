@@ -1,7 +1,7 @@
 // One place for the app's version and the files that make it up. The service worker caches them under this
 // version (sw.js), and the running app reads this file from the server to notice a new version (updates.js).
 // Bump VERSION with every release; `npm test` and the GitHub check refuse a change to docs/ without it.
-export const VERSION = 'v35';
+export const VERSION = 'v36';
 
 export const APP_FILES = [
   './',
@@ -32,6 +32,7 @@ export const APP_FILES = [
   './js/phone.js',
   './js/people.js',
   './js/links.js',
+  './js/money.js',
   './js/knowledge.js',
   './js/qr.js',
   './js/rhythm.js',
