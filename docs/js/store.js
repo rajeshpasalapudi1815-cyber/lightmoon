@@ -2,7 +2,7 @@
 // Nothing here leaves the device except the conversation sent to the AI service, and, if sync is on,
 // an encrypted copy (see cloud.js). Records carry random ids and change times so devices can merge.
 import { localStamp, today } from './time.js';
-import { reminderLine, checkInsOf, checkInLine, checksIn } from './announce.js';
+import { reminderLine, checkInsOf, checkInLine, checksIn, headsUpsOf, headsUpLine, headsUpMinutes } from './announce.js';
 import { kindOf, learnRhythm } from './rhythm.js';
 
 export const MEMORY_CATEGORIES = ['preference', 'person', 'routine', 'goal', 'health', 'work', 'fact', 'place', 'other'];
@@ -384,9 +384,11 @@ export const tasks = {
   get: id => find('tasks', id),
   // `announce` is what to say out loud when the reminder goes off. `checkIn` is the question to ask afterwards
   // until they answer (null: a plain one), or false for a heads-up that needs no answer.
-  add({ title, dueAt = null, remindAt = null, announce = null, checkIn = null }) {
+  // `headsUp`: minutes before the reminder for a heads-up each, e.g. [30, 10].
+  add({ title, dueAt = null, remindAt = null, announce = null, checkIn = null, headsUp = [] }) {
+    const minutes = remindAt ? headsUpMinutes(headsUp) : [];
     data.tasks.push({
-      id: newId(), title, due_at: dueAt, remind_at: remindAt, announce, check_in: checkIn,
+      id: newId(), title, due_at: dueAt, remind_at: remindAt, announce, check_in: checkIn, ...(minutes.length && { heads_up: minutes }),
       done: false, reminded: false, done_at: null, created_at: localStamp(), updated_at: Date.now(),
     });
     save();
@@ -396,7 +398,8 @@ export const tasks = {
     const task = tasks.get(id);
     if (!task || task.done) return false;
     if (task.reminded) noteOutcome(task, 'snoozed');
-    Object.assign(task, { remind_at: remindAt, reminded: false, checked_in: 0, answered: false });
+    // The heads-ups were for the old time: a snooze doesn't bring them back.
+    Object.assign(task, { remind_at: remindAt, reminded: false, checked_in: 0, answered: false, heads_up_said: task.heads_up ?? [] });
     touch(task);
     save();
     return true;
@@ -419,6 +422,12 @@ export const tasks = {
     const task = tasks.get(id);
     if (!task || (task.checked_in ?? 0) >= n) return;
     task.checked_in = n;
+    save();
+  },
+  markHeadsUp(id, minutes) {
+    const task = tasks.get(id);
+    if (!task || (task.heads_up_said ?? []).includes(minutes)) return;
+    task.heads_up_said = [...(task.heads_up_said ?? []), minutes];
     save();
   },
   markReminded(id) {
@@ -448,6 +457,7 @@ export const tasks = {
     for (const task of tasks.open().filter(t => t.remind_at)) {
       const base = { title: task.title, updated: task.updated_at };
       alerts.push({ ...base, id: task.id, at: Date.parse(task.remind_at), say: reminderLine(task, words) });
+      for (const early of headsUpsOf(task)) alerts.push({ ...base, id: early.id, at: early.at, say: headsUpLine(task, words, early.minutes) });
       for (const check of checkInsOf(task, words)) alerts.push({ ...base, id: check.id, at: check.at, say: checkInLine(task, words, check.n) });
     }
     return alerts.filter(alert => Number.isFinite(alert.at) && alert.at >= since);
@@ -480,6 +490,23 @@ export const tasks = {
       task.checked_in = latest.n;
       changed = true;
       if (now - latest.at <= LATE_CHECK_IN_MS) due.push({ id: latest.id, task, n: latest.n, say: checkInLine(task, data.settings, latest.n) });
+    }
+    if (changed) save();
+    return due;
+  },
+
+  // Heads-ups due now ("in 30 minutes: shopping"), each said once; ones missed by more than a few minutes
+  // (the app was closed) are skipped quietly. -> [{ id, task, say }]
+  takeDueHeadsUps() {
+    const now = Date.now();
+    const due = [];
+    let changed = false;
+    for (const task of live('tasks').filter(t => !t.done && !t.reminded && t.remind_at && t.heads_up)) {
+      for (const early of headsUpsOf(task).filter(h => h.at <= now)) {
+        task.heads_up_said = [...(task.heads_up_said ?? []), early.minutes];
+        changed = true;
+        if (now - early.at <= 5 * 60_000) due.push({ id: early.id, task, say: headsUpLine(task, data.settings, early.minutes) });
+      }
     }
     if (changed) save();
     return due;

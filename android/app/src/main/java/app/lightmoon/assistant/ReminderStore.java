@@ -56,13 +56,17 @@ final class ReminderStore {
     private static final String ACTION = "app.lightmoon.assistant.REMINDER";
     private static final long FORGET_ANSWERS_MS = 2 * 86_400_000L;
 
-    // A task's reminder has the task's id; its check-ins add "-c1", "-c2"... (docs/js/announce.js).
+    // A task's reminder has the task's id; its check-ins add "-c1", "-c2"..., its heads-ups "-h30" (docs/js/announce.js).
     static String taskIdOf(String alertId) {
-        return alertId == null ? "" : alertId.replaceFirst("-c\\d+$", "");
+        return alertId == null ? "" : alertId.replaceFirst("-[ch]\\d+$", "");
+    }
+
+    static boolean isHeadsUp(String alertId) {
+        return alertId != null && alertId.matches("[a-z0-9]+-h\\d+");
     }
 
     static boolean isTaskAlert(String alertId) {
-        return alertId != null && alertId.matches("[a-z0-9]+(-c\\d+)?");
+        return alertId != null && alertId.matches("[a-z0-9]+(-[ch]\\d+)?");
     }
 
     private ReminderStore() {}

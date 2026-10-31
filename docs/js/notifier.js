@@ -5,7 +5,7 @@
 // A reminder's check-ins (announce.js) arrive the same way, until "Done" or "Snooze" is tapped.
 import { idbGet, idbSet } from './idb.js';
 import { decryptJson } from './vault.js';
-import { reminderLine, checkInsOf, checkInLine, parseAlertId } from './announce.js';
+import { reminderLine, checkInsOf, checkInLine, parseAlertId, headsUpsOf, headsUpLine } from './announce.js';
 
 const DUE_WINDOW_MS = 6 * 3600_000; // ignore reminders more than this overdue
 const FORGET_NOTIFIED_MS = 7 * 86_400_000;
@@ -33,8 +33,8 @@ export async function showDueReminders({ registration, clients, now = Date.now()
     await registration.showNotification('LightMoon', { body: 'You have a reminder. Tap to hear it.', icon: ICON, tag: 'lightmoon-reminder' });
   }
   for (const reminder of due.filter(r => !notified[r.id])) {
-    const { taskId, n } = parseAlertId(reminder.id);
-    await registration.showNotification(n ? 'LightMoon is checking in' : 'LightMoon reminder', {
+    const { taskId, n, headsUp } = parseAlertId(reminder.id);
+    await registration.showNotification(headsUp ? 'LightMoon heads-up' : n ? 'LightMoon is checking in' : 'LightMoon reminder', {
       // With the app lock on, keep the words off the lock screen until the app is unlocked.
       body: cloud.private ? 'You have a reminder. Tap to hear it.' : reminder.say,
       icon: ICON,
@@ -112,5 +112,6 @@ async function remindersFromSync(cloud) {
     .flatMap(task => [
       { id: task.id, at: Date.parse(task.remind_at), say: reminderLine(task, settings) },
       ...checkInsOf(task, settings).map(check => ({ id: check.id, at: check.at, say: checkInLine(task, settings, check.n) })),
+      ...headsUpsOf(task).map(early => ({ id: early.id, at: early.at, say: headsUpLine(task, settings, early.minutes) })),
     ]);
 }

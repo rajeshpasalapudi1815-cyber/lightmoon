@@ -13,7 +13,7 @@ function openMailApp(url) {
 import { holdBack, callKey, saidYes } from './orders.js';
 import { normalizeTime, localStamp, prettyTime } from './time.js';
 import { findPlace, placeFromDevice, savedPlace, savePlace, weatherSummary } from './weather.js';
-import { LIFE_TOOLS, lifeHandlers, isConnected as lifeConnected } from './lifelevelling.js';
+import { LIFE_TOOLS, lifeHandlers, isConnected as lifeConnected, summary as lifeSummary, completeInLife } from './lifelevelling.js';
 import { phoneTools, phoneHandlers, heardMessages } from './phone.js';
 import { lookUp, headlines } from './knowledge.js';
 import { findLinks, checkLink } from './links.js';
@@ -60,6 +60,10 @@ export const TOOLS = [
         type: 'string',
         description: 'If they haven\'t said it\'s done, you check in after 15, 45 and 90 minutes with this question, e.g. "did you take your tablets?". '
           + 'Use "none" for a heads-up that needs no answer (a meeting starting, leaving soon).',
+      },
+      heads_up: {
+        type: 'array', items: { type: 'integer' },
+        description: 'Minutes before remind_at to warn them, e.g. [30, 10] for anything they go to, attend or start at a set time (shopping at 7, a meeting, a call). Leave out for simple nudges (tablets).',
       },
     },
     ['title'],
@@ -302,6 +306,17 @@ function findGoal(id) {
 
 // Each handler returns a short summary (shown as a chip under the reply), or an object with extras:
 // `result` (what the model is told, when it differs from the chip) and `calendar` (a reminder to export).
+// Something else at about the same time (within half an hour): another reminder, or a Life Levelling task with a
+// time. -> "Gym at 6:45 pm" or null.
+function clashWith(at, title) {
+  const ms = Date.parse(at);
+  const near = when => Number.isFinite(when) && Math.abs(when - ms) < 30 * 60_000;
+  const mine = tasks.open().find(t => t.title !== title && t.remind_at && near(Date.parse(t.remind_at)));
+  if (mine) return `${mine.title} at ${mine.remind_at.slice(11, 16)}`;
+  const life = lifeSummary()?.tasks?.find(t => t.title !== title && /\d{2}:\d{2}$/.test(t.due ?? '') && near(Date.parse(t.due.replace(' ', 'T'))));
+  return life ? `${life.title} at ${life.due.slice(11, 16)} in Life Levelling` : null;
+}
+
 // Whether their latest message asks for a task or reminder, says yes to one, or is one of their routines (whose
 // steps may add tasks). The AI's own suggestions never go on their list by themselves.
 const ASKS_FOR_TASK = /\bremind(?:er|ing)? me\b|\b(?:add|create|make|set|schedule|put|new)\b[^.?!]*\b(?:tasks?|to-?dos?|reminders?|alarms?)\b|don'?t let me forget|\bchase me\b/i;
@@ -326,7 +341,7 @@ const handlers = {
     return 'Forgot a saved fact';
   },
 
-  add_task({ title, due_at, remind_at, announcement, check_in }) {
+  add_task({ title, due_at, remind_at, announcement, check_in, heads_up }) {
     const name = toText(title, 'title', 200);
     if (!askedForTask()) throw new Error('They did not ask for a task or reminder. Ask them first ("Shall I add that?"), and add it only after their yes.');
     const dueAt = toTime(due_at, 'due_at');
@@ -339,14 +354,18 @@ const handlers = {
     const announce = remindAt && announcement ? String(announcement).trim().slice(0, 200) || null : null;
     const question = String(check_in ?? '').trim().slice(0, 160);
     const checkIn = !remindAt || !question ? null : /^(none|no|false)$/i.test(question) ? false : question;
-    tasks.add({ title: name, dueAt, remindAt, announce, checkIn });
+    tasks.add({ title: name, dueAt, remindAt, announce, checkIn, headsUp: heads_up });
     if (!remindAt) return `Task added: ${name}`;
-    return { text: `Reminder set: ${name}, ${prettyTime(remindAt)}`, calendar: { title: name, at: remindAt } };
+    const early = Array.isArray(heads_up) && heads_up.length ? ` (heads-ups ${heads_up.join(' and ')} minutes before)` : '';
+    const text = `Reminder set: ${name}, ${prettyTime(remindAt)}${early}`;
+    const clash = clashWith(remindAt, name);
+    return { text, ...(clash && { result: `${text}. CLASH: ${clash}. Tell them, and offer to move one.` }), calendar: { title: name, at: remindAt } };
   },
 
   complete_task({ id }) {
     const task = findTask(id);
     tasks.complete(task.id);
+    completeInLife(task.ll_task_id).catch(() => {});
     return `Done: ${task.title}`;
   },
 

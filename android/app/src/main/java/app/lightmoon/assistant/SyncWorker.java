@@ -185,6 +185,7 @@ public class SyncWorker extends Worker {
             if (at <= 0) continue;
             String title = task.optString("title");
             fromCloud.put(id, new ReminderStore.Reminder(id, title, reminderLine(task, title, settings), at, updated));
+            addHeadsUps(fromCloud, task, id, title, at, updated, settings);
             if (!checksIn(task, settings)) continue;
             int said = task.optInt("checked_in", 0);
             for (int n = 1; n <= CHECK_IN_MINUTES.length; n++) {
@@ -205,6 +206,45 @@ public class SyncWorker extends Worker {
         }
         result.addAll(fromCloud.values());
         return result;
+    }
+
+    // Heads-ups before the reminder, as headsUpsOf() and headsUpLine() in docs/js/announce.js: 5 to 240 minutes,
+    // at most three, none between 11 pm and 6 am, each said once (heads_up_said).
+    static void addHeadsUps(Map<String, ReminderStore.Reminder> into, JSONObject task, String id, String title, long at, long updated, JSONObject settings) {
+        JSONArray wanted = task.optJSONArray("heads_up");
+        if (wanted == null || task.optBoolean("reminded")) return;
+        JSONArray saidList = task.optJSONArray("heads_up_said");
+        java.util.Set<Integer> said = new java.util.HashSet<>();
+        for (int i = 0; saidList != null && i < saidList.length(); i++) said.add(saidList.optInt(i));
+        java.util.TreeSet<Integer> minutes = new java.util.TreeSet<>(java.util.Collections.reverseOrder());
+        for (int i = 0; i < wanted.length(); i++) {
+            int m = wanted.optInt(i, -1);
+            if (m >= 5 && m <= 240) minutes.add(m);
+        }
+        int count = 0;
+        for (int m : minutes) {
+            if (count++ >= 3) break;
+            long early = at - m * 60_000L;
+            if (said.contains(m) || headsUpQuiet(early)) continue;
+            String earlyId = id + "-h" + m;
+            into.put(earlyId, new ReminderStore.Reminder(earlyId, title, headsUpLine(task, title, settings, m), early, updated));
+        }
+    }
+
+    static boolean headsUpQuiet(long at) {
+        Calendar time = Calendar.getInstance();
+        time.setTimeInMillis(at);
+        int hour = time.get(Calendar.HOUR_OF_DAY);
+        return hour >= 23 || hour < 6;
+    }
+
+    // "Sir, heads up: shopping in 30 minutes, at 7 pm."
+    static String headsUpLine(JSONObject task, String title, JSONObject settings, int minutes) {
+        String stamp = task.optString("remind_at");
+        int h = Integer.parseInt(stamp.substring(11, 13));
+        int m = Integer.parseInt(stamp.substring(14, 16));
+        String clock = (h % 12 == 0 ? 12 : h % 12) + (m != 0 ? ":" + String.format(java.util.Locale.ROOT, "%02d", m) : "") + (h < 12 ? " am" : " pm");
+        return spokenAddress(settings) + ", heads up: " + title + " in " + minutes + " minutes, at " + clock + ".";
     }
 
     // Same words as reminderLine() in docs/js/announce.js.

@@ -22,7 +22,7 @@ globalThis.localStorage = {
 };
 const load = file => import(pathToFileURL(path.join(repo, 'docs', 'js', file)).href);
 const store = await load('store.js');
-const { checkInsOf, checkInLine, parseAlertId, isQuietTime } = await load('announce.js');
+const { checkInsOf, checkInLine, parseAlertId, isQuietTime, headsUpsOf, headsUpLine } = await load('announce.js');
 const { localStamp } = await load('time.js');
 
 const results = [];
@@ -68,7 +68,31 @@ check('schedule: check-ins for a day, none for heads-ups, done or answered', () 
   assert.deepEqual(checkInsOf(late).map(c => c.n), [1, 7, 8]);
 });
 
+check('heads-ups: ids, times, words, quiet hours', () => {
+  assert.deepEqual(parseAlertId('abc123-h30'), { taskId: 'abc123', n: 0, headsUp: 30 });
+  const shopping = { id: 'shop01', title: 'shopping', remind_at: localStamp(new Date(2026, 10, 3, 19, 0)), heads_up: [10, 30, 999] };
+  const early = headsUpsOf(shopping);
+  assert.deepEqual(early.map(h => h.id), ['shop01-h30', 'shop01-h10']);
+  assert.equal(early[0].at, new Date(2026, 10, 3, 18, 30).getTime());
+  assert.equal(headsUpLine(shopping, { address: 'boss' }, 30), 'Boss, heads up: shopping in 30 minutes, at 7 pm.');
+  assert.deepEqual(headsUpsOf({ ...shopping, heads_up_said: [30] }).map(h => h.minutes), [10]);
+  const wake = { id: 'wake01', title: 'wake up', remind_at: localStamp(new Date(2026, 10, 3, 5, 0)), heads_up: [30, 10] };
+  assert.equal(headsUpsOf(wake).length, 0, 'no heads-ups between 11 pm and 6 am');
+});
+
 if (daytime) {
+  check('heads-ups come with the alerts and are said once', () => {
+    store.tasks.add({ title: 'Go shopping', remindAt: at(-27), headsUp: [30, 10] });
+    const task = store.tasks.open().find(t => t.title === 'Go shopping');
+    const ids = store.tasks.alertsSince(Date.now() - 3600_000).filter(a => parseAlertId(a.id).taskId === task.id).map(a => a.id);
+    assert.ok(ids.includes(`${task.id}-h30`) && ids.includes(`${task.id}-h10`), ids.join(','));
+    const first = store.tasks.takeDueHeadsUps(); // the 30-minute one fell due 3 minutes ago
+    assert.equal(first.length, 1);
+    assert.equal(first[0].id, `${task.id}-h30`);
+    assert.equal(store.tasks.takeDueHeadsUps().length, 0, 'said once');
+    store.tasks.complete(task.id);
+  });
+
   check('a reminder that rang 16 min ago gets check-in 1, once', () => {
     store.tasks.add({ title: 'Take tablets', remindAt: at(16), checkIn: 'did you take your tablets?' });
     const task = store.tasks.open().find(t => t.title === 'Take tablets');

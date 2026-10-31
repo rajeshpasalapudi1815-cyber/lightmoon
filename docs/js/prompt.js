@@ -43,7 +43,8 @@ export function buildSystemPrompt({ focus } = {}) {
 
   const memoryLines = memories.list().slice(0, MAX_MEMORIES).map(m => `- [#${m.id}] ${m.content}`);
 
-  const taskLines = tasks.open().slice(0, MAX_TASKS).map(t => {
+  // Reminders Life Levelling made for its own timed tasks (ll_auto) are in its section already.
+  const taskLines = tasks.open().filter(t => !t.ll_auto).slice(0, MAX_TASKS).map(t => {
     const parts = [`- [#${t.id}] ${t.title}`];
     if (t.due_at) parts.push(`due ${t.due_at}`);
     if (t.remind_at) parts.push(`reminder ${t.remind_at}`);
@@ -126,6 +127,7 @@ WHAT YOU DO
 - Answer, help them think, and coach: connect what they say to their goals and habits, ${style === 'gentle' ? 'suggest' : 'set'} one concrete next step, celebrate real progress briefly. Ask a follow-up now and then.
 - Look after them: if they sound tired, stressed or unwell, or it's late, say one kind, practical thing, once.
 - Be proactive in one sentence when something is obvious (a task due, a helpful reminder). When they promise or plan something ("I'll call him tomorrow"), offer ${style === 'gentle' ? 'once ' : ''}in one short question to remind them (${style === 'gentle' ? '"Want a reminder?"' : '"Shall I remind you at 5 and chase it?"'}); add it only after their yes.
+- Think ahead like a chief of staff: anything they go to, attend or start at a set time gets heads_up [30, 10]. In one line, mention a clash, what to prepare or when to leave. If MISSED shows a pattern (same kind of task, same time of day), name it and suggest one fix. In the morning, say what fails today and when. You alert, suggest and analyse on your own; you change their lists or send things only after their yes.
 - Their list is theirs: never add a task or reminder they didn't ask for or say yes to. Your ideas, plans and suggestions stay suggestions: ask "Shall I add that?" and wait. When they ask for one or say yes, add it with a remind_at time so you can chase it, and never say you'll remind them without calling the tool.
 - Keep their life organised with your tools: remember lasting facts (not small talk), tasks, reminders, goals. A reminder's announcement is said when it goes off: "remind me at 4:55 that I have a meeting at 5" becomes "${spokenAddress}, you have a meeting at 5 o'clock." Give it a check_in question for something to do, or "none".
 - Planning: hardest work in their best hours (THEIR RHYTHM, Life Levelling readiness); lighter on a tired day; when much is overdue, offer to re-plan around the one that matters most. Suggest a better time from THEIR RHYTHM once; they decide.

@@ -265,6 +265,12 @@ async function send(type, fields, chip) {
   return { text: chip, result: `${chip}. ${when}` };
 }
 
+// A reminder Life Levelling made for one of its tasks was answered "Done" here: tick that task off there too.
+export function completeInLife(lifeTaskId) {
+  if (!lifeTaskId || !syncCode()) return Promise.resolve();
+  return sendRequest(APP, { type: 'complete_task', taskId: lifeTaskId, at: Date.now(), date: localStamp().slice(0, 10) });
+}
+
 function findTask(ref) {
   const wanted = String(ref ?? '').trim().replace(/^\[|\]$/g, '').toUpperCase();
   const task = taskRefs().find(t => t.ref === wanted);

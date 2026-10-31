@@ -162,21 +162,24 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
         // With the app lock on, keep the words off the lock screen.
         String text = ReminderStore.hideText(context) ? "You have a reminder." : reminder.say;
         boolean task = ReminderStore.isTaskAlert(reminder.id);
-        boolean checkIn = task && !ReminderStore.taskIdOf(reminder.id).equals(reminder.id);
+        boolean headsUp = ReminderStore.isHeadsUp(reminder.id);
+        boolean checkIn = task && !headsUp && !ReminderStore.taskIdOf(reminder.id).equals(reminder.id);
         // One notification per task: a check-in replaces the reminder's (or the earlier check-in's).
         int notificationId = (task ? ReminderStore.taskIdOf(reminder.id) : reminder.id).hashCode();
         Intent open = new Intent(context, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent tap = PendingIntent.getActivity(context, reminder.id.hashCode(), open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_REMINDERS)
             .setSmallIcon(R.drawable.ic_stat_moon)
-            .setContentTitle(checkIn ? "LightMoon is checking in" : "LightMoon reminder")
+            .setContentTitle(headsUp ? "LightMoon heads-up" : checkIn ? "LightMoon is checking in" : "LightMoon reminder")
             .setContentText(text)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
             .setContentIntent(tap);
-        if (task) {
+        if (headsUp) {
+            builder.addAction(0, "Done already", ReminderActionReceiver.intent(context, reminder, ReminderActionReceiver.DONE));
+        } else if (task) {
             // Answer it without opening LightMoon (ReminderActionReceiver).
             builder.addAction(0, "Done", ReminderActionReceiver.intent(context, reminder, ReminderActionReceiver.DONE))
                 .addAction(0, "Snooze 10 min", ReminderActionReceiver.intent(context, reminder, ReminderActionReceiver.SNOOZE))

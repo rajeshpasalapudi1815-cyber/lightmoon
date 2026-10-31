@@ -8,7 +8,7 @@ import * as weather from './js/weather.js';
 import * as cloud from './js/cloud.js';
 import * as lifeLevelling from './js/lifelevelling.js';
 import * as desktop from './js/desktop.js';
-import { reminderLine, checkInLine, parseAlertId } from './js/announce.js';
+import { reminderLine, checkInLine, parseAlertId, headsUpLine } from './js/announce.js';
 import { drawQr, pairingText, canScan, scanQr, codeFromScan } from './js/qr.js';
 import { offlineAvailable, offlineStatus, downloadOffline, removeOffline } from './js/offline.js';
 import { chat, briefing, weeklyLetter } from './js/brain.js';
@@ -825,10 +825,14 @@ async function pollReminders() {
     // background or closed.
     const { ids, visible } = await nativeAlarms.takeSpoken().catch(() => ({ ids: [], visible: true }));
     for (const id of ids) {
-      const { taskId, n } = parseAlertId(id);
+      const { taskId, n, headsUp } = parseAlertId(id);
       const task = store.tasks.get(taskId);
       if (!task || task.done) continue;
-      if (n) {
+      if (headsUp) {
+        if ((task.heads_up_said ?? []).includes(headsUp)) continue;
+        store.tasks.markHeadsUp(taskId, headsUp);
+        addMessage('reminder', headsUpLine(task, store.settings.all(), headsUp));
+      } else if (n) {
         if ((task.checked_in ?? 0) >= n) continue;
         store.tasks.markCheckedIn(taskId, n);
         addReminderMessage(task, checkInLine(task, store.settings.all(), n));
@@ -842,9 +846,10 @@ async function pollReminders() {
   // Never talk over the user: the microphone would take the reminder for part of their request.
   // It is announced at the next check, a few seconds after they finish.
   if (listener.capturing) return;
+  const headsUps = store.tasks.takeDueHeadsUps();
   const due = store.tasks.takeDueReminders();
   const checkIns = store.tasks.takeDueCheckIns();
-  if (!due.length && !checkIns.length) return;
+  if (!due.length && !checkIns.length && !headsUps.length) return;
   const notified = await cloud.notifiedReminders(); // already shown as a notification while closed
   for (const reminder of due.filter(r => !notified[r.id])) {
     const minutesLate = (Date.now() - toDate(reminder.remind_at).getTime()) / 60_000;
@@ -857,6 +862,11 @@ async function pollReminders() {
       speaker.speak(line, { force: true });
     }
     if (document.hidden) notify(`${assistantName()} reminder`, line);
+  }
+  for (const early of headsUps.filter(h => !notified[h.id])) {
+    addMessage('reminder', early.say);
+    speaker.speak(early.say, { force: true });
+    if (document.hidden) notify(`${assistantName()} heads-up`, early.say);
   }
   for (const check of checkIns.filter(c => !notified[c.id])) {
     addReminderMessage(check.task, check.say);
@@ -894,7 +904,10 @@ function answerReminder(taskId, action, { until = null } = {}) {
   const task = store.tasks.get(taskId);
   if (!task || task.done) return null;
   let reply = null;
-  if (action === 'done' && store.tasks.complete(taskId)) reply = `Done: ${task.title}`;
+  if (action === 'done' && store.tasks.complete(taskId)) {
+    reply = `Done: ${task.title}`;
+    lifeLevelling.completeInLife(task.ll_task_id).catch(() => {}); // a Life Levelling task's reminder: ticked off there too
+  }
   if (action === 'snooze') {
     const at = localStamp(new Date(until ?? Date.now() + SNOOZE_MINUTES * 60_000));
     if (store.tasks.snooze(taskId, at)) reply = `Snoozed until ${formatWhen(at)}: ${task.title}`;
@@ -928,6 +941,14 @@ async function announceReminder(id) {
     const line = `${addressWord()}, you have a reminder.`;
     addMessage('reminder', line);
     return speaker.speak(line, { force: true });
+  }
+  const { headsUp } = parseAlertId(id);
+  if (headsUp) {
+    const early = headsUpLine(task, store.settings.all(), headsUp);
+    store.tasks.markHeadsUp(task.id, headsUp);
+    addMessage('reminder', early);
+    speaker.speak(early, { force: true });
+    return applyState();
   }
   const line = n ? checkInLine(task, store.settings.all(), n) : sayReminder(task);
   if (n) store.tasks.markCheckedIn(task.id, n);

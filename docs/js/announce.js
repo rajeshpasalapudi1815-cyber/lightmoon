@@ -29,11 +29,52 @@ export const isQuietTime = ms => {
 };
 
 // A check-in is its own alert, for the cloud and the phone's alarms: the task's id plus "-c1", "-c2"...
+// A heads-up before the reminder is the task's id plus "-h30" (30 minutes before).
 export const checkInId = (taskId, n) => `${taskId}-c${n}`;
+export const headsUpId = (taskId, minutes) => `${taskId}-h${minutes}`;
 
+// -> { taskId, n } (n: the check-in, 0 for the reminder itself), plus headsUp (minutes) for a heads-up.
 export function parseAlertId(id) {
-  const match = /^([a-z0-9]+)-c(\d+)$/.exec(String(id));
-  return match ? { taskId: match[1], n: Number(match[2]) } : { taskId: String(id), n: 0 };
+  const match = /^([a-z0-9]+)-([ch])(\d+)$/.exec(String(id));
+  if (!match) return { taskId: String(id), n: 0 };
+  return match[2] === 'c' ? { taskId: match[1], n: Number(match[3]) } : { taskId: match[1], n: 0, headsUp: Number(match[3]) };
+}
+
+// ---------- Heads-ups before a reminder ----------
+// A task can ask for heads-ups some minutes before its reminder (heads_up: [30, 10]): "in 30 minutes: shopping".
+// Not between 11 pm and 6 am (a 5 am wake-up rings at 5, not at 4:30). The Android app has the same rules and
+// words in SyncWorker.java: change both together.
+const HEADS_UP_QUIET_FROM = 23;
+const HEADS_UP_QUIET_UNTIL = 6;
+const quietForHeadsUp = ms => {
+  const hour = new Date(ms).getHours();
+  return hour >= HEADS_UP_QUIET_FROM || hour < HEADS_UP_QUIET_UNTIL;
+};
+
+// The minutes asked for: whole numbers from 5 to 240, at most three, largest first.
+export const headsUpMinutes = value => [...new Set((Array.isArray(value) ? value : []).map(Number)
+  .filter(m => Number.isInteger(m) && m >= 5 && m <= 240))].sort((a, b) => b - a).slice(0, 3);
+
+// The heads-ups still to come for a task's reminder: [{ id, minutes, at }].
+export function headsUpsOf(task) {
+  if (!task?.remind_at || task.done || task.deleted) return [];
+  const rings = Date.parse(task.remind_at);
+  if (!Number.isFinite(rings)) return [];
+  const said = new Set(task.heads_up_said ?? []);
+  return headsUpMinutes(task.heads_up).filter(m => !said.has(m))
+    .map(m => ({ id: headsUpId(task.id, m), minutes: m, at: rings - m * 60_000 }))
+    .filter(h => !quietForHeadsUp(h.at));
+}
+
+// "7 pm", "7:30 am" from "YYYY-MM-DDTHH:MM".
+export function spokenClock(stamp) {
+  const [h, m] = String(stamp).slice(11, 16).split(':').map(Number);
+  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h < 12 ? 'am' : 'pm'}`;
+}
+
+// "Sir, heads up: shopping in 30 minutes, at 7 pm."
+export function headsUpLine(task, settings, minutes) {
+  return `${capitalize(addressWord(settings))}, heads up: ${task.title} in ${minutes} minutes, at ${spokenClock(task.remind_at)}.`;
 }
 
 export const checksIn = (task, settings = {}) =>
