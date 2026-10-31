@@ -105,7 +105,7 @@ export function promptSection() {
   const refOf = id => refs.find(t => t.id === id)?.ref;
   const planIds = new Set((s.plan?.today ?? []).map(t => t.id));
   const taskLine = t => join([
-    `[${refOf(t.id)}] ${t.title}`, PRIORITY[t.priority], t.status === 'in_progress' && 'started', t.due && `due ${t.due}`, t.reason, t.notes && `notes: ${t.notes}`,
+    `[${refOf(t.id)}] ${t.title}`, PRIORITY[t.priority], t.status === 'in_progress' && 'started', t.due && `due ${t.due}`, t.failsAt && `FAILS at ${t.failsAt} if not done`, t.reason, t.notes && `notes: ${t.notes}`,
   ], ' | ');
   const you = s.you ?? {};
   const h = s.health;
@@ -126,6 +126,7 @@ export function promptSection() {
     refs.some(t => !planIds.has(t.id) && !t.doneToday) && 'Other open tasks:',
     ...refs.filter(t => !planIds.has(t.id) && !t.doneToday).slice(0, 15).map(t => `  ${taskLine(t)}`),
     refs.some(t => t.doneToday) && `Finished today: ${refs.filter(t => t.doneToday).map(t => `[${t.ref}] ${t.title}`).join('; ')}`,
+    s.missed?.length && `Missed or failed lately (XP lost): ${s.missed.slice(0, 8).map(t => `${t.title} (${t.when}${t.xpLost ? `, -${t.xpLost} XP` : ''})`).join('; ')}`,
     s.quests?.daily?.length && `Daily quests: ${s.quests.daily.map(q => `${q.title} ${q.done ? 'done' : `${q.progress}/${q.target}${q.unit ? ` ${q.unit}` : ''}`}`).join('; ')}`,
     s.quests?.boss && `Weekly boss: ${s.quests.boss.name}, ${s.quests.boss.defeated ? 'defeated' : `${s.quests.boss.hpLeft}/${s.quests.boss.hp} HP left`}`,
     s.mirror && join([
@@ -181,6 +182,12 @@ export const LIFE_TOOLS = [
     ['kind'],
   ),
   tool('life_complete_task', 'Tick off a Life Levelling task they finished (earns XP).', { task: TASK_REF }, ['task']),
+  tool(
+    'life_miss_task',
+    'Mark a Life Levelling task as missed when they say they did not or could not do it (it loses XP, as Life Levelling rules say). Only for what they told you.',
+    { task: TASK_REF, reason: { type: 'string', description: 'Their reason, in their words, if they gave one.' } },
+    ['task'],
+  ),
   tool(
     'life_update_task',
     'Change a Life Levelling task: title, notes, priority, due date or time, start, pause, or reopen. Send only what changes.',
@@ -284,6 +291,11 @@ export const lifeHandlers = {
   life_complete_task({ task }) {
     const found = findTask(task);
     return send('complete_task', { taskId: found.id }, `Ticked off in Life Levelling: ${found.title}`);
+  },
+  life_miss_task({ task, reason }) {
+    const found = findTask(task);
+    const fields = { taskId: found.id, ...(reason && { reason: String(reason).trim().slice(0, 200) }) };
+    return send('miss_task', fields, `Marked missed in Life Levelling: ${found.title}`);
   },
   life_update_task({ task, title, notes, priority, due_date, due_time, clear_due, status }) {
     const found = findTask(task);

@@ -79,7 +79,7 @@ export function buildSystemPrompt({ focus } = {}) {
     ? 'Life Levelling is an app on their phone and computer: it applies what you send the next time one of them is open (within a minute if one is open now)'
     : 'Life Levelling applies what you send within a minute, while their computer is on';
   const lifeGuidance = lifeTalk && lifeLevelling ? `
-- Life Levelling is connected (below): coach from readiness, today's plan, their weakest area, quests and the Mirror's patterns. Log water, sleep, mood, exercise, spending and habits with life_* tools; new to-dos they ask for go there, and if one has a set day or time, offer a reminder so you can chase it; delete only when asked. After 7 pm, if the day isn't closed, ask once how it went and log it with life_close_day.
+- Life Levelling is connected (below): coach from readiness, today's plan, their weakest area, quests and the Mirror's patterns. Log water, sleep, mood, exercise, spending and habits with life_* tools; new to-dos they ask for go there, and if one has a set day or time, offer a reminder so you can chase it; delete only when asked. They finished one → life_complete_task; they say they didn't or couldn't do one → life_miss_task straight away (it costs XP; that is the deal they chose), then ask what got in the way and when they'll make it up. Hard mode: a task with a time FAILS 30 minutes after it unless done; warn them before. After 7 pm, if the day isn't closed, ask once how it went and log it with life_close_day.
 - ${lifeWhen}; say "done" or "logged".` : '';
 
   const phone = phoneSection();

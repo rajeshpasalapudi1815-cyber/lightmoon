@@ -10,10 +10,10 @@ const LEAVE_ALONE = new Set([
 ]);
 // Tools that take something away, and those that answer a reminder.
 const TAKE_AWAY = new Set(['forget', 'delete_task', 'delete_routine', 'life_delete_task']);
-const ANSWER = new Set(['complete_task', 'stop_checking_in', 'snooze_reminder', 'set_goal_status', 'life_complete_task']);
+const ANSWER = new Set(['complete_task', 'stop_checking_in', 'snooze_reminder', 'set_goal_status', 'life_complete_task', 'life_miss_task']);
 
 const TAKE_AWAY_WORDS = /\b(forget|delete|remove|clear|erase|wipe|drop|cancel|scrap|undo|abandon|pause|give up|get rid|no longer|anymore|don'?t (need|want)|never ?mind)\b/i;
-const ANSWER_WORDS = /\b(yes|yeah|yep|yup|sure|ok|okay|done|did|finished|completed?|achieved|tick|mark|stop|later|snooze|not now|remind|minutes?|hours?|tonight|tomorrow|haan|avunu)\b/i;
+const ANSWER_WORDS = /\b(missed|skipped|failed|didn'?t|couldn'?t|can'?t|could not|did not|unable|not able|yes|yeah|yep|yup|sure|ok|okay|done|did|finished|completed?|achieved|tick|mark|stop|later|snooze|not now|remind|minutes?|hours?|tonight|tomorrow|haan|avunu)\b/i;
 const YES = /^\W*(yes|yeah|yep|yup|ya|sure|ok|okay|go ahead|please do|do it|send( it)?|go|correct|right|confirm(ed)?|haan|ha|ji|haan ji|theek hai|avunu|sare|sari)\b/i;
 
 // Words too common to say where an idea came from.

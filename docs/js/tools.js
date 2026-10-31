@@ -208,7 +208,7 @@ export const LOAD_TOOLS = tool(
   { group: { type: 'string', enum: ['phone', 'life', 'more'] } },
   ['group'],
 );
-export const LIFE_WORDS = /\b(water|drank|drink|sleep|slept|mood|exercise|work ?out|gym|ran|run|walk(ed)?|steps|spent|spend|expenses?|paid|rupees|habits?|quests?|xp|level|intention|close (my )?day|life levelling|meditat\w*|read(ing)? ([\w-]+ ){0,2}(book|pages|chapters?)|reading habit|journal|weight)\b/i;
+export const LIFE_WORDS = /\b(tasks?|completed|finished|missed|skipped|failed|couldn'?t|didn'?t|water|drank|drink|sleep|slept|mood|exercise|work ?out|gym|ran|run|walk(ed)?|steps|spent|spend|expenses?|paid|rupees|habits?|quests?|xp|level|intention|close (my )?day|life levelling|meditat\w*|read(ing)? ([\w-]+ ){0,2}(book|pages|chapters?)|reading habit|journal|weight)\b/i;
 
 // The tools for a request: the core ones, the groups this conversation needs, and load_tools for the rest.
 // `text`: the latest exchange (the user's last messages and LightMoon's last reply, so "yes" to "shall I call him?"
@@ -562,6 +562,11 @@ const handlers = {
   },
 
   ...lifeHandlers,
+  // Their Life Levelling list is theirs too: only what they asked for or said yes to.
+  life_add_task(args) {
+    if (!askedForTask()) throw new Error('They did not ask for a task. Ask them first ("Shall I add that to Life Levelling?"), and add it only after their yes.');
+    return lifeHandlers.life_add_task(args);
+  },
   ...phoneHandlers,
 };
 
