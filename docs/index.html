@@ -348,8 +348,32 @@
               <p class="hint">It wakes for any phrase switched on here, said as a whole:</p>
               <div id="wakePhraseList"></div>
             </div>
+            <div id="ownWakeRow" hidden>
+              <span class="row say-as-add">
+                <input id="ownWake" maxlength="40" placeholder="Your own wake word, e.g. Sunshine" autocomplete="off" aria-label="Your own wake word">
+                <button type="button" id="ownWakeSave" class="btn-ghost">Save</button>
+              </span>
+              <p id="ownWakeError" class="card-note error-text"></p>
+            </div>
+            <div id="voiceBox" hidden>
+              <h4 class="card-title">Only my voice</h4>
+              <p id="voiceStatus" class="card-note"></p>
+              <span class="row actions">
+                <button type="button" id="voiceTeach" class="btn-ghost">Teach it my voice</button>
+                <button type="button" id="voiceForget" class="btn-ghost" hidden>Forget my voice</button>
+              </span>
+              <label class="switch-row" id="voiceOnRow" hidden>Wake only for my voice <input type="checkbox" id="voiceOn"></label>
+              <label id="voiceStrictRow" hidden>How sure it must be
+                <select id="voiceStrict">
+                  <option value="0">Relaxed (noisy places; others may get through)</option>
+                  <option value="1">Normal</option>
+                  <option value="2">Strict (may miss you sometimes)</option>
+                </select>
+              </label>
+            </div>
             <details class="help">
               <summary>How it works</summary>
+              <p>Only my voice: tap "Teach it my voice" and say your wake phrase 3 times. After that it ignores other people saying it, and when your voice wakes it on an unlocked phone it skips LightMoon's PIN. Your voice print stays on this phone. A short wake word like "Sunshine" is easier to say but harder to tell voices apart with: two or three words work best.</p>
               <p>With the app closed, say one of your wake phrases ("Hey LightMoon", "Are you there, LightMoon"), wait for the chime, then speak. It opens ready to listen; on a locked phone it asks for your fingerprint first. It listens only for those phrases, entirely on this phone (the first time, it downloads a 41 MB offline voice model), and nothing is recorded or sent.</p>
               <p>To see whether it's listening: its notification says "Listening", "Paused: LightMoon is open" or "Heard you", and Android shows a green microphone dot while it listens. For a switch like the camera and microphone ones, pull down the quick settings, tap the pencil and add the "LightMoon ears" tile.</p>
             </details>
@@ -414,15 +438,22 @@
         <section class="settings-page" data-page="reminders" data-title="Reminders" hidden>
           <div class="set-card">
             <h3 class="card-title">Checking in</h3>
+            <label>How I push you
+              <select name="coachStyle">
+                <option value="gentle">Gentle: friendly suggestions</option>
+                <option value="firm">Firm: direct, holds you to it</option>
+                <option value="strict">Strict: hard on you, no excuses</option>
+              </select>
+            </label>
             <label>After a reminder goes off
               <select name="reminderChecks">
-                <option value="on">ask until I answer (after 15, 45 and 90 minutes)</option>
+                <option value="on">ask until I answer (for up to a day)</option>
                 <option value="off">say it once, then leave it</option>
               </select>
             </label>
             <details class="help">
               <summary>How it works</summary>
-              <p>When a reminder needs doing, LightMoon checks back until you tell it it's done, say "later" (it asks again in 10 minutes) or say "stop asking". You can answer out loud, with the buttons under the reminder, or with Done and Snooze on the notification. It never checks in between 11 pm and 7 am, and not for a plain heads-up like a meeting starting.</p>
+              <p>When a reminder needs doing, LightMoon checks back after 15 and 45 minutes, an hour and a half, then every few hours, the last time a day later, until you tell it it's done, say "later" (it asks again in 10 minutes) or say "stop asking". You can answer out loud, with the buttons under the reminder, or with Done and Snooze on the notification. It never checks in between 11 pm and 7 am, and not for a plain heads-up like a meeting starting.</p>
             </details>
           </div>
 

@@ -17,8 +17,9 @@ export function reminderLine(task, settings) {
 
 // ---------- Checking in after a reminder ----------
 // Until they say it's done (or "not now", or "stop asking"), LightMoon asks again this many minutes after the
-// reminder went off. Never at night, and not for a heads-up that needs no answer (the task's check_in is false).
-export const CHECK_IN_MINUTES = [15, 45, 90];
+// reminder went off: soon, then every few hours, the last a day later. Never at night (those are skipped), and not
+// for a heads-up that needs no answer (the task's check_in is false).
+export const CHECK_IN_MINUTES = [15, 45, 90, 180, 300, 480, 720, 1440];
 const QUIET_FROM_HOUR = 23;
 const QUIET_UNTIL_HOUR = 7;
 
@@ -48,11 +49,29 @@ export function checkInsOf(task, settings = {}) {
     .filter(check => check.n > (task.checked_in ?? 0) && !isQuietTime(check.at));
 }
 
-// What LightMoon says when it checks in, e.g. "Sir, just checking: did you take your tablets?"
+// How LightMoon holds them to things (Settings → Reminders → How I push you; synced): "gentle", "firm" or "strict".
+export const coachStyle = (settings = {}) => (['gentle', 'strict'].includes(settings.coach_style) ? settings.coach_style : 'firm');
+
+// What LightMoon says when it checks in, e.g. "Sir, did you do it? Did you take your tablets?"
 export function checkInLine(task, settings, n) {
   const who = capitalize(addressWord(settings));
   const question = task.check_in || `did you get to "${task.title}"?`;
-  if (n >= CHECK_IN_MINUTES.length) return `${who}, one last check: ${question} I'll leave it with you after this.`;
-  if (n === 1) return `${who}, just checking: ${question}`;
-  return `${who}, checking again: ${question} Tell me when it's done, or say snooze.`;
+  const last = n >= CHECK_IN_MINUTES.length;
+  const late = n >= 4; // hours have gone by
+  switch (coachStyle(settings)) {
+    case 'gentle':
+      if (last) return `${who}, one last check: ${question} I'll leave it with you after this.`;
+      if (n === 1) return `${who}, just checking: ${question}`;
+      return `${who}, checking again: ${question} Tell me when it's done, or say snooze.`;
+    case 'strict':
+      if (last) return `${who}, a whole day and still nothing. ${question} Do it now, or tell me you're dropping it.`;
+      if (late) return `${who}, this is still not done. ${question} No more putting it off. Do it now.`;
+      if (n === 1) return `${who}. ${question} I want an answer.`;
+      return `${who}, I'm still waiting. ${question} Done, or not done?`;
+    default:
+      if (last) return `${who}, it's been a day. ${question} Do it today, give it a new time, or drop it. I won't let it sit.`;
+      if (late) return `${who}, this is still open. ${question} Do it now, or tell me exactly when.`;
+      if (n === 1) return `${who}, time's up: ${question}`;
+      return `${who}, checking again: ${question} It's not done until you tell me it is.`;
+  }
 }

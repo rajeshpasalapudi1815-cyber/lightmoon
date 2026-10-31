@@ -45,7 +45,7 @@ public class SyncWorker extends Worker {
     private static final String WORK_NAME = "lightmoon-sync";
     private static final String ANSWER_WORK_NAME = "lightmoon-answer";
     // Checking in after a reminder: the same rules and words as docs/js/announce.js. Change both together.
-    static final int[] CHECK_IN_MINUTES = {15, 45, 90};
+    static final int[] CHECK_IN_MINUTES = {15, 45, 90, 180, 300, 480, 720, 1440};
     private static final int QUIET_FROM_HOUR = 23;
     private static final int QUIET_UNTIL_HOUR = 7;
 
@@ -232,9 +232,24 @@ public class SyncWorker extends Worker {
         Object asked = task.opt("check_in");
         String question = asked instanceof String && !((String) asked).isEmpty() ? (String) asked : "did you get to \"" + title + "\"?";
         String who = spokenAddress(settings);
-        if (n >= CHECK_IN_MINUTES.length) return who + ", one last check: " + question + " I'll leave it with you after this.";
-        if (n == 1) return who + ", just checking: " + question;
-        return who + ", checking again: " + question + " Tell me when it's done, or say snooze.";
+        boolean last = n >= CHECK_IN_MINUTES.length;
+        boolean late = n >= 4;
+        String style = settings.optString("coach_style", "firm");
+        if (style.equals("gentle")) {
+            if (last) return who + ", one last check: " + question + " I'll leave it with you after this.";
+            if (n == 1) return who + ", just checking: " + question;
+            return who + ", checking again: " + question + " Tell me when it's done, or say snooze.";
+        }
+        if (style.equals("strict")) {
+            if (last) return who + ", a whole day and still nothing. " + question + " Do it now, or tell me you're dropping it.";
+            if (late) return who + ", this is still not done. " + question + " No more putting it off. Do it now.";
+            if (n == 1) return who + ". " + question + " I want an answer.";
+            return who + ", I'm still waiting. " + question + " Done, or not done?";
+        }
+        if (last) return who + ", it's been a day. " + question + " Do it today, give it a new time, or drop it. I won't let it sit.";
+        if (late) return who + ", this is still open. " + question + " Do it now, or tell me exactly when.";
+        if (n == 1) return who + ", time's up: " + question;
+        return who + ", checking again: " + question + " It's not done until you tell me it is.";
     }
 
     // How the user likes to be addressed, capitalised: "Sir", "Boss", or their name (addressWord() in announce.js).

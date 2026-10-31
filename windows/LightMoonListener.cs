@@ -10,6 +10,7 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -24,13 +25,20 @@ static class LightMoonListener
 {
     const string AppUrl = "https://rajeshpasalapudi1815-cyber.github.io/lightmoon/?action=talk";
     const string WindowTitle = "LightMoon";
-    const float WakeConfidence = 0.80f;      // the "light moon" phrase itself
+    const float WakeConfidence = 0.72f;      // the "light moon" phrase itself (0.80 missed Indian-English speakers)
+    const float NearMiss = 0.40f;            // below the bar but worth a line in the log, to tune it
+    const int RestartAfterQuietMinutes = 20; // no speech at all for this long: start the recognizer afresh
     const float DictationConfidence = 0.60f; // "light moon" heard inside other speech
     static readonly Regex Name = new Regex(@"\blight\s*moon\b", RegexOptions.IgnoreCase);
 
     // Its own folder (%USERPROFILE%\LightMoon): the log and the "talk" shortcut live next to the program.
     static readonly string Folder = Path.GetDirectoryName(Application.ExecutablePath);
     static readonly string LogFile = Path.Combine(Folder, "listener.log");
+    // The user's own wake word ("sunshine"), set in LightMoon on the phone and passed on by LightMoon here.
+    static readonly string OwnWakeFile = Path.Combine(Folder, "own-wake.txt");
+    static string ownWake = "";
+    static DateTime lastSound = DateTime.Now;
+    static System.Windows.Forms.Timer watchdog;
 
     static SpeechRecognitionEngine engine;
     static NotifyIcon tray;
@@ -45,6 +53,7 @@ static class LightMoonListener
     static void Main(string[] args)
     {
         Directory.CreateDirectory(Folder);
+        try { ownWake = Tidy(File.ReadAllText(OwnWakeFile)); } catch { }
         if (args.Length > 0 && args[0] == "--self-test") { Environment.Exit(SelfTest()); return; }
         if (args.Length > 0 && args[0] == "--wake") { Wake(); return; } // as if "LightMoon" had been heard (for testing)
         bool voice = Array.IndexOf(args, "--no-voice") < 0; // just the orb (a test copy beside the real Listener)
@@ -61,8 +70,26 @@ static class LightMoonListener
             MakeTray();
             orb = new DesktopOrb(Folder, Wake, ShowTrayMenu, Log);
             bridge = new OrbBridge(orb, ui, Log);
+            bridge.OnWakePhrase = SetOwnWake;
             bridge.Start();
-            if (voice) StartListening();
+            try { ownWake = Tidy(File.ReadAllText(OwnWakeFile)); } catch { }
+            if (voice)
+            {
+                StartListening();
+                // Windows' recognizer can go deaf after sleep or a microphone change, without saying so.
+                Microsoft.Win32.SystemEvents.PowerModeChanged += (s, e) =>
+                {
+                    if (e.Mode == Microsoft.Win32.PowerModes.Resume) ui.Post(_ => { Log("woke from sleep: listening afresh"); Restart(); }, null);
+                };
+                watchdog = new System.Windows.Forms.Timer { Interval = 60000 };
+                watchdog.Tick += (s, e) =>
+                {
+                    if (paused || (DateTime.Now - lastSound).TotalMinutes < RestartAfterQuietMinutes) return;
+                    Log("nothing heard for a while: listening afresh");
+                    Restart();
+                };
+                watchdog.Start();
+            }
             else { listenItem.Checked = false; listenItem.Enabled = false; tray.Text = "LightMoon Listener: orb only"; }
             Application.Run();
             bridge.Stop();
@@ -70,6 +97,44 @@ static class LightMoonListener
             if (engine != null) engine.Dispose();
             tray.Visible = false;
         }
+    }
+
+    static void Restart()
+    {
+        lastSound = DateTime.Now;
+        if (engine != null)
+        {
+            try { engine.RecognizeAsyncCancel(); } catch { }
+            try { engine.Dispose(); } catch { }
+            engine = null;
+        }
+        StartListening();
+    }
+
+    // "Sun Shine!" -> "sun shine", or "" if it isn't one to four plain words.
+    static string Tidy(string phrase)
+    {
+        string text = Regex.Replace(Regex.Replace((phrase ?? "").ToLowerInvariant().Replace("lightmoon", "light moon"), "[^a-z ]", " "), @"\s+", " ").Trim();
+        int words = text.Length == 0 ? 0 : text.Split(' ').Length;
+        return words >= 1 && words <= 4 && text.Length >= 3 ? text : "";
+    }
+
+    // LightMoon passed on the user's own wake word: keep it and listen for it too.
+    static void SetOwnWake(string phrase)
+    {
+        string tidy = Tidy(phrase);
+        if (tidy == ownWake) return;
+        ownWake = tidy;
+        try { File.WriteAllText(OwnWakeFile, ownWake); } catch { }
+        Log(ownWake.Length > 0 ? "own wake word: \"" + ownWake + "\"" : "own wake word removed");
+        if (engine != null) Restart();
+    }
+
+    static string[] WakePhrases()
+    {
+        var phrases = new List<string> { "light moon", "hey light moon", "okay light moon", "hi light moon" };
+        if (ownWake.Length > 0 && !phrases.Contains(ownWake)) phrases.Add(ownWake);
+        return phrases.ToArray();
     }
 
     static void StartListening()
@@ -105,15 +170,18 @@ static class LightMoonListener
     static SpeechRecognitionEngine MakeEngine()
     {
         var recognizer = new SpeechRecognitionEngine(new CultureInfo("en-US"));
-        var wake = new Grammar(new GrammarBuilder(new Choices("light moon", "hey light moon", "okay light moon", "hi light moon")));
+        var wake = new Grammar(new GrammarBuilder(new Choices(WakePhrases())));
         wake.Name = "wake";
         recognizer.LoadGrammar(wake);
         var dictation = new DictationGrammar();
         dictation.Name = "dictation";
         dictation.Weight = 0.3f;
         recognizer.LoadGrammar(dictation);
+        recognizer.SpeechDetected += (sender, e) => lastSound = DateTime.Now;
         recognizer.SpeechRecognized += (sender, e) =>
         {
+            if (!paused && !IsWake(e.Result) && e.Result.Grammar != null && e.Result.Grammar.Name == "wake" && e.Result.Confidence >= NearMiss)
+                Log(string.Format("near miss \"{0}\" ({1:0.00})", e.Result.Text, e.Result.Confidence));
             if (paused || !IsWake(e.Result)) return;
             Log(string.Format("heard \"{0}\" ({1:0.00}, {2})", e.Result.Text, e.Result.Confidence, e.Result.Grammar.Name));
             ui.Post(_ => Wake(), null);
@@ -125,6 +193,8 @@ static class LightMoonListener
     {
         if (result == null || result.Grammar == null) return false;
         if (result.Grammar.Name == "wake") return result.Confidence >= WakeConfidence;
+        if (ownWake.Length > 0 && Regex.IsMatch(result.Text, @"\b" + Regex.Escape(ownWake).Replace("\\ ", @"\s*") + @"\b", RegexOptions.IgnoreCase)
+            && result.Confidence >= DictationConfidence) return true;
         return Name.IsMatch(result.Text) && result.Confidence >= DictationConfidence;
     }
 
@@ -234,12 +304,13 @@ static class LightMoonListener
 
     static int SelfTest()
     {
-        string[] shouldWake = { "LightMoon", "Hey LightMoon", "Light moon, what's on my list today?" };
+        var shouldWake = new List<string> { "LightMoon", "Hey LightMoon", "Light moon, what's on my list today?" };
+        if (ownWake.Length > 0) shouldWake.Add(ownWake);
         string[] shouldNot = { "I like the moonlight tonight", "Turn on the light please", "What a lovely evening" };
         int wrong = 0;
         foreach (var phrase in shouldWake) if (!Heard(phrase)) { wrong++; Log("self-test MISSED: " + phrase); }
         foreach (var phrase in shouldNot) if (Heard(phrase)) { wrong++; Log("self-test FALSE WAKE: " + phrase); }
-        Log(string.Format("self-test done: {0} of {1} right", shouldWake.Length + shouldNot.Length - wrong, shouldWake.Length + shouldNot.Length));
+        Log(string.Format("self-test done: {0} of {1} right", shouldWake.Count + shouldNot.Length - wrong, shouldWake.Count + shouldNot.Length));
         return wrong;
     }
 
@@ -268,7 +339,7 @@ static class LightMoonListener
     static SpeechRecognitionEngine MakeTestEngine()
     {
         var recognizer = new SpeechRecognitionEngine(new CultureInfo("en-US"));
-        var wake = new Grammar(new GrammarBuilder(new Choices("light moon", "hey light moon", "okay light moon", "hi light moon")));
+        var wake = new Grammar(new GrammarBuilder(new Choices(WakePhrases())));
         wake.Name = "wake";
         recognizer.LoadGrammar(wake);
         var dictation = new DictationGrammar();

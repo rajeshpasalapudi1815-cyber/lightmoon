@@ -1109,6 +1109,7 @@ function openSettings() {
   fields.listenOnOpen.checked = prefs.listenOnOpen;
   fields.followUp.value = prefs.followUp;
   fields.reminderChecks.value = store.settings.get('reminder_checks', 'on');
+  fields.coachStyle.value = store.settings.get('coach_style', 'firm');
   fields.weeklyLetter.value = store.settings.get('weekly_letter', 'on');
   fields.buddyName.value = store.settings.get('buddy_name');
   fields.buddyContact.value = store.settings.get('buddy_contact');
@@ -1358,8 +1359,8 @@ async function testSpokenReminder() {
 // ---------- Wake word (Android app): "LightMoon" opens the app ready to listen ----------
 
 async function paintWakeSettings(message) {
-  $('#wakeBox').hidden = !wakeWord;
-  if (!wakeWord) return;
+  $('#wakeBox').hidden = !wakeWord && !desktop.listenerConnected();
+  if (!wakeWord) return paintDesktopWake();
   const status = await wakeWord.status().catch(() => null);
   if (!status) return void ($('#wakeStatus').textContent = 'Not available');
   const states = { listening: 'On, listening now', paused: 'On, paused while the app is open', heard: 'On, just heard you', starting: 'On, getting ready' };
@@ -1371,6 +1372,69 @@ async function paintWakeSettings(message) {
   if (panelState) $('#panelPref').checked = panelState.usePanel;
   $('#wakeOff').hidden = !status.enabled;
   $('#wakeOpenSelf').hidden = !status.enabled || status.canOpenItself;
+  $('#ownWakeRow').hidden = !wakeWord.setOwnPhrase || !status.modelReady;
+  paintVoice(status);
+}
+
+// "Only my voice" (app 1.20): taught, on or off, how strict, and how close the last wake was.
+async function paintVoice(status) {
+  const voice = status.modelReady && wakeWord.voice ? await wakeWord.voice().catch(() => null) : null;
+  $('#voiceBox').hidden = !voice;
+  if (!voice) return;
+  const last = voice.lastScore >= 0 ? ` Last wake: ${Math.round(voice.lastScore * 100)}% like you.` : '';
+  $('#voiceStatus').textContent = voice.samples
+    ? `${voice.on ? 'On' : 'Off'}: knows your voice from ${voice.samples} samples.${last}`
+    : 'Not taught yet: it wakes for anyone saying your wake phrase.';
+  $('#voiceOn').checked = voice.on;
+  $('#voiceOnRow').hidden = !voice.samples;
+  $('#voiceStrict').value = String(voice.strictness);
+  $('#voiceStrictRow').hidden = !voice.samples;
+  $('#voiceForget').hidden = !voice.samples;
+  $('#voiceTeach').textContent = voice.samples ? 'Teach it again' : 'Teach it my voice';
+}
+
+async function teachVoice() {
+  const button = $('#voiceTeach');
+  button.disabled = true;
+  listener.stopRec(); // the microphone is needed for this
+  listener.capturing = false;
+  const listeners = [
+    await wakeWord.addListener('modelProgress', ({ percent }) => { $('#voiceStatus').textContent = `Getting ready... ${percent}%`; }),
+    await wakeWord.addListener('voiceSample', ({ count }) => { $('#voiceStatus').textContent = `Got it ${count} of 3. ${count < 3 ? 'Again, please.' : ''}`; }),
+  ];
+  try {
+    $('#voiceStatus').textContent = 'Say your wake phrase 3 times, with a pause between, in your normal voice.';
+    await wakeWord.teachVoice();
+    note('LightMoon knows your voice now: the wake phrase only works when you say it.');
+    paintWakeSettings();
+  } catch (err) {
+    $('#voiceStatus').textContent = err.message;
+  } finally {
+    listeners.forEach(l => l.remove());
+    button.disabled = false;
+  }
+}
+
+// On the computer, the LightMoon Listener does the listening (windows/): only the own wake word is set here.
+function paintDesktopWake() {
+  if ($('#wakeBox').hidden) return;
+  $('#wakeStatus').textContent = 'LightMoon Listener is running';
+  for (const id of ['#wakeOn', '#wakeOff', '#wakeOpenSelf', '#panelRow', '#wakePhrases', '#voiceBox']) $(id).hidden = true;
+  $('#ownWakeRow').hidden = false;
+  $('#ownWake').value = store.settings.get('own_wake');
+}
+
+async function saveOwnWake() {
+  const phrase = $('#ownWake').value.trim();
+  $('#ownWakeError').textContent = '';
+  try {
+    if (wakeWord) await wakeWord.setOwnPhrase({ phrase });
+    store.settings.set('own_wake', phrase); // synced: the computer's Listener hears it too
+    if (phrase) note(`"${phrase}" wakes LightMoon now. Say it on its own, wait for the chime, then speak.`);
+    if (wakeWord) paintWakePhrases();
+  } catch (err) {
+    $('#ownWakeError').textContent = err.message;
+  }
 }
 
 // Which phrases wake it (LightMoon 1.10 and later; older apps keep listening for "LightMoon" alone).
@@ -1378,6 +1442,8 @@ async function paintWakePhrases() {
   const list = await wakeWord.phrases?.().then(r => r.phrases, () => null);
   $('#wakePhrases').hidden = !list;
   if (!list) return;
+  const own = list.find(item => item.own);
+  if (document.activeElement !== $('#ownWake')) $('#ownWake').value = own?.phrase ?? '';
   const box = $('#wakePhraseList');
   box.replaceChildren(...list.map(({ id, phrase, on }) => {
     const row = document.createElement('label');
@@ -1391,7 +1457,7 @@ async function paintWakePhrases() {
       }
       await wakeWord.setPhrases({ ids }).catch(err => note(err.message));
     });
-    row.append(id === 'name' ? `${phrase} on its own (wakes more easily, also by mistake)` : phrase, input);
+    row.append(id === 'name' ? `${phrase} on its own (wakes more easily, also by mistake)` : id === 'own' ? `${phrase} (your own)` : phrase, input);
     return row;
   }));
 }
@@ -1607,13 +1673,34 @@ function onPhoneSay({ say }) {
   if (!listener.capturing) speaker.speak(say, { force: true }); // never talk over the user
 }
 
-// True when the app was opened (or brought back) because the phone heard "LightMoon". Opened as the quick
-// panel, it shows as the panel.
-const takeWake = async () => {
+// The wake ({ wake, owner, panel }) when the app was opened (or brought back) because the phone heard its wake
+// phrase, else null. Opened as the quick panel, it shows as the panel.
+let wakeInHand = null; // taken early to check whose voice it was (ownerWoke), kept for the next takeWake
+async function fetchWake() {
+  if (wakeInHand) {
+    const woke = wakeInHand;
+    wakeInHand = null;
+    return woke;
+  }
   const woke = wakeWord ? await wakeWord.takeWake().catch(() => null) : null;
+  return woke?.wake ? woke : null;
+}
+
+const takeWake = async () => {
+  const woke = await fetchWake();
   if (woke?.panel) setPanelMode(true);
-  return Boolean(woke?.wake);
+  return woke;
 };
+
+// Whether the owner's own voice just woke it ("only my voice" on, and the phone itself unlocked, or it wouldn't have
+// opened): then the app's PIN isn't asked for this time. The wake is kept for listenAfterWake.
+async function ownerWoke() {
+  const woke = await fetchWake();
+  wakeInHand = woke;
+  return Boolean(woke?.owner);
+}
+
+const lockDue = () => lock.isEnabled() && !locked && hiddenAt && Date.now() - hiddenAt > RELOCK_AFTER_MS;
 
 // ---------- Quick panel (Android 1.12): a small panel over the app the user is in ----------
 // The phone shows LightMoon see-through (MainActivity); here only the moon, what was heard and the reply show.
@@ -1665,6 +1752,7 @@ new MutationObserver(() => {
 
 function listenAfterWake() {
   takeWake().then(woke => {
+    if (woke && locked) wakeInHand = woke; // for after the PIN
     if (!woke || !started || locked) return;
     speaker.stop();
     listener.autoStarted = true;
@@ -2007,6 +2095,7 @@ function saveSettings(event) {
     if (value !== store.settings.get(key, fallback)) store.settings.set(key, value);
   };
   synced('reminder_checks', fields.reminderChecks.value, 'on');
+  synced('coach_style', fields.coachStyle.value, 'firm');
   synced('weekly_letter', fields.weeklyLetter.value, 'on');
   synced('buddy_name', fields.buddyName.value.trim());
   synced('buddy_contact', fields.buddyContact.value.trim());
@@ -2253,6 +2342,11 @@ function wireUp() {
   $('#phoneTest').addEventListener('click', testSpokenReminder);
   $('#wakeOn').addEventListener('click', turnOnWakeWord);
   $('#wakeOff').addEventListener('click', () => wakeWord.stop().finally(() => paintWakeSettings()));
+  $('#ownWakeSave').addEventListener('click', saveOwnWake);
+  $('#voiceTeach').addEventListener('click', teachVoice);
+  $('#voiceOn').addEventListener('change', () => wakeWord.voice({ on: $('#voiceOn').checked }).finally(() => paintWakeSettings()));
+  $('#voiceStrict').addEventListener('change', () => wakeWord.voice({ strictness: Number($('#voiceStrict').value) }).catch(() => {}));
+  $('#voiceForget').addEventListener('click', () => wakeWord.forgetVoice().finally(() => paintWakeSettings()));
   $('#panelPref').addEventListener('change', () => wakeWord.panel({ on: $('#panelPref').checked }).catch(() => {}));
   $('#panelOpen').addEventListener('click', () => leavePanel({ full: true }));
   $('#panelText').addEventListener('click', () => leavePanel({ full: true }));
@@ -2328,13 +2422,22 @@ function wireUp() {
       paintReading();
       refreshPhone({ force: true });
     }
-    if (!document.hidden) listenAfterWake();
+    if (!document.hidden) {
+      if (started && lockDue()) {
+        ownerWoke().then(owner => {
+          if (owner) hiddenAt = Date.now();
+          else showLock();
+          listenAfterWake();
+        });
+      } else {
+        listenAfterWake();
+      }
+    }
     if (document.hidden && panelMode.on) setPanelMode(false), wakeWord?.leavePanel?.({ full: true }).catch(() => {});
     if (!started) return;
     if (document.hidden) {
       hiddenAt = Date.now();
     } else {
-      if (lock.isEnabled() && !locked && hiddenAt && Date.now() - hiddenAt > RELOCK_AFTER_MS) showLock();
       pollReminders();
     }
     refresh();
@@ -2513,7 +2616,7 @@ function boot() {
     $('#keyField').hidden = state.ai.ready;
     form.elements.userName.focus();
   } else if (lock.isEnabled()) {
-    showLock();
+    ownerWoke().then(owner => (owner ? start({ auto: true }) : showLock()));
   } else if (isNativeApp || soundAllowedWithoutTap()) {
     start({ auto: true });
   } else {

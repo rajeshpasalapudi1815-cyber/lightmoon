@@ -316,14 +316,17 @@ const handlers = {
 
   add_task({ title, due_at, remind_at, announcement, check_in }) {
     const name = toText(title, 'title', 200);
-    const remindAt = toTime(remind_at, 'remind_at', { requireTime: true });
+    const dueAt = toTime(due_at, 'due_at');
+    // Anything with a due time gets a reminder, so LightMoon can chase it: at the due time, or 10 am on a due day.
+    const dueReminder = dueAt && (dueAt.length > 10 ? dueAt : `${dueAt}T10:00`);
+    const remindAt = toTime(remind_at, 'remind_at', { requireTime: true }) ?? (dueReminder > localStamp() ? dueReminder : null);
     if (remindAt && remindAt < localStamp()) {
       throw new Error(`remind_at ${remindAt} is in the past; it is now ${localStamp()}.`);
     }
     const announce = remindAt && announcement ? String(announcement).trim().slice(0, 200) || null : null;
     const question = String(check_in ?? '').trim().slice(0, 160);
     const checkIn = !remindAt || !question ? null : /^(none|no|false)$/i.test(question) ? false : question;
-    tasks.add({ title: name, dueAt: toTime(due_at, 'due_at'), remindAt, announce, checkIn });
+    tasks.add({ title: name, dueAt, remindAt, announce, checkIn });
     if (!remindAt) return `Task added: ${name}`;
     return { text: `Reminder set: ${name}, ${prettyTime(remindAt)}`, calendar: { title: name, at: remindAt } };
   },

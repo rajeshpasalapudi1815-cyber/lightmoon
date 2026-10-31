@@ -47,21 +47,25 @@ check('quiet hours', () => {
 
 check('lines', () => {
   const task = { title: 'Take tablets', check_in: 'did you take your tablets?' };
-  assert.equal(checkInLine(task, { address: 'boss' }, 1), 'Boss, just checking: did you take your tablets?');
-  assert.equal(checkInLine({ title: 'Call mum' }, {}, 2), 'Sir, checking again: did you get to "Call mum"? Tell me when it\'s done, or say snooze.');
-  assert.match(checkInLine(task, { address: 'name', user_name: 'rajesh' }, 3), /^Rajesh, one last check: .* I'll leave it with you after this\.$/);
+  assert.equal(checkInLine(task, { address: 'boss', coach_style: 'gentle' }, 1), 'Boss, just checking: did you take your tablets?');
+  assert.equal(checkInLine({ title: 'Call mum' }, { coach_style: 'gentle' }, 2), 'Sir, checking again: did you get to "Call mum"? Tell me when it\'s done, or say snooze.');
+  assert.match(checkInLine(task, { address: 'name', user_name: 'rajesh', coach_style: 'gentle' }, 8), /^Rajesh, one last check: .* I'll leave it with you after this\.$/);
+  assert.equal(checkInLine(task, { address: 'boss' }, 1), "Boss, time's up: did you take your tablets?", 'firm unless chosen');
+  assert.match(checkInLine(task, {}, 5), /still open\. .* Do it now, or tell me exactly when\.$/);
+  assert.match(checkInLine(task, {}, 8), /it's been a day\. .* I won't let it sit\.$/);
+  assert.equal(checkInLine(task, { address: 'boss', coach_style: 'strict' }, 1), 'Boss. did you take your tablets? I want an answer.');
 });
 
-check('schedule: three check-ins, none for heads-ups, done or answered', () => {
+check('schedule: check-ins for a day, none for heads-ups, done or answered', () => {
   const base = { id: 'aaa111', title: 'x', remind_at: localStamp(new Date(2026, 9, 30, 10, 0)) };
-  assert.deepEqual(checkInsOf(base).map(c => c.id), ['aaa111-c1', 'aaa111-c2', 'aaa111-c3']);
+  assert.deepEqual(checkInsOf(base).map(c => c.n), [1, 2, 3, 4, 5, 6, 7, 8]); // 10:15 ... 22:00, then 10:00 next day
   assert.equal(checkInsOf({ ...base, check_in: false }).length, 0);
   assert.equal(checkInsOf({ ...base, done: true }).length, 0);
   assert.equal(checkInsOf({ ...base, answered: true }).length, 0);
   assert.equal(checkInsOf(base, { reminder_checks: 'off' }).length, 0);
-  assert.deepEqual(checkInsOf({ ...base, checked_in: 2 }).map(c => c.n), [3]);
-  const late = { ...base, remind_at: localStamp(new Date(2026, 9, 30, 22, 30)) }; // 22:45 ok, 23:15 and 00:00 quiet
-  assert.deepEqual(checkInsOf(late).map(c => c.n), [1]);
+  assert.deepEqual(checkInsOf({ ...base, checked_in: 6 }).map(c => c.n), [7, 8]);
+  const late = { ...base, remind_at: localStamp(new Date(2026, 9, 30, 22, 30)) }; // 22:45 ok, 23:15 to 06:30 quiet, then 10:30 and 22:30
+  assert.deepEqual(checkInsOf(late).map(c => c.n), [1, 7, 8]);
 });
 
 if (daytime) {
@@ -75,7 +79,7 @@ if (daytime) {
     store.tasks.get(task.id).checked_in = 0; // as if it had been announced on time
     const checks = store.tasks.takeDueCheckIns();
     assert.equal(checks.length, 1);
-    assert.equal(checks[0].say, 'Boss, just checking: did you take your tablets?');
+    assert.equal(checks[0].say, "Boss, time's up: did you take your tablets?");
     assert.equal(store.tasks.takeDueCheckIns().length, 0, 'said once');
     assert.equal(store.tasks.waitingForAnswer().length, 1);
   });
@@ -96,7 +100,7 @@ if (daytime) {
     assert.equal(snoozed.reminded, false);
     assert.equal(snoozed.checked_in, 0);
     assert.ok(snoozed.updated_at > before);
-    assert.equal(store.tasks.alertsSince(Date.now()).filter(a => parseAlertId(a.id).taskId === task.id).length, 4); // ring + 3
+    assert.equal(store.tasks.alertsSince(Date.now()).filter(a => parseAlertId(a.id).taskId === task.id).length, 8); // ring + 7 (the one after midnight is quiet)
     store.tasks.stopCheckingIn(task.id);
     assert.equal(store.tasks.alertsSince(Date.now()).filter(a => parseAlertId(a.id).taskId === task.id).length, 1); // ring only
     store.tasks.complete(task.id);

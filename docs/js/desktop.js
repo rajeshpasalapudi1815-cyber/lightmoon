@@ -27,6 +27,7 @@ let again = false;
 let connected = false;
 let sent = '';
 let sentAt = 0;
+let wakeSent = null; // the own wake word last passed on to the Listener
 
 // `onAnswer(taskId, action, { until })` applies Done or Snooze pressed on the orb.
 export function start(handlers) {
@@ -53,11 +54,13 @@ async function talk() {
   clearTimeout(timer);
   try {
     await sendAlerts();
+    await sendWake();
     await takeAnswers();
     connected = true;
   } catch {
     connected = false;
     sent = ''; // tell it everything once it's back
+    wakeSent = null;
   }
   running = false;
   timer = setTimeout(talk, again ? 0 : connected ? POLL_MS : AWAY_POLL_MS);
@@ -87,6 +90,17 @@ async function sendAlerts() {
   sent = json;
   sentAt = Date.now();
 }
+
+// The user's own wake word ("Sunshine", set in Settings → Voice, synced): the Listener listens for it too.
+// An older Listener without it answers 404, which is fine.
+async function sendWake() {
+  const phrase = store.settings.get('own_wake');
+  if (phrase === wakeSent) return;
+  await call('POST', '/wake', { phrase }).catch(() => {});
+  wakeSent = phrase;
+}
+
+export const listenerConnected = () => connected;
 
 // A snooze counts from when it was pressed, even if LightMoon only hears of it later.
 async function takeAnswers() {

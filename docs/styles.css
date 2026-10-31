@@ -112,6 +112,7 @@ small { color: var(--muted); }
 .btn-ghost:hover { color: var(--text); border-color: var(--cyan-dim); }
 
 .form-error { color: var(--danger); font-size: 13px; margin: 0; min-height: 1em; }
+.card-note.error-text { color: var(--danger); }
 .muted { color: var(--muted); font-size: 13px; margin: 0; }
 
 /* ---------- Arc-reactor core ---------- */

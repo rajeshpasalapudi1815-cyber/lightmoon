@@ -27,6 +27,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.vosk.Model;
 import org.vosk.Recognizer;
+import org.vosk.SpeakerModel;
 import org.vosk.android.RecognitionListener;
 import org.vosk.android.SpeechService;
 
@@ -43,6 +44,9 @@ public class WakeWordService extends Service implements RecognitionListener {
     private static final float SAMPLE_RATE = 16000f;
     private static final long REARM_AFTER_MS = 4000;
     private static final long RETRY_AFTER_ERROR_MS = 5000;
+    // How sure the recogniser must be of every word of the wake phrase (Vosk's word confidence, 0 to 1). Speech that
+    // only sounds a bit like it gets forced onto the phrase with lower confidence.
+    private static final double MIN_WORD_CONFIDENCE = 0.85;
 
     static volatile WakeWordService running;
     // "starting", "listening", "paused" (LightMoon is open), "heard" (just woke); what the notification and tile show.
@@ -52,6 +56,7 @@ public class WakeWordService extends Service implements RecognitionListener {
     private final ExecutorService loader = Executors.newSingleThreadExecutor();
     private final Runnable refresh = this::update;
     private Model model;
+    private SpeakerModel speaker; // "only my voice" (VoicePrint)
     private Recognizer recognizer;
     private SpeechService speech;
     private PowerManager.WakeLock awake;
@@ -92,8 +97,10 @@ public class WakeWordService extends Service implements RecognitionListener {
     private void loadModel() {
         try {
             Model loaded = new Model(WakeModel.dir(this).getAbsolutePath());
+            SpeakerModel voices = loadSpeaker();
             main.post(() -> {
                 model = loaded;
+                speaker = voices;
                 update();
             });
         } catch (IOException | RuntimeException err) {
@@ -157,6 +164,29 @@ public class WakeWordService extends Service implements RecognitionListener {
         main.post(this::restartListening);
     }
 
+    private SpeakerModel loadSpeaker() {
+        if (!VoicePrint.on(this) || !WakeModel.ready(this, WakeModel.SPEAKER)) return null;
+        try {
+            return new SpeakerModel(WakeModel.dir(this, WakeModel.SPEAKER).getAbsolutePath());
+        } catch (IOException | RuntimeException err) {
+            return null; // without it, "only my voice" refuses every wake (see heard)
+        }
+    }
+
+    // "Only my voice" was switched on or off, or taught again: load the speaker model if it's now needed.
+    static void voiceChanged() {
+        WakeWordService service = running;
+        if (service == null || service.model == null) return;
+        service.loader.execute(() -> {
+            SpeakerModel voices = service.speaker != null ? service.speaker : service.loadSpeaker();
+            service.main.post(() -> {
+                service.speaker = voices;
+                service.stopListening();
+                service.update();
+            });
+        });
+    }
+
     // The wake phrases changed in Settings: listen for the new ones.
     static void phrasesChanged() {
         WakeWordService service = running;
@@ -182,6 +212,8 @@ public class WakeWordService extends Service implements RecognitionListener {
     private void startListening() {
         try {
             recognizer = new Recognizer(model, SAMPLE_RATE, waitingToSend() ? WakePhrases.grammar(phrases, WakePhrases.SEND) : WakePhrases.grammar(phrases));
+            recognizer.setWords(true); // each word's confidence (heard)
+            if (speaker != null && VoicePrint.on(this)) recognizer.setSpeakerModel(speaker);
             speech = new SpeechService(recognizer, SAMPLE_RATE);
             speech.startListening(this);
             holdAwake(true);
@@ -215,9 +247,9 @@ public class WakeWordService extends Service implements RecognitionListener {
         }
     }
 
+    // Half-heard words never wake it: only a finished phrase, which can be checked word by word and voice by voice.
     @Override
     public void onPartialResult(String hypothesis) {
-        if (heard(hypothesis, "partial")) wake();
     }
 
     @Override
@@ -244,13 +276,30 @@ public class WakeWordService extends Service implements RecognitionListener {
         update();
     }
 
+    // A wake phrase, said clearly (every word confident), and, with "only my voice" on, in the owner's voice.
     private boolean heard(String hypothesis, String field) {
         try {
-            return WakePhrases.matches(new JSONObject(hypothesis).optString(field), phrases);
+            JSONObject result = new JSONObject(hypothesis);
+            if (!WakePhrases.matches(result.optString(field), phrases)) return false;
+            org.json.JSONArray words = result.optJSONArray("result");
+            if (words != null) {
+                for (int i = 0; i < words.length(); i++) {
+                    JSONObject word = words.optJSONObject(i);
+                    if (word != null && word.optDouble("conf", 1) < MIN_WORD_CONFIDENCE) return false;
+                }
+            }
+            ownerHeard = false;
+            if (VoicePrint.on(this)) {
+                if (!VoicePrint.isOwner(this, VoicePrint.from(result))) return false;
+                ownerHeard = true;
+            }
+            return true;
         } catch (JSONException err) {
             return false;
         }
     }
+
+    private boolean ownerHeard; // the last wake was checked against the owner's voice print
 
     private void wake() {
         long now = SystemClock.elapsedRealtime();
@@ -260,7 +309,7 @@ public class WakeWordService extends Service implements RecognitionListener {
         stopListening();
         show("heard");
         chime();
-        WakeWordPlugin.wakeUp(this);
+        WakeWordPlugin.wakeUp(this, ownerHeard);
         main.postDelayed(refresh, REARM_AFTER_MS);
     }
 
@@ -332,6 +381,10 @@ public class WakeWordService extends Service implements RecognitionListener {
         if (model != null) {
             model.close();
             model = null;
+        }
+        if (speaker != null) {
+            speaker.close();
+            speaker = null;
         }
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
         super.onDestroy();

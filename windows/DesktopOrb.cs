@@ -690,6 +690,7 @@ class OrbBridge
     readonly SynchronizationContext ui;
     readonly Action<string> log;
     TcpListener server;
+    public Action<string> OnWakePhrase; // the user's own wake word, passed on by LightMoon (POST /wake)
 
     public OrbBridge(DesktopOrb orb, SynchronizationContext ui, Action<string> log)
     {
@@ -824,6 +825,17 @@ class OrbBridge
             Exception failed = null;
             ui.Send(_ => { try { orb.TakeAlerts(list); } catch (Exception err) { failed = err; } }, null);
             Send(stream, failed == null ? 204 : 400, origin, null, false);
+            return;
+        }
+        if (method == "POST" && path == "/wake")
+        {
+            object given;
+            try { given = Json.DeserializeObject(Encoding.UTF8.GetString(body)); }
+            catch (Exception) { Send(stream, 400, origin, null, false); return; }
+            var fields = given as Dictionary<string, object>;
+            string phrase = fields != null && fields.ContainsKey("phrase") ? Convert.ToString(fields["phrase"]) : "";
+            if (OnWakePhrase != null) ui.Send(_ => OnWakePhrase(phrase ?? ""), null);
+            Send(stream, 204, origin, null, false);
             return;
         }
         if (method == "GET" && path == "/answers")

@@ -35,6 +35,8 @@ public class WakeWordPlugin extends Plugin {
 
     // Set when "LightMoon" was heard; the app takes it when it opens and starts listening.
     static volatile boolean pendingWake;
+    // ... and the voice was checked as the owner's ("only my voice"): the app skips its own PIN for this wake.
+    static volatile boolean pendingOwner;
 
     @PluginMethod
     public void status(PluginCall call) {
@@ -124,9 +126,150 @@ public class WakeWordPlugin extends Plugin {
         call.resolve(phraseList());
     }
 
+    // { phrase }: their own wake word ("Sunshine"), switched on; an empty phrase removes it. Only words the offline
+    // recogniser knows can be heard, so others are refused with a message saying which.
+    @PluginMethod
+    public void setOwnPhrase(PluginCall call) {
+        String given = call.getString("phrase", "");
+        String phrase = WakePhrases.tidy(given);
+        if (!given.trim().isEmpty() && phrase.isEmpty()) {
+            call.reject("Use one to four plain words, like Sunshine.");
+            return;
+        }
+        if (!phrase.isEmpty() && WakeModel.ready(getContext()) && !WakeModel.knows(getContext(), phrase)) {
+            call.reject("LightMoon's offline ears don't know \"" + phrase + "\". Try another word or two, like Sun Shine or Hey Buddy.");
+            return;
+        }
+        WakePhrases.setOwn(getContext(), phrase);
+        WakeWordService.phrasesChanged();
+        call.resolve(phraseList());
+    }
+
+    // ---------- Only my voice (VoicePrint) ----------
+
+    // { on?, strictness? (0 relaxed, 1 normal, 2 strict) } -> { on, samples, wanted, strictness, lastScore }.
+    @PluginMethod
+    public void voice(PluginCall call) {
+        Boolean on = call.getBoolean("on");
+        Integer strictness = call.getInt("strictness");
+        if (on != null) VoicePrint.setOn(getContext(), on);
+        if (strictness != null) VoicePrint.setStrictness(getContext(), strictness);
+        if (on != null || strictness != null) WakeWordService.voiceChanged();
+        call.resolve(voiceStatus());
+    }
+
+    @PluginMethod
+    public void forgetVoice(PluginCall call) {
+        VoicePrint.forget(getContext());
+        WakeWordService.voiceChanged();
+        call.resolve(voiceStatus());
+    }
+
+    private JSObject voiceStatus() {
+        JSObject status = new JSObject();
+        status.put("on", VoicePrint.on(getContext()));
+        status.put("samples", VoicePrint.samples(getContext()));
+        status.put("wanted", VoicePrint.SAMPLES_WANTED);
+        status.put("strictness", VoicePrint.strictness(getContext()));
+        status.put("lastScore", VoicePrint.lastScore(getContext()));
+        return status;
+    }
+
+    private volatile boolean teaching;
+
+    // Learns the owner's voice: they say a wake phrase SAMPLES_WANTED times while LightMoon is open (the background
+    // listener is paused then, so the microphone is free). Downloads the speaker model first if needed, reporting
+    // "modelProgress"; each phrase heard reports "voiceSample" { count }. Then "only my voice" is on.
+    @PluginMethod
+    public void teachVoice(PluginCall call) {
+        if (getPermissionState("microphone") != PermissionState.GRANTED) {
+            call.reject("LightMoon needs the microphone to learn your voice.");
+            return;
+        }
+        if (!WakeModel.ready(getContext())) {
+            call.reject("Turn on the wake word first.");
+            return;
+        }
+        if (teaching) {
+            call.reject("Already listening: say your wake word.");
+            return;
+        }
+        teaching = true;
+        new Thread(() -> {
+            org.vosk.Model model = null;
+            org.vosk.SpeakerModel voices = null;
+            org.vosk.Recognizer recognizer = null;
+            org.vosk.android.SpeechService speech = null;
+            try {
+                WakeModel.downloadSpeaker(getContext(), percent -> {
+                    JSObject progress = new JSObject();
+                    progress.put("percent", percent);
+                    notifyListeners("modelProgress", progress);
+                });
+                java.util.List<String> ids = WakePhrases.chosen(getContext());
+                model = new org.vosk.Model(WakeModel.dir(getContext()).getAbsolutePath());
+                voices = new org.vosk.SpeakerModel(WakeModel.dir(getContext(), WakeModel.SPEAKER).getAbsolutePath());
+                recognizer = new org.vosk.Recognizer(model, 16000f, WakePhrases.grammar(ids));
+                recognizer.setSpeakerModel(voices);
+                java.util.List<double[]> prints = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+                java.util.concurrent.CountDownLatch enough = new java.util.concurrent.CountDownLatch(1);
+                org.vosk.android.RecognitionListener collect = new org.vosk.android.RecognitionListener() {
+                    private void take(String hypothesis) {
+                        try {
+                            org.json.JSONObject result = new org.json.JSONObject(hypothesis);
+                            double[] print = VoicePrint.from(result);
+                            if (print == null || !WakePhrases.matches(result.optString("text"), ids)) return;
+                            prints.add(print);
+                            JSObject sample = new JSObject();
+                            sample.put("count", prints.size());
+                            notifyListeners("voiceSample", sample);
+                            if (prints.size() >= VoicePrint.SAMPLES_WANTED) enough.countDown();
+                        } catch (org.json.JSONException err) {
+                            // Not a result.
+                        }
+                    }
+                    @Override public void onPartialResult(String hypothesis) {}
+                    @Override public void onResult(String hypothesis) { take(hypothesis); }
+                    @Override public void onFinalResult(String hypothesis) { take(hypothesis); }
+                    @Override public void onError(Exception err) { enough.countDown(); }
+                    @Override public void onTimeout() { enough.countDown(); }
+                };
+                speech = new org.vosk.android.SpeechService(recognizer, 16000f);
+                speech.startListening(collect);
+                enough.await(40, java.util.concurrent.TimeUnit.SECONDS);
+                speech.stop();
+                if (prints.size() < VoicePrint.SAMPLES_WANTED) {
+                    call.reject("Heard your wake word " + prints.size() + " of " + VoicePrint.SAMPLES_WANTED + " times. Try again somewhere quiet, a little closer.");
+                    return;
+                }
+                VoicePrint.forget(getContext());
+                for (double[] print : prints) VoicePrint.add(getContext(), print);
+                VoicePrint.setOn(getContext(), true);
+                WakeWordService.voiceChanged();
+                call.resolve(voiceStatus());
+            } catch (Exception err) {
+                call.reject("Couldn't learn your voice. Check the internet connection (it downloads 13 MB once) and try again.");
+            } finally {
+                if (speech != null) speech.shutdown();
+                if (recognizer != null) recognizer.close();
+                if (voices != null) voices.close();
+                if (model != null) model.close();
+                teaching = false;
+            }
+        }, "lightmoon-teach-voice").start();
+    }
+
     private JSObject phraseList() {
         java.util.List<String> on = WakePhrases.chosen(getContext());
         com.getcapacitor.JSArray list = new com.getcapacitor.JSArray();
+        if (!WakePhrases.own.isEmpty()) {
+            JSObject item = new JSObject();
+            item.put("id", WakePhrases.OWN);
+            item.put("phrase", WakePhrases.spoken(WakePhrases.own));
+            item.put("on", on.contains(WakePhrases.OWN));
+            item.put("own", true);
+            list.put(item);
+        }
         for (java.util.Map.Entry<String, String> choice : WakePhrases.CHOICES.entrySet()) {
             JSObject item = new JSObject();
             item.put("id", choice.getKey());
@@ -194,8 +337,10 @@ public class WakeWordPlugin extends Plugin {
     public void takeWake(PluginCall call) {
         JSObject result = new JSObject();
         result.put("wake", pendingWake);
+        result.put("owner", pendingWake && pendingOwner);
         result.put("panel", MainActivity.panel);
         pendingWake = false;
+        pendingOwner = false;
         call.resolve(result);
     }
 
@@ -234,8 +379,9 @@ public class WakeWordPlugin extends Plugin {
 
     // "LightMoon" was heard: open the app ready to listen. A locked phone asks to be unlocked first,
     // so nobody can talk to LightMoon from the lock screen.
-    static void wakeUp(Context context) {
+    static void wakeUp(Context context, boolean owner) {
         pendingWake = true;
+        pendingOwner = owner;
         KeyguardManager keyguard = context.getSystemService(KeyguardManager.class);
         Class<?> screen = keyguard.isKeyguardLocked() ? UnlockActivity.class : MainActivity.class;
         Intent open = new Intent(context, screen).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(MainActivity.EXTRA_PANEL, usePanel(context));
