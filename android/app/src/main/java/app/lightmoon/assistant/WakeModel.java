@@ -58,6 +58,7 @@ final class WakeModel {
         if (known == null) {
             known = new java.util.HashSet<>();
             File list = new File(dir(context), "graph/words.txt");
+            if (!list.exists()) return inGrammar(context, phrase); // the small model has no word list file
             try (java.io.BufferedReader in = new java.io.BufferedReader(new java.io.FileReader(list))) {
                 for (String line; (line = in.readLine()) != null; ) {
                     int space = line.indexOf(' ');
@@ -70,6 +71,41 @@ final class WakeModel {
         }
         for (String word : phrase.split(" ")) if (!known.contains(word)) return false;
         return true;
+    }
+
+    // The small model keeps its words inside graph/Gr.fst (its symbol table, one word per entry): a word it knows
+    // is in there as a whole, between non-letters. Read once per check, in chunks.
+    private static boolean inGrammar(Context context, String phrase) {
+        String[] wanted = phrase.split(" ");
+        boolean[] found = new boolean[wanted.length];
+        File grammar = new File(dir(context), "graph/Gr.fst");
+        int overlap = 64;
+        byte[] buffer = new byte[1 << 20];
+        try (InputStream in = new java.io.FileInputStream(grammar)) {
+            int kept = 0;
+            for (int read; (read = in.read(buffer, kept, buffer.length - kept)) > 0; ) {
+                int length = kept + read;
+                for (int i = 0; i < wanted.length; i++) if (!found[i]) found[i] = containsWord(buffer, length, wanted[i]);
+                kept = Math.min(overlap, length);
+                System.arraycopy(buffer, length - kept, buffer, 0, kept);
+            }
+        } catch (IOException err) {
+            return true; // can't tell: let it try
+        }
+        for (boolean ok : found) if (!ok) return false;
+        return true;
+    }
+
+    private static boolean containsWord(byte[] data, int length, String word) {
+        byte[] target = word.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        outer:
+        for (int i = 0; i + target.length <= length; i++) {
+            for (int j = 0; j < target.length; j++) if (data[i + j] != target[j]) continue outer;
+            boolean before = i == 0 || !Character.isLetter(data[i - 1]);
+            boolean after = i + target.length < length && !Character.isLetter(data[i + target.length]); // at the end: the next chunk decides
+            if (before && after) return true;
+        }
+        return false;
     }
 
     // Downloads and unpacks one of Vosk's models; `check` is a file that only a complete model has.
