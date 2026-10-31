@@ -302,6 +302,18 @@ function findGoal(id) {
 
 // Each handler returns a short summary (shown as a chip under the reply), or an object with extras:
 // `result` (what the model is told, when it differs from the chip) and `calendar` (a reminder to export).
+// Whether their latest message asks for a task or reminder, says yes to one, or is one of their routines (whose
+// steps may add tasks). The AI's own suggestions never go on their list by themselves.
+const ASKS_FOR_TASK = /\bremind(?:er|ing)? me\b|\b(?:add|create|make|set|schedule|put|new)\b[^.?!]*\b(?:tasks?|to-?dos?|reminders?|alarms?)\b|don'?t let me forget|\bchase me\b/i;
+const SAYS_YES = /\b(?:yes|yeah|yep|yup|ok(?:ay)?|sure|do it|go ahead|add it|set it|haan|ji|avunu|sare|sari|pettu)\b/i;
+function askedForTask() {
+  const said = String(chat.recent(4).filter(m => m.role === 'user').at(-1)?.content ?? '');
+  if (said.startsWith('(Automatic message')) return false; // a briefing or letter: nobody asked for anything
+  if (ASKS_FOR_TASK.test(said) || SAYS_YES.test(said)) return true;
+  const lower = said.toLowerCase();
+  return routines.list().some(r => lower.includes(r.trigger.toLowerCase()));
+}
+
 const handlers = {
   remember({ content, category }) {
     const fact = toText(content, 'content', 300);
@@ -316,6 +328,7 @@ const handlers = {
 
   add_task({ title, due_at, remind_at, announcement, check_in }) {
     const name = toText(title, 'title', 200);
+    if (!askedForTask()) throw new Error('They did not ask for a task or reminder. Ask them first ("Shall I add that?"), and add it only after their yes.');
     const dueAt = toTime(due_at, 'due_at');
     // Anything with a due time gets a reminder, so LightMoon can chase it: at the due time, or 10 am on a due day.
     const dueReminder = dueAt && (dueAt.length > 10 ? dueAt : `${dueAt}T10:00`);
