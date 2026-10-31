@@ -46,7 +46,6 @@ const ASKED_NOTIFICATIONS_KEY = 'assistant.askedNotifications';
 const REMINDER_POLL_MS = 15_000;
 const LATE_REMINDER_MINUTES = 5;
 const SNOOZE_MINUTES = 10;
-const RELOCK_AFTER_MS = 3 * 60_000; // with the app lock on, ask again after this long in the background
 const MAX_SHARED_CHARS = 6000;
 const FIRST_WORDS_WAIT_MS = 8000; // stop listening if nothing is said for this long
 const MAX_MIC_RESTARTS = 30; // some phones stop the mic after every pause; keep it going, within reason
@@ -1381,7 +1380,7 @@ async function paintVoice(status) {
   const voice = status.modelReady && wakeWord.voice ? await wakeWord.voice().catch(() => null) : null;
   $('#voiceBox').hidden = !voice;
   if (!voice) return;
-  const last = voice.lastScore >= 0 ? ` Last wake: ${Math.round(voice.lastScore * 100)}% like you.` : '';
+  const last = voice.lastScore >= 0 ? ` The last time it heard your wake phrase, the voice was ${Math.round(voice.lastScore * 100)}% like yours.` : '';
   $('#voiceStatus').textContent = voice.samples
     ? `${voice.on ? 'On' : 'Off'}: knows your voice from ${voice.samples} samples.${last}`
     : 'Not taught yet: it wakes for anyone saying your wake phrase.';
@@ -1405,6 +1404,7 @@ async function teachVoice() {
   try {
     $('#voiceStatus').textContent = 'Say your wake phrase 3 times, with a pause between, in your normal voice.';
     await wakeWord.teachVoice();
+    await listenForWake();
     note('LightMoon knows your voice now: the wake phrase only works when you say it.');
     paintWakeSettings();
   } catch (err) {
@@ -1424,13 +1424,21 @@ function paintDesktopWake() {
   $('#ownWake').value = store.settings.get('own_wake');
 }
 
+// Listening for the wake phrase switched on, if it was off (the voice model is there by now).
+async function listenForWake() {
+  const status = await wakeWord.status().catch(() => null);
+  if (status?.modelReady && !status.enabled) await wakeWord.start().catch(err => note(err.message));
+  paintWakeSettings();
+}
+
 async function saveOwnWake() {
   const phrase = $('#ownWake').value.trim();
   $('#ownWakeError').textContent = '';
   try {
     if (wakeWord) await wakeWord.setOwnPhrase({ phrase });
     store.settings.set('own_wake', phrase); // synced: the computer's Listener hears it too
-    if (phrase) note(`"${phrase}" wakes LightMoon now. Say it on its own, wait for the chime, then speak.`);
+    if (phrase && wakeWord) await listenForWake();
+    if (phrase) note(`"${phrase}" wakes LightMoon now. Leave the app, say it on its own, wait for the chime, then speak.`);
     if (wakeWord) paintWakePhrases();
   } catch (err) {
     $('#ownWakeError').textContent = err.message;
@@ -1700,7 +1708,7 @@ async function ownerWoke() {
   return Boolean(woke?.owner);
 }
 
-const lockDue = () => lock.isEnabled() && !locked && hiddenAt && Date.now() - hiddenAt > RELOCK_AFTER_MS;
+const lockDue = () => lock.isEnabled() && !locked && hiddenAt && Date.now() - hiddenAt > lock.relockAfterMs();
 
 // ---------- Quick panel (Android 1.12): a small panel over the app the user is in ----------
 // The phone shows LightMoon see-through (MainActivity); here only the moon, what was heard and the reply show.
@@ -1969,6 +1977,8 @@ async function paintLockSettings() {
   $('#newPin').value = '';
   $('#newPin2').value = '';
   $('#lockBio').hidden = !enabled || lock.hasBiometric() || !(await lock.biometricAvailable());
+  $('#relockRow').hidden = !enabled;
+  $('#relockAfter').value = String(lock.relockMinutes());
 }
 
 async function saveNewPin() {
@@ -2343,6 +2353,7 @@ function wireUp() {
   $('#wakeOn').addEventListener('click', turnOnWakeWord);
   $('#wakeOff').addEventListener('click', () => wakeWord.stop().finally(() => paintWakeSettings()));
   $('#ownWakeSave').addEventListener('click', saveOwnWake);
+  $('#relockAfter').addEventListener('change', () => lock.setRelockMinutes(Number($('#relockAfter').value)));
   $('#voiceTeach').addEventListener('click', teachVoice);
   $('#voiceOn').addEventListener('change', () => wakeWord.voice({ on: $('#voiceOn').checked }).finally(() => paintWakeSettings()));
   $('#voiceStrict').addEventListener('change', () => wakeWord.voice({ strictness: Number($('#voiceStrict').value) }).catch(() => {}));

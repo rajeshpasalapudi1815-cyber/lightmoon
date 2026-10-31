@@ -46,7 +46,7 @@ public class WakeWordService extends Service implements RecognitionListener {
     private static final long RETRY_AFTER_ERROR_MS = 5000;
     // How sure the recogniser must be of every word of the wake phrase (Vosk's word confidence, 0 to 1). Speech that
     // only sounds a bit like it gets forced onto the phrase with lower confidence.
-    private static final double MIN_WORD_CONFIDENCE = 0.85;
+    private static final double MIN_WORD_CONFIDENCE = 0.75; // 0.85 risked missing non-native accents
 
     static volatile WakeWordService running;
     // "starting", "listening", "paused" (LightMoon is open), "heard" (just woke); what the notification and tile show.

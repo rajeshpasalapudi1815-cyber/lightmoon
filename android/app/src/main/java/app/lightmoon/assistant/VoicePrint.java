@@ -14,9 +14,11 @@ final class VoicePrint {
     private static final String PREFS = "lightmoon.voice";
     static final int SAMPLES_WANTED = 3;
     private static final int MAX_SAMPLES = 8;
-    // How alike two voice prints must be (cosine similarity), by strictness. Vosk's prints of one person's short
-    // phrases usually land well above 0.5 and other people's well below; "relaxed" for noisy places.
-    private static final double[] THRESHOLDS = { 0.35, 0.45, 0.55 }; // relaxed, normal, strict
+    // How alike two voice prints must be (cosine similarity), by strictness. One person's short wake phrase scored
+    // 0.45 to 0.76 against their own other samples (the first phone, 1 Nov), so "normal" sits under that.
+    private static final double[] THRESHOLDS = { 0.30, 0.40, 0.50 }; // relaxed, normal, strict
+    // A wake this clearly the owner's becomes a sample too, so it keeps up with how they sound in different places.
+    private static final double LEARN_ABOVE = 0.15;
 
     private VoicePrint() {}
 
@@ -98,7 +100,9 @@ final class VoicePrint {
     static boolean isOwner(Context context, double[] print) {
         double score = likeness(context, print);
         prefs(context).edit().putFloat("last", (float) score).apply();
-        return score >= THRESHOLDS[strictness(context)];
+        double needed = THRESHOLDS[strictness(context)];
+        if (score >= needed + LEARN_ABOVE) add(context, print);
+        return score >= needed;
     }
 
     // The last wake's likeness (for Settings, to see how close it was), or -1.

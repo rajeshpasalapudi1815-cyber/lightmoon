@@ -786,9 +786,17 @@
               <label>Repeat the PIN <input id="newPin2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="new-password"></label>
               <button type="button" id="savePin" class="btn-ghost">Save PIN</button>
             </div>
+            <label id="relockRow" hidden>Ask again after I've been away
+              <select id="relockAfter">
+                <option value="3">3 minutes</option>
+                <option value="30">30 minutes</option>
+                <option value="120">2 hours</option>
+                <option value="0">Only when LightMoon was closed</option>
+              </select>
+            </label>
             <details class="help">
               <summary>How it works</summary>
-              <p>Asks for your PIN or fingerprint when the app opens and after a few minutes away. It keeps others out of the app; it doesn't encrypt your data.</p>
+              <p>Asks for your PIN or fingerprint when the app opens and after the time you choose away. When your own voice wakes it ("Only my voice" in Voice settings) on an unlocked phone, it doesn't ask. It keeps others out of the app; it doesn't encrypt your data.</p>
             </details>
           </div>
         </section>

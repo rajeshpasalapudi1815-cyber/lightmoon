@@ -22,6 +22,14 @@ const toBase64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const fromBase64 = text => Uint8Array.from(atob(text), c => c.charCodeAt(0));
 
 export const isEnabled = () => Boolean(read()?.pinHash);
+
+// How long away before it asks again, in minutes (0: only when the app was closed). Per device.
+export const RELOCK_CHOICES = [3, 30, 120, 0];
+export const relockMinutes = () => (RELOCK_CHOICES.includes(read()?.relockMinutes) ? read().relockMinutes : 30);
+export const relockAfterMs = () => (relockMinutes() ? relockMinutes() * 60_000 : Infinity);
+export function setRelockMinutes(minutes) {
+  if (RELOCK_CHOICES.includes(minutes)) write({ ...read(), relockMinutes: minutes });
+}
 export const hasBiometric = () => Boolean(read()?.credentialId || (deviceUnlock && read()?.deviceUnlock));
 
 export async function biometricAvailable() {
