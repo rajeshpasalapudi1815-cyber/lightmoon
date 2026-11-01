@@ -587,7 +587,8 @@ export const phoneHandlers = {
     if (['play', 'toggle'].includes(action) && !String(app ?? '').trim() && phone.musicApps) {
       const { apps = [] } = await phone.musicApps().catch(() => ({}));
       if (apps.length > 1) {
-        throw new Error(`They have ${apps.join(', ')}. Ask which one in a short question ("${apps.slice(0, 2).join(' or ')}?") and end your reply; then call again with app.`);
+        const choices = `${apps.slice(0, -1).join(', ')} or ${apps.at(-1)}`;
+        throw new Error(`They have ${apps.join(', ')}. Ask which one in a short question ("${choices}?") and end your reply; then call again with app.`);
       }
     }
     const out =(await call(phone.media({ action, query, app: String(app ?? '') }))) ?? {};
