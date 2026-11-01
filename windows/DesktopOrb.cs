@@ -691,6 +691,7 @@ class OrbBridge
     readonly Action<string> log;
     TcpListener server;
     public Action<string> OnWakePhrase; // the user's own wake word, passed on by LightMoon (POST /wake)
+    readonly Dictionary<string, DateTime> seenRequests = new Dictionary<string, DateTime>();
 
     public OrbBridge(DesktopOrb orb, SynchronizationContext ui, Action<string> log)
     {
@@ -818,6 +819,17 @@ class OrbBridge
 
         string query = path.Contains("?") ? path.Substring(path.IndexOf('?') + 1) : "";
         path = path.Split('?')[0];
+        // Each kind of request once in a while, so the log shows what the LightMoon page is doing.
+        string kind = method + " " + path;
+        DateTime last;
+        lock (seenRequests)
+        {
+            if (!seenRequests.TryGetValue(kind, out last) || DateTime.Now - last > TimeSpan.FromMinutes(10))
+            {
+                seenRequests[kind] = DateTime.Now;
+                log("bridge: " + kind + (origin == null ? " (no origin)" : ""));
+            }
+        }
         if (method == "OPTIONS") { Send(stream, 204, origin, null, true); return; }
         // LightMoon kept in the tray (TrayMode.cs): waiting for a wake, what it's doing, and asking for its window.
         if (path == "/events" || path == "/state" || path == "/show")
