@@ -762,8 +762,11 @@ const listener = {
 
 // Conversation mode: after a spoken request, listen for the answer once the reply has been said, without a
 // tap or the wake word ("Call Mom?" "Yes."). If nothing is said, listening stops on its own after a moment.
+// On the computer a spoken conversation keeps going: after each reply it listens again, until they stop talking
+// (nothing said for a few seconds ends it), so one "LightMoon" is enough for several questions.
 function shouldFollowUp(reply) {
   if (!prefs.speak || prefs.followUp === 'off') return false;
+  if (!isNativeApp) return true;
   return prefs.followUp === 'always' || /\?["')\]]*\s*$/.test(String(reply ?? '').trim());
 }
 
@@ -783,7 +786,9 @@ async function send(text, { context = null, byVoice = false, heardAlso = [] } = 
     const out = await chat(text, { onText: live.push, heardAlso, shared: context ?? '' });
     live.done(out);
     applyState();
-    if (byVoice && !out.error && (shouldFollowUp(out.reply) || awaitingYes())) listenWhenFree = 'follow-up';
+    // "That's all", "thanks", "bye", "stop" end the conversation; anything else gets listened for again.
+    const closing = /^\W*(that'?s (all|it)|thanks?( you)?|thank u|ok(ay)? thanks?|bye|good ?bye|stop|nothing|no thanks|that will do)\W*$/i.test(text);
+    if (byVoice && !out.error && !closing && (shouldFollowUp(out.reply) || awaitingYes())) listenWhenFree = 'follow-up';
   } finally {
     busy = false;
     refresh();
