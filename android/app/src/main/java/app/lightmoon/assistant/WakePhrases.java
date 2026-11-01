@@ -101,12 +101,17 @@ final class WakePhrases {
     // Whether what it heard is one of the chosen phrases. Only whole phrases count, at word boundaries,
     // so "light moon" heard alone doesn't count when only "hey light moon" is chosen.
     static boolean matches(String heard, List<String> ids) {
+        return matched(heard, ids) != null;
+    }
+
+    // The wake phrase in what was heard, or null.
+    static String matched(String heard, List<String> ids) {
         String text = " " + String.valueOf(heard).toLowerCase().replace("lightmoon", "light moon").replaceAll("[^a-z ]", " ")
             .replaceAll("\\s+", " ").trim() + " ";
         for (String phrase : phrases(ids)) {
-            if (text.contains(" " + phrase + " ")) return true;
+            if (text.contains(" " + phrase + " ")) return phrase;
         }
-        return false;
+        return null;
     }
 
     // Whether what it heard is only "send it" (or one of SEND), nothing else.

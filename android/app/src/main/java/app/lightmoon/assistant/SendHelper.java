@@ -278,8 +278,31 @@ public class SendHelper extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (!armed() || event == null || event.getPackageName() == null) return;
+        if (APP_CHOOSERS.contains(event.getPackageName().toString())) {
+            pickMainApp();
+            return;
+        }
         if (!armedApps.contains(event.getPackageName().toString())) return;
         tryNow();
+    }
+
+    // Phones with a cloned WhatsApp (vivo's App Clone, Xiaomi's Dual apps) ask which one opens a WhatsApp link. For a
+    // message LightMoon is sending, the main app: listed first, and not the one marked as the clone.
+    private static final List<String> APP_CHOOSERS = Arrays.asList("com.vivo.doubleinstance", "com.miui.securitycore", "com.android.intentresolver");
+    private static final Pattern CLONE = Pattern.compile("clone|dual|twin|copy|\\(2\\)|\\b2$", Pattern.CASE_INSENSITIVE);
+
+    private void pickMainApp() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null || !armedApps.contains("com.whatsapp")) return;
+        AccessibilityNodeInfo main = findText(root, node -> {
+            CharSequence said = node.getText() != null ? node.getText() : node.getContentDescription();
+            if (said == null) return false;
+            String label = said.toString().trim();
+            return label.toLowerCase(Locale.ROOT).startsWith("whatsapp") && !label.toLowerCase(Locale.ROOT).contains("business") && !CLONE.matcher(label).find();
+        });
+        AccessibilityNodeInfo target = main;
+        while (target != null && !target.isClickable()) target = target.getParent();
+        if (target != null) target.performAction(AccessibilityNodeInfo.ACTION_CLICK);
     }
 
     private void tryNow() {

@@ -595,7 +595,8 @@ public class PhonePlugin extends Plugin {
             return;
         }
         Uri chat = Uri.parse("https://wa.me/" + digits + "?text=" + Uri.encode(call.getString("text", "")));
-        Intent intent = new Intent(Intent.ACTION_VIEW, chat);
+        // In its own task: in LightMoon's, it would go to the back with LightMoon when the Send helper steps aside.
+        Intent intent = new Intent(Intent.ACTION_VIEW, chat).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         for (String app : new String[] { "com.whatsapp", "com.whatsapp.w4b" }) {
             if (getContext().getPackageManager().getLaunchIntentForPackage(app) != null) {
                 intent.setPackage(app);
@@ -754,6 +755,14 @@ public class PhonePlugin extends Plugin {
             return;
         }
         SendHelper.arm(apps, text, call.getString("chat", ""));
+        // stay: the app was just opened in front of LightMoon (WhatsApp from phone_message); stepping LightMoon back
+        // now would count as a background start and Android would close it again.
+        if (Boolean.TRUE.equals(call.getBoolean("stay", false))) {
+            JSObject armed = new JSObject();
+            armed.put("armed", true);
+            call.resolve(armed);
+            return;
+        }
         getActivity().runOnUiThread(() -> {
             if (getActivity() instanceof MainActivity) ((MainActivity) getActivity()).leavePanel();
             else getActivity().moveTaskToBack(true);

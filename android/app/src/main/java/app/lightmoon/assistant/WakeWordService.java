@@ -46,7 +46,7 @@ public class WakeWordService extends Service implements RecognitionListener {
     private static final long RETRY_AFTER_ERROR_MS = 5000;
     // How sure the recogniser must be of every word of the wake phrase (Vosk's word confidence, 0 to 1). Speech that
     // only sounds a bit like it gets forced onto the phrase with lower confidence.
-    private static final double MIN_WORD_CONFIDENCE = 0.75; // 0.85 risked missing non-native accents
+    private static final double MIN_WORD_CONFIDENCE = 0.6; // 0.75 missed the owner shouting; other speech scores far lower
 
     static volatile WakeWordService running;
     // "starting", "listening", "paused" (LightMoon is open), "heard" (just woke); what the notification and tile show.
@@ -276,26 +276,84 @@ public class WakeWordService extends Service implements RecognitionListener {
         update();
     }
 
-    // A wake phrase, said clearly (every word confident), and, with "only my voice" on, in the owner's voice.
+    // A wake phrase, said clearly (its own words confident; noise around it doesn't count), and, with "only my voice"
+    // on, in the owner's voice. Said again within a few seconds after the voice didn't match (they're shouting, or
+    // sound different), it wakes anyway, as not the owner, so LightMoon's own lock still applies. Each decision is
+    // logged (tag LightMoonWake) so a missed wake can be explained.
     private boolean heard(String hypothesis, String field) {
         try {
             JSONObject result = new JSONObject(hypothesis);
-            if (!WakePhrases.matches(result.optString(field), phrases)) return false;
-            org.json.JSONArray words = result.optJSONArray("result");
-            if (words != null) {
-                for (int i = 0; i < words.length(); i++) {
-                    JSONObject word = words.optJSONObject(i);
-                    if (word != null && word.optDouble("conf", 1) < MIN_WORD_CONFIDENCE) return false;
-                }
+            String text = result.optString(field);
+            String phrase = WakePhrases.matched(text, phrases);
+            if (phrase == null) {
+                if (!text.isEmpty() && !"[unk]".equals(text)) android.util.Log.i("LightMoonWake", "heard \"" + text + "\": no wake phrase");
+                return false;
+            }
+            double sure = phraseConfidence(result.optJSONArray("result"), phrase);
+            if (sure < MIN_WORD_CONFIDENCE) {
+                android.util.Log.i("LightMoonWake", "heard \"" + phrase + "\" but unclear (" + Math.round(sure * 100) + "%)");
+                return false;
             }
             ownerHeard = false;
             if (VoicePrint.on(this)) {
-                if (!VoicePrint.isOwner(this, VoicePrint.from(result))) return false;
+                boolean owner = VoicePrint.isOwner(this, VoicePrint.from(result));
+                long now = SystemClock.elapsedRealtime();
+                android.util.Log.i("LightMoonWake", "heard \"" + phrase + "\" (" + Math.round(sure * 100) + "%), voice " + Math.round(VoicePrint.lastScore(this) * 100) + "%: " + (owner ? "owner" : "not matched"));
+                if (!owner) {
+                    boolean again = now - voiceMissedAt < SAID_AGAIN_MS;
+                    voiceMissedAt = now;
+                    if (!again) {
+                        lowTone(); // heard, but not sure it's them: saying it again wakes it
+                        return false;
+                    }
+                    return true;
+                }
                 ownerHeard = true;
             }
             return true;
         } catch (JSONException err) {
             return false;
+        }
+    }
+
+    private static final long SAID_AGAIN_MS = 12_000;
+    private long voiceMissedAt;
+
+    // The lowest confidence among the words that make up the phrase (where it occurs in what was heard), 1 if unknown.
+    private static double phraseConfidence(org.json.JSONArray words, String phrase) {
+        if (words == null || words.length() == 0) return 1;
+        List<String> said = new ArrayList<>();
+        List<Double> sure = new ArrayList<>();
+        for (int i = 0; i < words.length(); i++) {
+            JSONObject word = words.optJSONObject(i);
+            said.add(word == null ? "" : word.optString("word").toLowerCase().replace("lightmoon", "light moon"));
+            sure.add(word == null ? 0 : word.optDouble("conf", 1));
+        }
+        // Vosk may give "light moon" as one or two words: compare on the joined text.
+        double best = -1;
+        for (int start = 0; start < said.size(); start++) {
+            StringBuilder joined = new StringBuilder();
+            double lowest = 1;
+            for (int end = start; end < said.size(); end++) {
+                joined.append(joined.length() > 0 ? " " : "").append(said.get(end));
+                lowest = Math.min(lowest, sure.get(end));
+                if (joined.toString().equals(phrase)) best = Math.max(best, lowest);
+                if (joined.length() >= phrase.length()) break;
+            }
+        }
+        if (best >= 0) return best;
+        double lowest = 1; // the words didn't line up with the phrase: all of them must be clear
+        for (double s : sure) lowest = Math.min(lowest, s);
+        return lowest;
+    }
+
+    private void lowTone() {
+        try {
+            ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 50);
+            tone.startTone(ToneGenerator.TONE_PROP_NACK, 120);
+            main.postDelayed(tone::release, 400);
+        } catch (RuntimeException err) {
+            // No sound: saying it again still works.
         }
     }
 

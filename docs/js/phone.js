@@ -490,7 +490,7 @@ export const phoneHandlers = {
       return askFirst(`WhatsApp ${named(person)}: "${words}"`, async () => {
         await call(phone.whatsapp({ number: withCountryCode(person.number), text: words }));
         const helper = phone.tapSend ? await phone.sendHelper?.().catch(() => null) : null;
-        if (helper?.enabled && await phone.tapSend({ apps: SEND_APPS.whatsapp, text: words, chat: '' }).then(() => true, () => false)) {
+        if (helper?.enabled && await phone.tapSend({ apps: SEND_APPS.whatsapp, text: words, chat: '', stay: true }).then(() => true, () => false)) {
           return { text: `Sending on WhatsApp to ${person.name ?? person.number}`, result: 'WhatsApp opened that chat with the message and the Send helper is tapping Send; the phone shows "LightMoon tapped Send" when it has.' };
         }
         rememberDraft('whatsapp', words);

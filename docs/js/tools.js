@@ -19,6 +19,7 @@ import { phoneTools, phoneHandlers, heardMessages } from './phone.js';
 import { lookUp, headlines } from './knowledge.js';
 import { findLinks, checkLink } from './links.js';
 import { planCompose, rememberDraft, recentDraft, SEND_NOW, YES_ONLY, onDraft } from './compose.js';
+import { parseSend, splitNameAndText, teluguToLatin, hasTelugu } from './quicksend.js';
 
 // A draft just opened in another app: the phone hears "send it" for 30 seconds without the wake phrase (app 1.19+).
 onDraft(draft => wakeWord?.expectSend?.({ apps: draft.apps, text: draft.text, chat: draft.chat ?? '', seconds: 30 }).catch(() => {}));
@@ -725,6 +726,48 @@ const APP_ALIASES = {
   'life leveling': 'Life Levelling', 'light moon': 'LightMoon',
 };
 
+// "WhatsApp wife akkada unnav bangaram": straight to the read-back, without the AI, so their words go exactly as said
+// (quicksend.js). "WhatsApp wife" alone asks what to say, and their next words are the message.
+const WAIT_FOR_WORDS_MS = 2 * 60_000;
+let waitingWords = null; // { to, via, at }
+const CANCEL = /^\W*(no|cancel|leave it|stop|forget it|never ?mind|vaddu|వద్దు)\W*$/i;
+
+async function quickMessage(said) {
+  if (!phoneApp?.whatsapp) return null;
+  let to;
+  let via;
+  let words;
+  if (waitingWords && Date.now() - waitingWords.at < WAIT_FOR_WORDS_MS && !parseSend(said)) {
+    ({ to, via } = waitingWords);
+    waitingWords = null;
+    if (CANCEL.test(said)) return { reply: 'Okay, not sending anything.', actions: [] };
+    words = said;
+  } else {
+    waitingWords = null;
+    const order = parseSend(said);
+    if (!order) return null;
+    const isPerson = async name => {
+      const nick = nicknames.lookUp(name);
+      if (nick && !/@|^https?:/i.test(nick)) return true;
+      return phoneApp.contacts({ query: name }).then(r => r.contacts.length > 0, () => false);
+    };
+    const split = await splitNameAndText(order.rest, isPerson);
+    if (!split) return null; // no contact by that name: the AI asks
+    ({ to } = split);
+    ({ via } = order);
+    words = split.text;
+    if (!words) {
+      waitingWords = { to, via, at: Date.now() };
+      return { reply: `What should I say to ${to}?`, actions: [] };
+    }
+  }
+  const text = hasTelugu(words) ? teluguToLatin(words) : words;
+  const out = await runTool('phone_message', { to, text, via });
+  if (!out.ok) return { reply: String(out.error), actions: [] };
+  const question = /Ask the user exactly: "(.*)\?"/.exec(String(out.result))?.[1];
+  return { reply: question ? `${question}?` : String(out.action?.text ?? 'Done.'), actions: [] };
+}
+
 export async function quickReply(text) {
   const said = String(text ?? '');
   // A plain yes to a read-back LightMoon just asked ("Send to NOC Team on Teams: ...?"): do it now.
@@ -741,6 +784,8 @@ export async function quickReply(text) {
     }
   }
   if (asked && !saidYes(said)) forgetConfirms(); // they moved on: the old read-back can't be confirmed later
+  const message = await quickMessage(said);
+  if (message) return message;
   if (asked) return null; // a longer answer: the AI handles it (runConfirmed still needs their yes)
   const app = OPEN_APP.exec(said)?.[1];
   if (app && phoneApp?.openApp) {
