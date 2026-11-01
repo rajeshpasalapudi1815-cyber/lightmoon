@@ -30,8 +30,10 @@ let sentAt = 0;
 let wakeSent = null; // the own wake word last passed on to the Listener
 
 // `onAnswer(taskId, action, { until })` applies Done or Snooze pressed on the orb.
+let begun = false;
 export function start(handlers) {
-  if (isNativeApp || !onWindows || testCopy || timer) return;
+  if (isNativeApp || !onWindows || testCopy || begun) return;
+  begun = true;
   onAnswer = handlers.onAnswer;
   onWake = handlers.onWake ?? (() => {});
   waitForWakes();

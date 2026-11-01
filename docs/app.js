@@ -2577,20 +2577,7 @@ function start({ auto = false } = {}) {
     },
     onStatus: paintSyncStatus,
   });
-  // Done and Snooze pressed on the Windows desktop orb.
-  desktop.start({
-    onAnswer: (taskId, action, options) => { const reply = answerReminder(taskId, action, options); if (reply) note(reply); },
-    // "LightMoon" heard while it's kept in the tray: listen right here, out of sight (the lock screen needs the window).
-    onWake: () => {
-      // Unused for the relock time (Settings): the PIN first, as when it comes back to the front.
-      if (started && lockDue()) showLock();
-      if (locked) return desktop.showWindow();
-      if (!started) start({ auto: true });
-      speaker.stop();
-      listenWhenFree = 'follow-up';
-      refresh();
-    },
-  });
+  startDesktop();
 
   if (phone) {
     phone.addListener('meetingDue', onPhoneSay);
@@ -2630,6 +2617,27 @@ function greet(auto) {
     runBriefing(launch.action === 'briefing');
   }
   refresh();
+}
+
+// The Windows Listener (js/desktop.js): Done and Snooze pressed on its orb, and "LightMoon" heard while LightMoon is
+// kept in the tray. From the very start, before the start screen's tap: in the tray nobody can tap it, so a wake
+// starts LightMoon (the Listener has given the page its key press by then, so it may speak).
+function startDesktop() {
+  desktop.start({
+    onAnswer: (taskId, action, options) => { const reply = answerReminder(taskId, action, options); if (reply) note(reply); },
+    onWake: () => {
+      // Unused for the relock time (Settings): the PIN first, as when it comes back to the front.
+      if (started && lockDue()) showLock();
+      if (locked) return desktop.showWindow();
+      if (!started) {
+        launch.action = 'talk'; // straight to listening, no briefing
+        start({ auto: true });
+      }
+      speaker.stop();
+      listenWhenFree = 'follow-up';
+      refresh();
+    },
+  });
 }
 
 // Installed apps may play sound without a tap first (Chrome's autoplay rules for home-screen apps).
@@ -2695,7 +2703,9 @@ function boot() {
   updates.start({ isQuiet: quietForRestart, onReady: offerRestart });
   wireUp();
   applyState();
-  if (!state.profile.userName || !state.ai.ready) {
+  const setup = !state.profile.userName || !state.ai.ready;
+  startDesktop(); // reachable from the Windows Listener even before the tap below (nothing in the Android app)
+  if (setup) {
     const form = $('#setupForm');
     form.hidden = false;
     form.elements.userName.value = state.profile.userName;
