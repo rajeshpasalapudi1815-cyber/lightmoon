@@ -17,7 +17,11 @@ import android.database.Cursor;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
+import android.content.ComponentName;
 import android.media.AudioManager;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
 import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.Build;
@@ -892,7 +896,7 @@ public class PhonePlugin extends Plugin {
         String action = call.getString("action", "toggle");
         String query = call.getString("query", "").trim();
         AudioManager audio = getContext().getSystemService(AudioManager.class);
-        boolean play = "play".equals(action) || ("toggle".equals(action) && !audio.isMusicActive());
+        boolean play = "play".equals(action) || ("toggle".equals(action) && !musicPlaying(audio));
         if (!play || query.isEmpty()) {
             int key;
             switch (action) {
@@ -902,11 +906,14 @@ public class PhonePlugin extends Plugin {
                 case "previous": key = KeyEvent.KEYCODE_MEDIA_PREVIOUS; break;
                 default: key = KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE;
             }
-            try {
-                pressMediaKey(audio, key);
-            } catch (RuntimeException err) {
-                call.reject("The music app didn't take it.");
-                return;
+            // To the music app itself (a key press goes to whichever app last held the sound, a Teams call too).
+            if (!control(action, null, "")) {
+                try {
+                    pressMediaKey(audio, key);
+                } catch (RuntimeException err) {
+                    call.reject("The music app didn't take it.");
+                    return;
+                }
             }
         }
         Handler main = new Handler(Looper.getMainLooper());
@@ -916,7 +923,7 @@ public class PhonePlugin extends Plugin {
         }
         // Give a paused player a moment to start again before opening one.
         main.postDelayed(() -> {
-            if (query.isEmpty() && audio.isMusicActive()) {
+            if (query.isEmpty() && musicPlaying(audio)) {
                 resolveMedia(call, audio, "");
                 return;
             }
@@ -942,16 +949,80 @@ public class PhonePlugin extends Plugin {
             }
             // Some apps open but wait for a play: press it once they're up, then see whether music is heard.
             main.postDelayed(() -> {
-                if (!audio.isMusicActive()) {
+                if (!musicPlaying(audio) && !control("play", player[0], query)) {
                     try {
                         pressMediaKey(audio, KeyEvent.KEYCODE_MEDIA_PLAY);
                     } catch (RuntimeException ignored) {
                         // Reported as not playing.
                     }
                 }
-                main.postDelayed(() -> resolveMedia(call, audio, player[1]), 2500);
+                main.postDelayed(() -> {
+                    // Some accounts (Spotify Free) won't play a chosen song for another app: play their music instead, and say so.
+                    if (query.isEmpty() || musicPlaying(audio) || !control("play", player[0], "")) {
+                        resolveMedia(call, audio, player[1]);
+                        return;
+                    }
+                    main.postDelayed(() -> {
+                        JSObject result = new JSObject();
+                        result.put("musicActive", musicPlaying(audio));
+                        result.put("app", player[1]);
+                        result.put("instead", true);
+                        call.resolve(result);
+                    }, 2000);
+                }, 2500);
             }, 4000);
         }, query.isEmpty() ? 900 : 0);
+    }
+
+    // Apps whose sessions aren't music: a Teams meeting, a call, LightMoon's own voice.
+    private static final List<String> NOT_PLAYERS = Arrays.asList("app.lightmoon.assistant", "com.microsoft.teams",
+        "com.android.server.telecom", "com.google.android.dialer", "com.whatsapp", "com.whatsapp.w4b");
+
+    // Whether a player is playing now, by the players' own state (seen with the notification access LightMoon has for
+    // messages). Without that access, whether anything sounds on the music stream, which other audio also counts as.
+    private boolean musicPlaying(AudioManager audio) {
+        try {
+            MediaSessionManager sessions = getContext().getSystemService(MediaSessionManager.class);
+            for (MediaController player : sessions.getActiveSessions(new ComponentName(getContext(), MessageListener.class))) {
+                PlaybackState state = player.getPlaybackState();
+                if (!NOT_PLAYERS.contains(player.getPackageName()) && state != null && state.getState() == PlaybackState.STATE_PLAYING) return true;
+            }
+            return false;
+        } catch (RuntimeException noAccess) {
+            return audio.isMusicActive();
+        }
+    }
+
+    // Plays, pauses or skips on a music app's own controls: that app's (pkg), else the one playing, else the first
+    // paused one. For play with a query, it plays that. -> false when there is no such player to ask.
+    private boolean control(String action, String pkg, String query) {
+        MediaController chosen = null;
+        try {
+            MediaSessionManager sessions = getContext().getSystemService(MediaSessionManager.class);
+            for (MediaController player : sessions.getActiveSessions(new ComponentName(getContext(), MessageListener.class))) {
+                if (NOT_PLAYERS.contains(player.getPackageName()) || (pkg != null && !pkg.equals(player.getPackageName()))) continue;
+                PlaybackState state = player.getPlaybackState();
+                if (chosen == null || (state != null && state.getState() == PlaybackState.STATE_PLAYING)) chosen = player;
+            }
+        } catch (RuntimeException noAccess) {
+            return false;
+        }
+        if (chosen == null) return false;
+        MediaController.TransportControls controls = chosen.getTransportControls();
+        switch (action) {
+            case "play":
+                if (query.isEmpty()) controls.play();
+                else controls.playFromSearch(query, new android.os.Bundle());
+                break;
+            case "pause": controls.pause(); break;
+            case "next": controls.skipToNext(); break;
+            case "previous": controls.skipToPrevious(); break;
+            default:
+                PlaybackState state = chosen.getPlaybackState();
+                if (state != null && state.getState() == PlaybackState.STATE_PLAYING) controls.pause();
+                else controls.play();
+        }
+        return true;
     }
 
     private static void pressMediaKey(AudioManager audio, int key) {
@@ -959,9 +1030,9 @@ public class PhonePlugin extends Plugin {
         audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
     }
 
-    private static void resolveMedia(PluginCall call, AudioManager audio, String app) {
+    private void resolveMedia(PluginCall call, AudioManager audio, String app) {
         JSObject result = new JSObject();
-        result.put("musicActive", audio.isMusicActive());
+        result.put("musicActive", musicPlaying(audio));
         result.put("app", app);
         call.resolve(result);
     }

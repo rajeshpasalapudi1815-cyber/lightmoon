@@ -561,6 +561,9 @@ export const phoneHandlers = {
       return { pause: 'Paused', next: 'Next track', previous: 'Previous track' }[action] ?? (out.musicActive ? 'Playing' : 'Paused');
     }
     // Older apps don't say whether music is heard (musicActive undefined): believe the key press, as before.
+    if (playing && out.instead) {
+      return { text: `Playing on ${out.app}`, result: `${out.app} wouldn't play "${query}" when asked from another app, so their own music is playing on it. Say so; they can pick "${query}" in ${out.app}.` };
+    }
     if (playing) return `Playing${out.app ? ` on ${out.app}` : ''}${query ? `: ${query}` : ''}`;
     return {
       text: out.app ? `Opened ${out.app}` : 'Nothing playing',
