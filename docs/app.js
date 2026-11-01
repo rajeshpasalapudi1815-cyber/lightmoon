@@ -2137,6 +2137,13 @@ async function unlockWithFingerprint() {
   }
 }
 
+function clearChat() {
+  if (!confirm("Clear the whole conversation on all your devices? This can't be undone.")) return;
+  store.messages.clear();
+  renderHistory();
+  note('Chat history cleared.');
+}
+
 function eraseAfterForgottenPin() {
   const name = assistantName();
   if (!confirm(`Forgot your PIN? The only way back in is to erase ${name} on this device: memories, tasks, goals and chats.`)) return;
@@ -2289,6 +2296,7 @@ function wireUp() {
   addEventListener('popstate', onSettingsHistory);
   $('#resetAi').addEventListener('click', () => fillAiFields($('#settingsForm').elements, store.DEFAULT_AI));
   wireLearning(); // Settings -> AI brain -> Our own model
+  $('#clearChatBtn').addEventListener('click', clearChat);
   $('#exportBtn').addEventListener('click', downloadBackup);
   $('#importBtn').addEventListener('click', () => $('#importFile').click());
   $('#importFile').addEventListener('change', restoreBackup);

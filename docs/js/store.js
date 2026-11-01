@@ -302,7 +302,14 @@ export const messages = {
     save();
   },
   recent: limit => data.messages.slice(-limit),
+  // Clears the conversation on every device: the time it was cleared is a synced setting, and messages from before
+  // it are dropped wherever they turn up again (mergeIn).
+  clear() {
+    data.messages = [];
+    settings.set('chat_cleared_at', String(Date.now()));
+  },
 };
+const clearedAt = () => Number(data.settings.chat_cleared_at) || 0;
 
 const byCreated = (a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? '') || a.updated_at - b.updated_at;
 
@@ -641,13 +648,15 @@ export function mergeIn(remote) {
     data[name] = [...merged.values()];
   }
   const known = new Set(data.messages.map(m => m.id));
-  const added = theirs.messages.filter(m => !known.has(m.id));
+  const added = theirs.messages.filter(m => !known.has(m.id) && m.at > clearedAt());
   data.messages = [...data.messages, ...added].sort((a, b) => a.at - b.at || byId(a, b));
   for (const [key, at] of Object.entries(theirs.settingsAt)) {
     if (LOCAL_SETTINGS.has(key) || at <= (data.settingsAt[key] ?? 0)) continue;
     data.settings[key] = theirs.settings[key];
     data.settingsAt[key] = at;
   }
+  // Chat history cleared on another device: this one's copy from before then goes too.
+  if (clearedAt()) data.messages = data.messages.filter(m => m.at > clearedAt());
   save({ quiet: true });
   return added.length;
 }
