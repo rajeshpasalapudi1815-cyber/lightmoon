@@ -97,7 +97,14 @@ static class TrayMode
             open(); // opened by the wake word, it listens straight away; Keep() puts it away after
             return true;
         }
-        if (DateTime.Now - pageSeen > TimeSpan.FromSeconds(60)) return false; // the page isn't talking to us (an old one)
+        if (DateTime.Now - pageSeen > TimeSpan.FromSeconds(60))
+        {
+            // The page isn't talking to us (an older version, or still loading): the usual wake, with the window where it can be seen.
+            log("tray mode: LightMoon page not connected, showing it");
+            Show(window, false);
+            shownByUser = window;
+            return false;
+        }
         if (!pageActivated) Prime(window);
         if (ui != null) ui.Post(_ => glow.Show("listening"), null); // heard on the recogniser's thread
         wakePending = true;
@@ -107,8 +114,15 @@ static class TrayMode
     }
 
     // GET /events: waits up to 20 s for a wake. -> true if one came.
+    static DateTime eventsLogged = DateTime.MinValue;
+
     public static bool WaitForWake()
     {
+        if (DateTime.Now - eventsLogged > TimeSpan.FromMinutes(5))
+        {
+            eventsLogged = DateTime.Now;
+            log("tray mode: LightMoon page is waiting for wakes");
+        }
         if (!wakePending) wakeWaiting.WaitOne(20000);
         if (!wakePending) return false;
         wakePending = false;

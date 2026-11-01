@@ -40,7 +40,9 @@ self.addEventListener('fetch', event => {
     (async () => {
       const cache = await caches.open(CACHE);
       try {
-        const response = await fetch(request, { signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS) });
+        // 'no-cache': asked of GitHub each time (a quick "still the same?" check), so a reload after an update gets
+        // the new files rather than the browser's ten-minute copy of the old ones.
+        const response = await fetch(request, { cache: 'no-cache', signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS) });
         if (response.ok) cache.put(key, response.clone());
         return response;
       } catch {
