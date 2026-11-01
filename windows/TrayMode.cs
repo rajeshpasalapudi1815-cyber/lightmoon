@@ -68,7 +68,7 @@ static class TrayMode
         if (!On) return;
         IntPtr window = findWindow();
         if (window != IntPtr.Zero && window != shownByUser && !hidden.Contains(window) && GetForegroundWindow() != window) Hide(window);
-        if (pageState != "idle" && pageState != "unknown" && DateTime.Now - pageSeen > TimeSpan.FromSeconds(90)) SetPageState("idle", pageActivated); // the page went away
+        if (pageState != "idle" && pageState != "unknown" && DateTime.Now - pageSeen > TimeSpan.FromSeconds(90)) { pageState = "idle"; glow.Hide(); } // the page went away
     }
 
     // The tray icon was clicked: show LightMoon if it's out of sight, else put it away.
@@ -119,6 +119,7 @@ static class TrayMode
     // POST /state from the page.
     public static void SetPageState(string state, bool activated)
     {
+        if (DateTime.Now - pageSeen > TimeSpan.FromSeconds(60)) log("tray mode: LightMoon page connected (" + state + (activated ? ", may speak" : ", needs a key press to speak") + ")");
         pageSeen = DateTime.Now;
         pageActivated = activated;
         pageState = state ?? "idle";
