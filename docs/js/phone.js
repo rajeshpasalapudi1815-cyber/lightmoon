@@ -224,8 +224,15 @@ async function findPerson(whom) {
   // or a Teams link: "Deeksha" for Teams is still Deeksha in the contacts).
   const nick = nicknames.lookUp(said);
   const wanted = nick && !/@|^https?:/i.test(nick) ? nick : said;
-  if (looksLikeNumber(wanted)) return { name: null, number: wanted.replace(/[\s().-]/g, '') };
-  const { contacts } = await phone.contacts({ query: wanted });
+  // A nickname for a number ("wife" = 9014...) reads back as the nickname, not the digits.
+  if (looksLikeNumber(wanted)) return { name: nick ? said : null, number: wanted.replace(/[\s().-]/g, '') };
+  // As heard first; then without "Mr", "Sir", "Anna" and the like, then shorter, since the last word is often misheard
+  // ("Mr Venkat Vaity" for Mr Venkat YT). The read-back names the contact found, so a yes covers the right one.
+  let contacts = [];
+  for (const query of searchesFor(wanted)) {
+    ({ contacts } = await phone.contacts({ query }));
+    if (contacts.length) break;
+  }
   if (!contacts.length) throw new Error(`No contact matches "${wanted}". Ask the user for the name as saved, or the number.`);
   // Two Ashas, or one with two numbers: their recent calls and messages say which is likelier (people.js).
   const chosen = choosePerson(wanted, contacts, { calls: await recentCalls(), messages: seen.messages });
@@ -240,7 +247,28 @@ async function recentCalls() {
   return phone.calls({ since: Date.now() - 30 * 24 * HOUR }).then(r => r.calls ?? [], () => seen.calls);
 }
 
-const named = p => (p.name ? `${p.name} (${p.number})` : p.number);
+// Read back by name only: a number is read out only when there is no name for it.
+const named = p => p.name || p.number;
+
+// The searches for a name as heard: itself and shorter (words dropped from the end), then the same without titles
+// ("Mr", "Sir", "Anna"), then its last word alone (a surname, when the first was misheard).
+const TITLES = /\b(mr|mrs|ms|miss|dr|sir|madam|mam|anna|akka|garu|gaaru|ji|bhai|uncle|aunty|bava|babai)\b\.?/gi;
+export function searchesFor(name) {
+  const tries = [];
+  const shorter = words => {
+    for (let n = words.length; n >= 1; n--) {
+      const query = words.slice(0, n).join(' ');
+      if (query.replace(/\W/g, '').length >= 3) tries.push(query);
+    }
+  };
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const plain = name.replace(TITLES, ' ').trim().split(/\s+/).filter(Boolean);
+  shorter(words);
+  shorter(plain);
+  if (plain.length > 1) tries.push(plain.at(-1));
+  // Never a title alone ("Mr").
+  return [...new Set(tries)].filter(q => q.replace(TITLES, '').trim());
+}
 
 // WhatsApp needs the country code; a 10-digit number without one is taken as Indian (+91).
 function withCountryCode(number) {
@@ -346,7 +374,7 @@ export function phoneTools() {
     tool('phone_media', 'Play music (resumes, or opens a music app and plays "what"), pause, skip or go back. Say it plays only if the result says so.', {
       action: { type: 'string', enum: ['play', 'pause', 'toggle', 'next', 'previous'] },
       what: { type: 'string', description: 'For play: a song, artist, album, mood or language, e.g. "Telugu melodies". Empty resumes their music.' },
-      app: { type: 'string', description: 'Only if they name one, e.g. "Spotify", "YouTube Music".' },
+      app: { type: 'string', description: 'The music app they named, e.g. "Spotify", "i Music". Leave out if they didn\'t say: you\'re told the choices to ask about.' },
     }, ['action']),
     tool('phone_navigate', 'Directions in Google Maps.', {
       destination: { type: 'string' },
@@ -555,7 +583,14 @@ export const phoneHandlers = {
 
   async phone_media({ action, what = '', app = '' }) {
     const query = String(what ?? '').trim().slice(0, 120);
-    const out = (await call(phone.media({ action, query, app: String(app ?? '') }))) ?? {};
+    // More than one music app and they didn't say which: ask (app 1.24 and later says which there are).
+    if (['play', 'toggle'].includes(action) && !String(app ?? '').trim() && phone.musicApps) {
+      const { apps = [] } = await phone.musicApps().catch(() => ({}));
+      if (apps.length > 1) {
+        throw new Error(`They have ${apps.join(', ')}. Ask which one in a short question ("${apps.slice(0, 2).join(' or ')}?") and end your reply; then call again with app.`);
+      }
+    }
+    const out =(await call(phone.media({ action, query, app: String(app ?? '') }))) ?? {};
     const playing = ['play', 'toggle'].includes(action) && out.musicActive !== false;
     if (!['play', 'toggle'].includes(action) || (action === 'toggle' && out.musicActive === false && !out.app)) {
       return { pause: 'Paused', next: 'Next track', previous: 'Previous track' }[action] ?? (out.musicActive ? 'Playing' : 'Paused');

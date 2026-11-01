@@ -30,7 +30,9 @@ export function languageRule(talk) {
   return `- LANGUAGE: they asked you to speak ${lang.name}. Write every reply in ${lang.name}, in ${lang.script}: ${lang.how}, simple and natural, `
     + `not bookish. Keep common English words they'd use (meeting, task, phone, office, names) in English letters. Your voice can read only `
     + `${lang.name} letters, so never write ${lang.name} in English letters in a reply. Their words arrive through ${lang.name} speech recognition, `
-    + 'often mixed with English. Tool fields (task titles, notes) in the language they used. To switch back, set_language.';
+    + 'often mixed with English. Tool fields (task titles, notes) in the language they used. To switch back, set_language.'
+    + (talk === 'te' ? ' Messages they send to people are different: write those in Tenglish, Telugu in English letters as they\'d type it '
+      + '("Akkada unnav bangaram?"), turning Telugu letters into English ones, unless they ask for Telugu letters.' : '');
 }
 
 // Yes in Indian scripts ("అవును", "సరే", "हाँ"), at the start of a message; JavaScript's \b doesn't work for these letters.

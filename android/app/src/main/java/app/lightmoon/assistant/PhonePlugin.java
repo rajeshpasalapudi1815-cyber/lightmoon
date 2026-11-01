@@ -906,8 +906,11 @@ public class PhonePlugin extends Plugin {
                 case "previous": key = KeyEvent.KEYCODE_MEDIA_PREVIOUS; break;
                 default: key = KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE;
             }
-            // To the music app itself (a key press goes to whichever app last held the sound, a Teams call too).
-            if (!control(action, null, "")) {
+            // To the music app itself (a key press goes to whichever app last held the sound, a Teams call too); to the
+            // one they named, if they did (no key press then, which could start another app).
+            String named = call.getString("app", "").trim();
+            String[] chosen = named.isEmpty() ? null : musicApp(named);
+            if (!control(action, chosen == null ? null : chosen[0], "") && (chosen == null || !play)) {
                 try {
                     pressMediaKey(audio, key);
                 } catch (RuntimeException err) {
@@ -1047,20 +1050,52 @@ public class PhonePlugin extends Plugin {
         { "com.gaana", "Gaana" },
         { "com.amazon.mp3", "Amazon Music" },
         { "com.apple.android.music", "Apple Music" },
+        // The phone makers' own players.
+        { "com.android.bbkmusic", "i Music" },
+        { "com.miui.player", "Mi Music" },
+        { "com.sec.android.app.music", "Samsung Music" },
+        { "com.heytap.music", "Music" },
+        { "com.oneplus.music", "Music" },
     };
 
-    private String[] musicApp(String wanted) {
+    // The music apps on this phone, each { package, label } with the label the phone shows.
+    private List<String[]> installedMusicApps() {
         PackageManager pm = getContext().getPackageManager();
+        List<String[]> found = new ArrayList<>();
+        for (String[] app : MUSIC_APPS) {
+            if (pm.getLaunchIntentForPackage(app[0]) == null) continue;
+            String label = app[1];
+            try {
+                label = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(app[0], 0)));
+            } catch (PackageManager.NameNotFoundException ignored) {
+                // Keep the usual name.
+            }
+            found.add(new String[] { app[0], label });
+        }
+        return found;
+    }
+
+    // -> { apps: [label...] }: so LightMoon can ask which one when they didn't say.
+    @PluginMethod
+    public void musicApps(PluginCall call) {
+        JSArray apps = new JSArray();
+        for (String[] app : installedMusicApps()) apps.put(app[1]);
+        JSObject result = new JSObject();
+        result.put("apps", apps);
+        call.resolve(result);
+    }
+
+    private String[] musicApp(String wanted) {
         String asked = simplify(wanted);
+        List<String[]> installed = installedMusicApps();
         if (!asked.isEmpty()) {
-            for (String[] app : MUSIC_APPS) {
-                if (simplify(app[1]).contains(asked) && pm.getLaunchIntentForPackage(app[0]) != null) return app;
+            for (String[] app : installed) {
+                if (simplify(app[1]).contains(asked) || asked.contains(simplify(app[1]))) return app;
             }
             String[] other = findApp(wanted);
             if (other != null) return other;
         }
-        for (String[] app : MUSIC_APPS) if (pm.getLaunchIntentForPackage(app[0]) != null) return app;
-        return null;
+        return installed.isEmpty() ? null : installed.get(0);
     }
 
     // { destination, mode?: "drive" | "walk" | "bike" | "transit" }: turn-by-turn directions in Google Maps.
