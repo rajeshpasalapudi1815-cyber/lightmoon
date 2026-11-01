@@ -312,7 +312,8 @@ static class LightMoonListener
         menu.Items.Add(orbItem);
         menu.Opening += (s, e) => orbItem.Text = orb.OrbShown ? "Hide the orb" : "Show the orb";
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Quit", null, (s, e) => Application.Exit());
+        // Quitting never leaves LightMoon running out of sight: its window comes back on screen first.
+        menu.Items.Add("Quit", null, (s, e) => { TrayMode.ReleaseWindow(); Application.Exit(); });
         tray = new NotifyIcon
         {
             Icon = AppIcon(),

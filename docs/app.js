@@ -429,6 +429,9 @@ const speaker = {
   },
 
   speak(text, { voice = prefs.voice, rate = prefs.rate, force = false } = {}) {
+    // Parked off the screen by the Listener's tray mode, and the Listener is gone (quit or crashed): stay silent,
+    // never talking from a window nobody can see or close.
+    if (offScreen() && !desktop.listenerConnected()) return;
     if ((!prefs.speak && !force) || !('speechSynthesis' in window)) {
       if (text) desktop.notePageProblem(prefs.speak ? 'this browser has no voice' : 'speaking replies is switched off in Settings'); // seen in the Listener's log
       return;
@@ -600,6 +603,7 @@ const listener = {
   start(mode, { opening = '', resume = false } = {}) {
     this.stopRec();
     if (!this.supported) return;
+    if (offScreen() && !desktop.listenerConnected()) return; // off the screen with no Listener: never listening unseen
     const Recognizer = speechRecognizer();
     const rec = new Recognizer();
     rec.lang = listenLang();
@@ -1678,8 +1682,9 @@ async function allowPhone(request, what) {
 
 // The Microsoft work account (1.15 and later): sending Teams messages and work email straight from LightMoon.
 async function paintWork(message) {
-  const state = await workAccount?.status().catch(() => null);
-  $('#workBox').hidden = !state;
+  // The Microsoft work account was removed (company data stays out of LightMoon): never offered again.
+  const state = null;
+  $('#workBox').hidden = true;
   if (!state) return;
   $('#workStatus').textContent = message ?? (state.signedIn ? `Signed in${state.account ? ` as ${state.account}` : ''}` : state.configured ? 'Not signed in' : 'Not set up');
   if (!$('#workClient').value) $('#workClient').value = state.clientId ?? '';
@@ -2611,7 +2616,8 @@ function start({ auto = false } = {}) {
 
 // On the computer, not on screen: minimized, behind, or parked off the screen by the Listener's tray mode (which
 // browsers don't count as hidden).
-const outOfSight = () => !isNativeApp && (document.hidden || window.screenX < -10000 || window.screenY < -10000);
+const offScreen = () => !isNativeApp && (window.screenX < -10000 || window.screenY < -10000);
+const outOfSight = () => !isNativeApp && (document.hidden || offScreen());
 
 // Opened from a home-screen shortcut or the share sheet: do that instead of the usual briefing.
 // Otherwise brief (or greet), then start listening if that setting is on.

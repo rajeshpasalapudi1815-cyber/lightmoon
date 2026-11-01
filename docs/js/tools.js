@@ -169,10 +169,10 @@ export const currentTools = () => [...TOOLS, CHECK_LINK, COMPOSE, ...(lifeConnec
 // On the computer, with the LightMoon Listener running: what's showing in its open apps, and Windows notifications
 // (desktop.js, windows/ScreenReader.cs). Sent when the talk is about reading messages, mail or the screen.
 const DESKTOP_TOOLS = [
-  tool('desktop_read', "Read what's showing in an app open on this computer, which is in front of them: Teams (its chat list with the latest messages, then the open chat), Outlook mail, WhatsApp, a browser page. Use it for \"read my latest Teams message\", \"any new email?\".", {
-    app: { type: 'string', description: 'screen (the window in front of them, for "read my screen"), teams, outlook, whatsapp, browser, or words from the window title.' },
+  tool('desktop_read', "Read what's showing in a personal app open on this computer (WhatsApp, a browser page, documents of their own), or the window in front for \"read my screen\". Never work apps (Teams, Outlook): those are refused.", {
+    app: { type: 'string', description: 'screen (the window in front of them, for "read my screen"), whatsapp, browser, or words from the window title.' },
   }, ['app']),
-  tool('desktop_notifications', 'Windows notifications that came in on this computer (Teams, Outlook, WhatsApp and others) since the Listener started.', {}),
+  tool('desktop_notifications', 'Windows notifications that came in on this computer (personal apps; work apps such as Teams and Outlook are left out).', {}),
   tool('desktop_open', 'Open a website, or a search, in a new tab of the browser on this computer.', {
     url: { type: 'string', description: 'A web address, e.g. "www.cloudbox99.com".' },
     search: { type: 'string', description: 'Or words to search for.' },
@@ -275,7 +275,8 @@ export function toolsFor(text, loaded = new Set()) {
   const core = TOOLS.filter(t => !EXTRA_TOOLS.has(t.function.name) || groups.has('more') || EXTRA_TOOLS.get(t.function.name).test(text));
   const missing = (phone.length && phonePart.length < phone.length) || (life.length && !groups.has('life')) || core.length < TOOLS.length;
   const links = LINK_WORDS.test(text) || findLinks(text).length ? [CHECK_LINK] : [];
-  if (COMPOSE_WORDS.test(text)) links.push(...(workSignedIn ? WORK_TOOLS : []), COMPOSE);
+  // No work account tools: company data (Teams, work email) stays out of LightMoon (WORK_APPS).
+  if (COMPOSE_WORDS.test(text)) links.push(COMPOSE);
   const onScreen = DESKTOP_WORDS.test(text) ? desktopTools() : [];
   return [...core, ...links, ...onScreen, ...(groups.has('life') ? life : []), ...phonePart, ...(missing ? [LOAD_TOOLS] : [])];
 }
@@ -294,6 +295,11 @@ const PHONE_PARTS = [
   [/\b(search|youtube|google|find)\b/i, ['phone_search']],
   [/\b(open|launch|start|app)\b/i, ['phone_open_app']],
 ];
+// Their company's apps and data never go to the AI service: no reading, drafting or sending in Teams or Outlook
+// (their work email is there). They asked for this on 1 November 2026, to keep company data out of LightMoon.
+export const WORK_APPS = /\b(teams|outlook|sarasamerica)\b/i;
+const WORK_OFF = 'Work apps (Teams, Outlook) are switched off in LightMoon, so company data never goes to the AI. Tell them to use their work apps directly.';
+
 // Notes come up as "make a note", "note it down", "my notes", "నోట్".
 export const NOTE_WORDS = /\b(notes?|noted|jot|write (it|this|that|these) down|keep (a )?(note|record))\b|నోట్|రాసి పెట్ట|नोट/i;
 // Core tools sent only when their words come up.
@@ -603,6 +609,7 @@ const handlers = {
   },
 
   async compose_message({ app, to, group, text }) {
+    if (WORK_APPS.test(String(app ?? ''))) throw new Error(WORK_OFF);
     const byName = Boolean(phoneApp?.openTeamsChat) && Boolean((await phoneApp.sendHelper?.().catch(() => null))?.enabled);
     const plan = planCompose({ app, to, group, text: toText(text, 'text', 2000), lookUp: name => nicknames.lookUp(name), byName });
     if (plan.ask) throw new Error(plan.ask);
@@ -695,7 +702,9 @@ const handlers = {
   },
 
   async desktop_read({ app }) {
+    if (WORK_APPS.test(String(app ?? ''))) throw new Error(WORK_OFF);
     const out = await desktop.readScreen(toText(app, 'app', 80));
+    if (WORK_APPS.test(String(out.window ?? ''))) throw new Error(`The window in front is ${out.window}. ${WORK_OFF}`);
     if (!out.found) {
       throw new Error(out.error ?? `No ${app} window is open on this computer${out.windows?.length ? ` (open: ${out.windows.join('; ')})` : ''}. Ask them to open it, then read again.`);
     }
@@ -733,7 +742,7 @@ const handlers = {
   },
 
   async desktop_notifications() {
-    const list = await desktop.notifications();
+    const list = (await desktop.notifications()).filter(n => !WORK_APPS.test(`${n.app ?? ''} ${n.text ?? ''}`.slice(0, 80)));
     if (!list.length) return { text: 'Checked notifications', result: 'No Windows notifications since the LightMoon Listener started.' };
     const clock = ms => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
     return {

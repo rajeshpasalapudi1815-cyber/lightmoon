@@ -167,6 +167,15 @@ static class TrayMode
         shownByUser = window; // until they put it away
     }
 
+    // The Listener is quitting (or tray mode switched off): LightMoon's window back on screen, in the taskbar,
+    // so nothing keeps running where it can't be seen or closed.
+    public static void ReleaseWindow()
+    {
+        IntPtr window = findWindow == null ? IntPtr.Zero : findWindow();
+        if (window != IntPtr.Zero && hidden.Contains(window)) Show(window, false);
+        if (glow != null) glow.Hide();
+    }
+
     // ---------- Out of sight and back ----------
 
     static void Hide(IntPtr window)
