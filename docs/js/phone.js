@@ -161,6 +161,9 @@ function finishedCalls() {
     + `${fresh.includes(c) ? ' (AFTER-CALL: ask once)' : ''}`);
 }
 
+// Each line that looks like a one-time code or security message, hidden (for what is read off the computer's screen).
+export const hideCodes = text => String(text ?? '').split('\n').map(line => (SECURITY_WORDS.test(line) && CODE_NUMBER.test(line) ? '(a one-time code or security message, hidden)' : line)).join('\n');
+
 // The messages the AI was shown, and who sent each: for tools.js to tell what came from a message (orders.js).
 export const heardMessages = () => (allowed?.messages ? messageRefs().map(m => ({ from: source(m), text: shareable(m.text) })) : []);
 

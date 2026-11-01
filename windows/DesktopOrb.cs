@@ -776,7 +776,7 @@ class OrbBridge
         var first = lines[0].Split(' ');
         if (first.Length < 3) return 400;
         method = first[0].ToUpperInvariant();
-        path = first[1].Split('?')[0];
+        path = first[1]; // with its ?query; Answer splits it
         foreach (var line in lines.Skip(1))
         {
             int colon = line.IndexOf(':');
@@ -816,7 +816,21 @@ class OrbBridge
         if (host == null || !Hosts.Contains(host.ToLowerInvariant())) { Send(stream, 403, null, null, false); return; }
         if (origin != null && !Origins.Contains(origin)) { Send(stream, 403, null, null, false); return; }
 
+        string query = path.Contains("?") ? path.Substring(path.IndexOf('?') + 1) : "";
+        path = path.Split('?')[0];
         if (method == "OPTIONS") { Send(stream, 204, origin, null, true); return; }
+        // What's on screen in an open app, and the notifications that popped up (ScreenReader.cs). Only from LightMoon's
+        // own page (an Origin is required here, so another program can't use LightMoon to read the screen either).
+        if (method == "GET" && (path == "/read" || path == "/notifications"))
+        {
+            if (origin == null) { Send(stream, 403, null, null, false); return; }
+            if (path == "/notifications") { Send(stream, 200, origin, Json.Serialize(ScreenReader.Notifications()), false); return; }
+            string app = "";
+            foreach (var part in query.Split('&'))
+                if (part.StartsWith("app=")) app = Uri.UnescapeDataString(part.Substring(4).Replace('+', ' '));
+            Send(stream, 200, origin, Json.Serialize(ScreenReader.Read(app)), false);
+            return;
+        }
         if (method == "POST" && path == "/alerts")
         {
             object list;

@@ -13,9 +13,11 @@ out="${1:-$USERPROFILE/LightMoon}"
 mkdir -p "$out"
 csc="$WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 speech="$WINDIR/Microsoft.NET/assembly/GAC_MSIL/System.Speech/v4.0_4.0.0.0__31bf3856ad364e35/System.Speech.dll"
+wpf="$WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF" # UI Automation, for reading open apps (ScreenReader.cs)
 "$csc" -nologo -target:winexe -optimize+ \
   -out:"$(cygpath -w "$out/LightMoon Listener.exe")" \
   -win32icon:"$(cygpath -w "$here/lightmoon.ico")" \
   -r:"$(cygpath -w "$speech")" -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll \
-  "$(cygpath -w "$here/LightMoonListener.cs")" "$(cygpath -w "$here/DesktopOrb.cs")"
+  -r:"$(cygpath -w "$wpf/UIAutomationClient.dll")" -r:"$(cygpath -w "$wpf/UIAutomationTypes.dll")" -r:"$(cygpath -w "$wpf/WindowsBase.dll")" \
+  "$(cygpath -w "$here/LightMoonListener.cs")" "$(cygpath -w "$here/DesktopOrb.cs")" "$(cygpath -w "$here/ScreenReader.cs")"
 echo "built: $out/LightMoon Listener.exe"

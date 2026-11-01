@@ -18,7 +18,7 @@ const SNOOZE_MS = 10 * 60_000; // the orb's "Snooze 10 min"
 const onWindows = /Windows/.test(navigator.userAgentData?.platform ?? navigator.userAgent);
 // A copy served on this computer for testing leaves the real orb alone (it would take its Done and Snooze
 // presses), unless the address asks for it with ?orb.
-const testCopy = ['localhost', '127.0.0.1'].includes(location.hostname) && !new URLSearchParams(location.search).has('orb');
+const testCopy = ['localhost', '127.0.0.1'].includes(globalThis.location?.hostname) && !new URLSearchParams(globalThis.location?.search).has('orb');
 
 let onAnswer = () => {};
 let timer = 0;
@@ -109,4 +109,25 @@ async function takeAnswers() {
     if (!['done', 'snooze'].includes(action)) continue;
     onAnswer(parseAlertId(id).taskId, action, { until: action === 'snooze' ? Number(at) + SNOOZE_MS : null });
   }
+}
+
+// ---------- Reading this computer's open apps and notifications (windows/ScreenReader.cs) ----------
+
+// What's showing in an open app ("teams", "outlook", "whatsapp", "browser", or a window title):
+// { found, window, text } or { found: false, windows: [titles] }.
+export async function readScreen(app) {
+  if (!connected) throw new Error('The LightMoon Listener is not running on this computer.');
+  const res = await fetch(`${LISTENER_URL}/read?app=${encodeURIComponent(app)}`, { signal: AbortSignal.timeout(15000) });
+  if (res.status === 404) throw new Error('The LightMoon Listener on this computer is too old to read apps: it needs updating.');
+  if (!res.ok) throw new Error(`LightMoon Listener: ${res.status}`);
+  return res.json();
+}
+
+// Windows notifications that popped up since the Listener started: [{ at, text }], oldest first.
+export async function notifications() {
+  if (!connected) throw new Error('The LightMoon Listener is not running on this computer.');
+  const res = await fetch(`${LISTENER_URL}/notifications`, { signal: AbortSignal.timeout(5000) });
+  if (res.status === 404) throw new Error('The LightMoon Listener on this computer is too old to read notifications: it needs updating.');
+  if (!res.ok) throw new Error(`LightMoon Listener: ${res.status}`);
+  return res.json();
 }

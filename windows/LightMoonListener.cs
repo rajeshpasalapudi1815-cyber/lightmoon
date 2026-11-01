@@ -72,6 +72,7 @@ static class LightMoonListener
             bridge = new OrbBridge(orb, ui, Log);
             bridge.OnWakePhrase = SetOwnWake;
             bridge.Start();
+            ScreenReader.WatchNotifications(Log);
             try { ownWake = Tidy(File.ReadAllText(OwnWakeFile)); } catch { }
             if (voice)
             {
