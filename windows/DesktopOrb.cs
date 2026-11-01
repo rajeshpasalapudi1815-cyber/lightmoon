@@ -692,6 +692,7 @@ class OrbBridge
     TcpListener server;
     public Action<string> OnWakePhrase; // the user's own wake word, passed on by LightMoon (POST /wake)
     readonly Dictionary<string, DateTime> seenRequests = new Dictionary<string, DateTime>();
+    [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
 
     public OrbBridge(DesktopOrb orb, SynchronizationContext ui, Action<string> log)
     {
@@ -831,6 +832,36 @@ class OrbBridge
             }
         }
         if (method == "OPTIONS") { Send(stream, 204, origin, null, true); return; }
+        // Asked of LightMoon by voice: open a website or search in the browser (POST /open {url}, web addresses only),
+        // and play, pause or skip whatever is playing (POST /media {action}: the keyboard's media keys).
+        if (method == "POST" && (path == "/open" || path == "/media"))
+        {
+            if (origin == null) { Send(stream, 403, null, null, false); return; }
+            Dictionary<string, object> asked = null;
+            try { asked = Json.DeserializeObject(Encoding.UTF8.GetString(body)) as Dictionary<string, object>; }
+            catch (Exception) { }
+            if (asked == null) { Send(stream, 400, origin, null, false); return; }
+            if (path == "/open")
+            {
+                string url = asked.ContainsKey("url") ? Convert.ToString(asked["url"]) : "";
+                Uri address;
+                if (!Uri.TryCreate(url, UriKind.Absolute, out address) || (address.Scheme != "https" && address.Scheme != "http"))
+                {
+                    Send(stream, 400, origin, null, false);
+                    return;
+                }
+                try { System.Diagnostics.Process.Start(address.AbsoluteUri); } // the default browser, a new tab
+                catch (Exception) { Send(stream, 400, origin, null, false); return; }
+                Send(stream, 204, origin, null, false);
+                return;
+            }
+            string action = asked.ContainsKey("action") ? Convert.ToString(asked["action"]) : "";
+            byte key = action == "next" ? (byte)0xB0 : action == "previous" ? (byte)0xB1 : action == "stop" ? (byte)0xB2 : (byte)0xB3; // play/pause
+            keybd_event(key, 0, 0, UIntPtr.Zero);
+            keybd_event(key, 0, 2, UIntPtr.Zero);
+            Send(stream, 204, origin, null, false);
+            return;
+        }
         // LightMoon kept in the tray (TrayMode.cs): waiting for a wake, what it's doing, and asking for its window.
         if (path == "/events" || path == "/state" || path == "/show")
         {

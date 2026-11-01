@@ -786,8 +786,11 @@ async function send(text, { context = null, byVoice = false, heardAlso = [] } = 
     const out = await chat(text, { onText: live.push, heardAlso, shared: context ?? '' });
     live.done(out);
     applyState();
-    // "That's all", "thanks", "bye", "stop" end the conversation; anything else gets listened for again.
-    const closing = /^\W*(that'?s (all|it)|thanks?( you)?|thank u|ok(ay)? thanks?|bye|good ?bye|stop|nothing|no thanks|that will do)\W*$/i.test(text);
+    // "That's all", "thanks", "bye", "stop" end the conversation; anything else gets listened for again. Short
+    // messages only ("okay bye", "stop listening", "bye LightMoon"); "bye" is often heard as "buy".
+    const closing = text.split(/\s+/).length <= 5
+      && /\b(that'?s (all|it)|that is (all|it)|thanks?|thank (you|u)|bye|buy|goodbye|good ?night|stop|enough|nothing( else)?|no thanks|that will do|leave it|ok(ay)?,? (bye|thanks?))\b/i.test(text)
+      && !/\b(buy (a|an|some|the|me)|stop (the|my|playing|music|video|timer|alarm))\b/i.test(text);
     if (byVoice && !out.error && !closing && (shouldFollowUp(out.reply) || awaitingYes())) listenWhenFree = 'follow-up';
   } finally {
     busy = false;

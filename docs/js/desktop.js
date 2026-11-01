@@ -187,3 +187,26 @@ export const noteState = state => {
 export function showWindow() {
   fetch(`${LISTENER_URL}/show`, { method: 'POST', signal: AbortSignal.timeout(3000) }).catch(() => {});
 }
+
+// ---------- Opening websites and the media keys (windows/DesktopOrb.cs POST /open, /media) ----------
+
+// Opens a web address in the default browser, in a new tab.
+export async function openUrl(url) {
+  if (!connected) throw new Error('The LightMoon Listener is not running on this computer.');
+  const res = await fetch(`${LISTENER_URL}/open`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }), signal: AbortSignal.timeout(5000),
+  });
+  if (res.status === 404) throw new Error('The LightMoon Listener on this computer is too old to open websites: it needs updating.');
+  if (!res.ok) throw new Error("That address couldn't be opened.");
+}
+
+// 'play_pause', 'next', 'previous' or 'stop': the keyboard's media key, for whatever is playing (a YouTube video in
+// the browser, Spotify, a film).
+export async function mediaKey(action) {
+  if (!connected) throw new Error('The LightMoon Listener is not running on this computer.');
+  const res = await fetch(`${LISTENER_URL}/media`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }), signal: AbortSignal.timeout(5000),
+  });
+  if (res.status === 404) throw new Error('The LightMoon Listener on this computer is too old for media keys: it needs updating.');
+  if (!res.ok) throw new Error("The media key didn't go.");
+}

@@ -9,7 +9,7 @@ import { NATIVE_YES } from './language.js';
 const LEAVE_ALONE = new Set([
   'get_weather', 'look_up', 'check_link', 'news_headlines', 'phone_calendar', 'phone_recent_calls', 'phone_messages',
   'phone_number_info', 'phone_search', 'phone_navigate', 'phone_open_app', 'phone_media', 'phone_call', 'phone_message', 'phone_driving', 'compose_message', 'tap_send', 'teams_send', 'work_email_send',
-  'desktop_read', 'desktop_notifications',
+  'desktop_read', 'desktop_notifications', 'desktop_open', 'desktop_media',
 ]);
 // Tools that take something away, and those that answer a reminder.
 const TAKE_AWAY = new Set(['forget', 'delete_task', 'delete_routine', 'life_delete_task', 'delete_note', 'phone_cancel_scheduled']);
