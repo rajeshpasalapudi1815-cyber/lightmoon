@@ -13,6 +13,7 @@ import { linkNote } from './links.js';
 import { moneyNote } from './money.js';
 import { rememberDraft, SEND_APPS } from './compose.js';
 import { saidYes } from './orders.js';
+import { localStamp } from './time.js';
 
 const REFRESH_AFTER_MS = 60_000;
 const WAIT_AT_MOST_MS = 2_500;
@@ -50,7 +51,8 @@ async function load() {
   // Email accounts start switched off (Settings → Messages and email), so "check my mail" can find nothing.
   const sources = allowed.messages && phone.readingSources ? await phone.readingSources().catch(() => null) : null;
   const mail = sources ? { accounts: (sources.accounts ?? []).length, on: (sources.accounts ?? []).filter(a => a.allowed).length } : null;
-  seen = { events, calls, messages, battery, steps, mail, at: now };
+  const sends = phone.scheduledSends ? await phone.scheduledSends().then(r => r.sends ?? [], () => []) : [];
+  seen = { events, calls, messages, battery, steps, mail, sends, at: now };
 }
 
 // ---------- What the AI is told ----------
@@ -130,6 +132,10 @@ export function promptSection() {
     const notes = lookAlikeNotes(refs);
     lines.push(...refs.map(m => `  [${m.ref}] ${source(m)}, ${clock(m.at)}: "${shareable(m.text)}"${m.canReply ? '' : ' (no reply from here)'}`
       + `${asksSomething(m) ? ' (ASKS SOMETHING OF THEM)' : ''}${notes[m.ref] ? ` (${notes[m.ref]})` : ''}${linkNote(m.text) ? ` (${linkNote(m.text)})` : ''}${moneyNote(m.text) ? ` (${moneyNote(m.text)})` : ''}`));
+  }
+  if (seen.sends?.length) {
+    lines.push('Messages scheduled to send (phone_cancel_scheduled with the id cancels one):');
+    lines.push(...seen.sends.map(s => `  [${s.id}] ${dayWord(s.at)} ${clock(s.at)}, ${s.via === 'sms' ? 'text' : 'WhatsApp'} to ${s.name}: "${shareable(s.text).slice(0, 120)}"`));
   }
   const can = [
     allowed.calendar && 'read and add calendar events',
@@ -338,6 +344,7 @@ export function phoneTools() {
         via: { type: 'string', enum: ['sms', 'whatsapp'] },
         confirm_id: CONFIRM,
         send_now: { type: 'boolean', description: 'Only when they asked you to send them a joke, riddle, quote or wish you write: it goes on WhatsApp without the read-back.' },
+        at: { type: 'string', description: `To send it later instead of now ("at 8:45 pm"): ${STAMP}. The phone sends it then.` },
       },
       ['text'],
     ));
@@ -347,6 +354,7 @@ export function phoneTools() {
       hours: { type: 'integer', minimum: 1, maximum: 48, description: 'Default 12.' },
     }));
   }
+  if (seen.sends?.length) tools.push(tool('phone_cancel_scheduled', 'Cancel a message scheduled to send later (its id from your context).', { id: { type: 'string' } }, ['id']));
   tools.push(
     tool('phone_number_info', "Who a number is: its contact name if saved, and your calls with it. show_in also opens it in Truecaller "
       + "or the dialer, without calling, so its caller ID shows on screen; you can't see what Truecaller shows.", {
@@ -472,7 +480,7 @@ export const phoneHandlers = {
     return { text: show_in === 'truecaller' ? 'Opened the number in Truecaller' : 'Looked up the number', result: lines.join(' ') };
   },
 
-  async phone_message({ text, reply_to, to, via = 'sms', confirm_id, send_now: sendNow = false }) {
+  async phone_message({ text, reply_to, to, via = 'sms', confirm_id, send_now: sendNow = false, at }) {
     if (confirm_id) return runConfirmed(confirm_id);
     const words = String(text ?? '').trim();
     if (!words) throw new Error('text is required.');
@@ -494,6 +502,28 @@ export const phoneHandlers = {
       return asked;
     }
     const person = await findPerson(to);
+    // Later ("send a joke to my wife at 8:45 pm"): the phone sends it then, LightMoon open or not (ScheduledSends.java).
+    if (at) {
+      const when = toMs(at, 'at');
+      if (when <= Date.now() + 30_000) throw new Error(`at must be later than now (${localStamp()}); to send now, leave it out.`);
+      if (!phone.scheduleSend) throw new Error('Sending later needs LightMoon app 1.27 or later on their phone; tell them to update it from the releases page.');
+      const channel = via === 'sms' ? 'sms' : 'whatsapp';
+      const whenText = `${dayWord(when).toLowerCase()} at ${clock(when)}`;
+      const schedule = async () => {
+        const out = await call(phone.scheduleSend({
+          at: when, via: channel, number: channel === 'whatsapp' ? withCountryCode(person.number) : person.number, name: named(person), text: words,
+        }));
+        seen.at = 0; // show it in the list from the next reply
+        // How it goes then (ScheduledSends.java): unlocked, WhatsApp with the Send helper; locked, the reply box on
+        // their WhatsApp notification if one is showing, else a text, so it isn't missed.
+        const how = channel === 'whatsapp'
+          ? ` If the phone is locked then, it replies from their WhatsApp notification if there is one, otherwise it goes as an SMS.${out.helper ? '' : ' The Send helper is off, so even unlocked it goes that way; "turn on the Send helper" fixes that.'}`
+          : '';
+        return { text: `Scheduled: ${channel === 'sms' ? 'text' : 'WhatsApp'} to ${named(person)}, ${whenText}`, result: `Scheduled for ${whenText}.${how} Tell them this in one short sentence.` };
+      };
+      if (sendNow && askedToSendNow()) return schedule();
+      return askFirst(`${whenText.charAt(0).toUpperCase()}${whenText.slice(1)}, ${channel === 'sms' ? 'text' : 'WhatsApp'} ${named(person)}: "${words}"`, schedule);
+    }
     if (via === 'whatsapp') {
       // Read back like a text; on their yes WhatsApp opens that chat with the message and the Send helper sends it.
       const send = async () => {
@@ -518,6 +548,13 @@ export const phoneHandlers = {
       await call(phone.sendText({ number: person.number, text: words }));
       return `Texted ${person.name ?? person.number}`;
     });
+  },
+
+  async phone_cancel_scheduled({ id }) {
+    const { cancelled } = await call(phone.cancelScheduledSend({ id: String(id ?? '').replace(/^\[|\]$/g, '') }));
+    seen.at = 0;
+    if (!cancelled) throw new Error(`There is no scheduled message ${id}. Use an id from the list in your context.`);
+    return 'Cancelled the scheduled message';
   },
 
   async phone_messages({ hours = 12 }) {

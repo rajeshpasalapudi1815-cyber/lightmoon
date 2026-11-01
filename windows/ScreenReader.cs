@@ -49,6 +49,13 @@ static class ScreenReader
 
     static Dictionary<string, object> ReadNow(string app)
     {
+        // "Read my screen": the window in front, under LightMoon's own.
+        if (new[] { "screen", "front", "window", "this" }.Contains(app.Trim().ToLowerInvariant()))
+        {
+            var front = FrontWindow();
+            if (front == null) return new Dictionary<string, object> { { "found", false }, { "error", "No window is open in front." } };
+            return new Dictionary<string, object> { { "found", true }, { "window", front.Name }, { "minimized", false }, { "text", TextOf(front.Element) } };
+        }
         string[] wanted;
         if (!Titles.TryGetValue(app.Trim(), out wanted)) wanted = new[] { app.Trim() };
         var windows = TopWindows();
@@ -88,6 +95,30 @@ static class ScreenReader
     }
 
     class Window { public string Name; public AutomationElement Element; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint how);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool IsIconic(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int GetWindowText(IntPtr window, StringBuilder text, int max);
+    const uint GW_HWNDNEXT = 2;
+
+    // The window in front, going down the stack past LightMoon's own, the taskbar and untitled or hidden windows.
+    static Window FrontWindow()
+    {
+        for (IntPtr handle = GetForegroundWindow(); handle != IntPtr.Zero; handle = GetWindow(handle, GW_HWNDNEXT))
+        {
+            if (!IsWindowVisible(handle) || IsIconic(handle)) continue;
+            var title = new StringBuilder(512);
+            GetWindowText(handle, title, title.Capacity);
+            string name = title.ToString().Replace("​", "");
+            if (name.Length == 0 || name.StartsWith("LightMoon", StringComparison.OrdinalIgnoreCase) || name == "Program Manager") continue;
+            try { return new Window { Name = name, Element = AutomationElement.FromHandle(handle) }; }
+            catch (Exception) { }
+        }
+        return null;
+    }
 
     static List<Window> TopWindows()
     {

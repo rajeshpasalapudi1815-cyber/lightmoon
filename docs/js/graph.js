@@ -195,12 +195,15 @@ export async function sendTeams(place, text, mentionPeople = []) {
   return graph(`/chats/${chatId}/messages`, { method: 'POST', body: message });
 }
 
-export async function sendMail({ to, subject, body }) {
-  return graph('/me/sendMail', {
-    method: 'POST',
-    body: {
-      message: { subject, body: { contentType: 'Text', content: body }, toRecipients: to.map(address => ({ emailAddress: { address } })) },
-      saveToSentItems: true,
-    },
-  });
+// at (ms): Exchange holds it in Outbox and sends it then (the "deferred delivery" time), phone on or off.
+export async function sendMail({ to, subject, body, at = null }) {
+  const message = { subject, body: { contentType: 'Text', content: body }, toRecipients: to.map(address => ({ emailAddress: { address } })) };
+  if (at) message.singleValueExtendedProperties = [{ id: 'SystemTime 0x3FEF', value: new Date(at).toISOString() }];
+  return graph('/me/sendMail', { method: 'POST', body: { message, saveToSentItems: true } });
+}
+
+// The signed-in work account's address ("jr.admin@sarasamerica.com"), or ''.
+export async function accountAddress() {
+  if (!account) return '';
+  return String((await account.status().catch(() => null))?.account ?? '').toLowerCase();
 }

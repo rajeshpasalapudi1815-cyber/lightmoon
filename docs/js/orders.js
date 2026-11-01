@@ -12,7 +12,7 @@ const LEAVE_ALONE = new Set([
   'desktop_read', 'desktop_notifications',
 ]);
 // Tools that take something away, and those that answer a reminder.
-const TAKE_AWAY = new Set(['forget', 'delete_task', 'delete_routine', 'life_delete_task', 'delete_note']);
+const TAKE_AWAY = new Set(['forget', 'delete_task', 'delete_routine', 'life_delete_task', 'delete_note', 'phone_cancel_scheduled']);
 const ANSWER = new Set(['complete_task', 'stop_checking_in', 'snooze_reminder', 'set_goal_status', 'life_complete_task', 'life_miss_task']);
 
 const TAKE_AWAY_WORDS = /\b(forget|delete|remove|clear|erase|wipe|drop|cancel|scrap|undo|abandon|pause|give up|get rid|no longer|anymore|don'?t (need|want)|never ?mind)\b/i;

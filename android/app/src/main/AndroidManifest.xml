@@ -37,6 +37,7 @@
 
         <!-- Spoken reminders: the alarm, the voice that says it, and setting alarms again after a restart. -->
         <receiver android:name=".AlarmReceiver" android:exported="false" />
+        <receiver android:name=".ScheduledSends" android:exported="false" />
         <receiver android:name=".ReminderActionReceiver" android:exported="false" />
         <receiver android:name=".FocusReceiver" android:exported="false" />
 

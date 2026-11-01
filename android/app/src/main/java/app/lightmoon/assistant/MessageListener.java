@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -352,6 +353,20 @@ public class MessageListener extends NotificationListenerService {
             replies.remove(conversation);
             return false;
         }
+    }
+
+    // Answers the WhatsApp chat with this person through its notification (works with the phone locked), if one
+    // from them is showing: their name as the chat's title, the whole of it or its first word. False otherwise.
+    static boolean replyToChat(Context context, String name, String text) {
+        String wanted = String.valueOf(name).trim().toLowerCase(Locale.ROOT);
+        if (wanted.isEmpty()) return false;
+        for (String conversation : replies.keySet()) {
+            String[] parts = conversation.split("\\|", 2);
+            if (parts.length < 2 || !parts[0].startsWith("com.whatsapp")) continue;
+            String chat = parts[1].trim().toLowerCase(Locale.ROOT);
+            if (chat.equals(wanted) || chat.split(" ")[0].equals(wanted.split(" ")[0])) return reply(context, conversation, text);
+        }
+        return false;
     }
 
     private static Notification.Action replyAction(Notification n) {

@@ -714,6 +714,63 @@ public class PhonePlugin extends Plugin {
         }
     }
 
+    // ---------- Messages to send later (ScheduledSends.java) ----------
+
+    // { at, via: "whatsapp" | "sms", number, name, text } -> { id }. The app has read it back and had the user's yes.
+    @PluginMethod
+    public void scheduleSend(PluginCall call) {
+        long at = longArg(call, "at", 0L);
+        String via = call.getString("via", "whatsapp");
+        String number = call.getString("number", "").trim();
+        String text = call.getString("text", "").trim();
+        if (at <= System.currentTimeMillis() || text.isEmpty() || number.replaceAll("[^0-9]", "").length() < 6) {
+            call.reject("A scheduled message needs a time ahead, a number and the words.");
+            return;
+        }
+        if ("sms".equals(via) && !has(Manifest.permission.SEND_SMS)) {
+            call.reject("Texting is off. Turn it on in LightMoon's Settings → Phone, or send it on WhatsApp.");
+            return;
+        }
+        String digits = "sms".equals(via) ? number : number.replaceAll("[^0-9]", "");
+        ScheduledSends.Send send = ScheduledSends.add(getContext(), at, via, digits, call.getString("name", number), text);
+        if (send == null) {
+            call.reject("There are already 50 messages waiting to go.");
+            return;
+        }
+        JSObject result = new JSObject();
+        result.put("id", send.id);
+        result.put("helper", SendHelper.isEnabled(getContext()));
+        call.resolve(result);
+    }
+
+    // -> { sends: [{ id, at, via, name, text }] }, soonest first.
+    @PluginMethod
+    public void scheduledSends(PluginCall call) {
+        JSArray list = new JSArray();
+        List<ScheduledSends.Send> sends = ScheduledSends.all(getContext());
+        sends.sort((a, b) -> Long.compare(a.at, b.at));
+        for (ScheduledSends.Send send : sends) {
+            JSObject item = new JSObject();
+            item.put("id", send.id);
+            item.put("at", send.at);
+            item.put("via", send.via);
+            item.put("name", send.name);
+            item.put("text", send.text);
+            list.put(item);
+        }
+        JSObject result = new JSObject();
+        result.put("sends", list);
+        call.resolve(result);
+    }
+
+    // { id } -> { cancelled }.
+    @PluginMethod
+    public void cancelScheduledSend(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("cancelled", ScheduledSends.cancel(getContext(), call.getString("id", "")));
+        call.resolve(result);
+    }
+
     // The Send helper (SendHelper.java): { enabled } now.
     @PluginMethod
     public void sendHelper(PluginCall call) {

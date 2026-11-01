@@ -6,6 +6,7 @@ import { languageCode, TALK_LANGUAGES } from './language.js';
 function openMailApp(url) {
   const link = document.createElement('a');
   link.href = url;
+  if (/^https?:/.test(url)) link.target = '_blank'; // a web mail page opens beside LightMoon, not in its place
   link.rel = 'noopener';
   document.body.append(link);
   link.click();
@@ -130,6 +131,7 @@ export const TOOLS = [
       to: { type: 'string' },
       subject: { type: 'string' },
       body: { type: 'string', description: 'The whole email, in their voice, signed with their name.' },
+      from: { type: 'string', description: 'Which of their own accounts it goes from: an address or its nickname ("through Rajesh").' },
     },
     ['to', 'body'],
   ),
@@ -168,7 +170,7 @@ export const currentTools = () => [...TOOLS, CHECK_LINK, COMPOSE, ...(lifeConnec
 // (desktop.js, windows/ScreenReader.cs). Sent when the talk is about reading messages, mail or the screen.
 const DESKTOP_TOOLS = [
   tool('desktop_read', "Read what's showing in an app open on this computer, which is in front of them: Teams (its chat list with the latest messages, then the open chat), Outlook mail, WhatsApp, a browser page. Use it for \"read my latest Teams message\", \"any new email?\".", {
-    app: { type: 'string', description: 'teams, outlook, whatsapp, browser, or words from the window title.' },
+    app: { type: 'string', description: 'screen (the window in front of them, for "read my screen"), teams, outlook, whatsapp, browser, or words from the window title.' },
   }, ['app']),
   tool('desktop_notifications', 'Windows notifications that came in on this computer (Teams, Outlook, WhatsApp and others) since the Listener started.', {}),
 ];
@@ -212,11 +214,12 @@ const WORK_TOOLS = [
   ),
   tool(
     'work_email_send',
-    'Send an email now from their work account. The first call reads it back; call again with confirm_id after their yes.',
+    'Send an email from their work account, now or at a set time. The first call reads it back; call again with confirm_id after their yes.',
     {
       to: { type: 'string', description: 'Email addresses or nicknames, comma-separated.' },
       subject: { type: 'string' },
       body: { type: 'string' },
+      at: { type: 'string', description: 'To send it later: local time, YYYY-MM-DDTHH:MM. Outlook sends it then, phone on or off.' },
       confirm_id: { type: 'string' },
     },
     ['to', 'subject', 'body'],
@@ -272,7 +275,7 @@ export function toolsFor(text, loaded = new Set()) {
 // The phone tools a request needs, by its words.
 const PHONE_PARTS = [
   [/\b(tell|message|msg|text|sms|whats ?app|reply|send|chat|call(ed|ing)?|ring|dial|missed|contact|number|who (is|was)|truecaller)\b|కాల్|ఫోన్|మెసేజ్|వాట్సాప్|చెప్పు|कॉल|फोन|मैसेज/i,
-    ['phone_message', 'phone_messages', 'phone_call', 'phone_recent_calls', 'phone_number_info']],
+    ['phone_message', 'phone_messages', 'phone_call', 'phone_recent_calls', 'phone_number_info', 'phone_cancel_scheduled']],
   [/\b(calendar|meetings?|events?|schedule|appointment|tomorrow|today|next week)\b/i, ['phone_calendar', 'phone_add_event']],
   [/\b(alarms?|timer|wake me|remind me in|minutes?)\b/i, ['phone_alarm']],
   [/\b(flash ?light|torch|volume|ringer|silent|vibrate|mute|louder|quieter)\b/i, ['phone_device']],
@@ -565,7 +568,7 @@ const handlers = {
     return person ? `"${nick}" is ${person}` : `Forgot the nickname "${nick}"`;
   },
 
-  draft_email({ to, subject, body }) {
+  async draft_email({ to, subject, body, from }) {
     const said = toText(to, 'to', 120);
     const address = nicknames.lookUp(said) ?? said;
     if (!EMAIL_ADDRESS.test(address)) {
@@ -573,10 +576,22 @@ const handlers = {
     }
     const text = toText(body, 'body', 4000);
     const title = String(subject ?? '').trim().slice(0, 200);
-    const url = `mailto:${encodeURIComponent(address).replace('%40', '@')}?${new URLSearchParams({ subject: title, body: text }).toString().replace(/\+/g, '%20')}`;
-    openMailApp(url);
+    // From which of their accounts ("through Rajesh" = the nickname for one of their own addresses).
+    const fromSaid = String(from ?? '').trim();
+    const sender = fromSaid ? (nicknames.lookUp(fromSaid) ?? fromSaid).toLowerCase() : '';
+    if (fromSaid && !EMAIL_ADDRESS.test(sender)) throw new Error(`"${fromSaid}" isn't one of their email addresses. Ask which address, and offer set_nickname (e.g. ${fromSaid} = name@domain.com).`);
+    if (sender && workSignedIn && sender === await work.accountAddress()) {
+      throw new Error(`${sender} is their signed-in work account: use work_email_send, which sends it from there directly.`);
+    }
+    const query = new URLSearchParams({ subject: title, body: text }).toString().replace(/\+/g, '%20');
+    // Gmail on the computer opens in the right account (authuser); other apps open with the account they default to.
+    const gmailWeb = sender.endsWith('@gmail.com') && !phoneApp;
+    openMailApp(gmailWeb
+      ? `https://mail.google.com/mail/?${new URLSearchParams({ authuser: sender, view: 'cm', fs: '1', to: address, su: title, body: text }).toString()}`
+      : `mailto:${encodeURIComponent(address).replace('%40', '@')}?${query}`);
     rememberDraft('email', text);
-    return { text: `Email to ${address} opened in your mail app`, result: `The mail app is open with the email to ${address} filled in. Tell the user to check it and tap Send there; you haven't sent it.` };
+    const checkFrom = sender && !gmailWeb ? ` Ask them to check the From is ${sender} (switch it there if not).` : '';
+    return { text: `Email to ${address} opened${sender ? ` from ${sender}` : ''}`, result: `The mail is open with the email to ${address} filled in${gmailWeb ? `, in Gmail as ${sender}` : ''}. Tell the user to check it and tap Send there; you haven't sent it.${checkFrom}` };
   },
 
   async compose_message({ app, to, group, text }) {
@@ -624,16 +639,22 @@ const handlers = {
     });
   },
 
-  async work_email_send({ to, subject, body, confirm_id }) {
+  async work_email_send({ to, subject, body, at, confirm_id }) {
     if (confirm_id) return runConfirmed(confirm_id);
     const addresses = String(to ?? '').split(/\s*[,;]\s*/).filter(Boolean).map(name => nicknames.lookUp(name) ?? name);
     const bad = addresses.filter(a => !EMAIL_ADDRESS.test(a));
     if (!addresses.length || bad.length) throw new Error(`I need an email address for ${bad.join(', ') || 'who it goes to'}; ask, and offer to remember it with set_nickname.`);
     const title = toText(subject, 'subject', 200);
     const words = toText(body, 'body', 8000);
-    return askFirst(`Email ${addresses.join(', ')}, subject "${title}": "${words.slice(0, 300)}"`, async () => {
-      await work.sendMail({ to: addresses, subject: title, body: words });
-      return { text: `Email sent to ${addresses.join(', ')}`, result: `Sent from their work account to ${addresses.join(', ')}.` };
+    const later = toTime(at, 'at', { requireTime: true });
+    if (later && later <= localStamp()) throw new Error(`at ${later} is not in the future; it is now ${localStamp()}.`);
+    const from = await work.accountAddress();
+    const when = later ? `, ${prettyTime(later)}` : '';
+    return askFirst(`Email ${addresses.join(', ')}${from ? ` from ${from}` : ''}${when}, subject "${title}": "${words.slice(0, 300)}"`, async () => {
+      await work.sendMail({ to: addresses, subject: title, body: words, at: later ? Date.parse(later) : null });
+      return later
+        ? { text: `Email to ${addresses.join(', ')} scheduled${when}`, result: `Outlook holds it in the Outbox and sends it${when}, from ${from || 'their work account'}.` }
+        : { text: `Email sent to ${addresses.join(', ')}`, result: `Sent from ${from || 'their work account'} to ${addresses.join(', ')}.` };
     });
   },
 
@@ -791,6 +812,8 @@ async function quickMessage(said) {
     const split = await splitNameAndText(order.rest, isPerson);
     if (!split) return null; // no contact by that name: the AI asks
     if (/^(a |an |some )?(jokes?|riddles?|puns?|shayari|quotes?|good (morning|night)|wish(es)?)\b/i.test(split.text)) return null; // the AI writes it
+    // "WhatsApp wife at 8:45 pm good night": for later, which the AI schedules.
+    if (/^(at|by|tomorrow|tonight|in \d+|on (mon|tue|wed|thu|fri|sat|sun))\b|\b\d{1,2}(:\d{2})?\s?(am|pm)\b/i.test(split.text)) return null;
     ({ to } = split);
     ({ via } = order);
     words = split.text;
