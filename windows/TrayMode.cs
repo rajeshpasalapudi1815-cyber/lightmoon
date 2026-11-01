@@ -132,8 +132,13 @@ static class TrayMode
     }
 
     // POST /state from the page.
-    public static void SetPageState(string state, bool activated)
+    static string lastProblem = "";
+
+    public static void SetPageState(string state, bool activated, string problem = "")
     {
+        if (!string.IsNullOrEmpty(problem) && problem != lastProblem) log("LightMoon page: " + problem);
+        lastProblem = problem ?? "";
+        if (state != pageState && pageState != "unknown") log("LightMoon: " + state);
         if (DateTime.Now - pageSeen > TimeSpan.FromSeconds(180)) log("tray mode: LightMoon page connected (" + state + (activated ? ", may speak" : ", needs a key press to speak") + ")");
         pageSeen = DateTime.Now;
         pageActivated = activated;

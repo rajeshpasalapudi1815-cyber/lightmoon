@@ -166,10 +166,18 @@ export function reportState(state) {
   if (key === stateSent) return;
   stateSent = key;
   fetch(`${LISTENER_URL}/state`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, activated }), signal: AbortSignal.timeout(3000),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, activated, problem }), signal: AbortSignal.timeout(3000),
   }).catch(() => { stateSent = ''; });
 }
 let lastState = 'idle';
+let problem = ''; // the page's latest trouble (a voice error), for the Listener's log
+
+export function notePageProblem(text) {
+  if (text === problem) return;
+  problem = text;
+  stateSent = '';
+  reportState(lastState);
+}
 export const noteState = state => {
   lastState = state;
   reportState(state);

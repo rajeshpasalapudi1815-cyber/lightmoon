@@ -849,7 +849,8 @@ class OrbBridge
                 if (fields == null) { Send(stream, 400, origin, null, false); return; }
                 string state = fields.ContainsKey("state") ? Convert.ToString(fields["state"]) : "idle";
                 bool activated = fields.ContainsKey("activated") && Convert.ToBoolean(fields["activated"]);
-                ui.Send(_ => TrayMode.SetPageState(state, activated), null);
+                string trouble = fields.ContainsKey("problem") ? Convert.ToString(fields["problem"]) : "";
+                ui.Send(_ => TrayMode.SetPageState(state, activated, trouble), null);
                 Send(stream, 204, origin, null, false);
                 return;
             }

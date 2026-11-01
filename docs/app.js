@@ -429,7 +429,10 @@ const speaker = {
   },
 
   speak(text, { voice = prefs.voice, rate = prefs.rate, force = false } = {}) {
-    if ((!prefs.speak && !force) || !('speechSynthesis' in window)) return;
+    if ((!prefs.speak && !force) || !('speechSynthesis' in window)) {
+      if (text) desktop.notePageProblem(prefs.speak ? 'this browser has no voice' : 'speaking replies is switched off in Settings'); // seen in the Listener's log
+      return;
+    }
     const sayAs = store.pronunciations.all();
     // Taught a new word (by the AI, or on another device): the phone's own announcements learn it too.
     if (JSON.stringify(sayAs) !== this.sharedSayAs) this.shareVoice();
@@ -484,7 +487,7 @@ const speaker = {
     utterance.rate = entry.rate;
     utterance.onend = utterance.onerror = event => {
       if (entry.dropped || entry.generation !== this.generation) return;
-      if (event?.type === 'error' && !['interrupted', 'canceled'].includes(event.error)) problems.report('voice', `${chosen?.name ?? 'the voice'}: ${event.error}`);
+      if (event?.type === 'error' && !['interrupted', 'canceled'].includes(event.error)) { problems.report('voice', `${chosen?.name ?? 'the voice'}: ${event.error}`); desktop.notePageProblem(`voice ${chosen?.name ?? ''}: ${event.error}`); }
       this.queue = this.queue.filter(other => other !== entry);
       if (CONNECTION_ERRORS.includes(event?.error) && isOnlineVoice(chosen)) return this.sayOffline(entry);
       if (!this.queue.length) this.finish();
