@@ -33,6 +33,9 @@ let wakeSent = null; // the own wake word last passed on to the Listener
 export function start(handlers) {
   if (isNativeApp || !onWindows || testCopy || timer) return;
   onAnswer = handlers.onAnswer;
+  onWake = handlers.onWake ?? (() => {});
+  waitForWakes();
+  setInterval(() => { stateSent = ''; reportState(lastState); }, 30_000); // so the Listener knows it's still here
   store.onLocalChange(() => {
     if (!connected) return;
     if (running) {
@@ -130,4 +133,47 @@ export async function notifications() {
   if (res.status === 404) throw new Error('The LightMoon Listener on this computer is too old to read notifications: it needs updating.');
   if (!res.ok) throw new Error(`LightMoon Listener: ${res.status}`);
   return res.json();
+}
+
+// ---------- Kept in the tray (windows/TrayMode.cs) ----------
+// The Listener keeps LightMoon's window out of sight; "LightMoon" heard there arrives here, and what LightMoon is
+// doing goes back so a thin line can glow at the top of the screen.
+
+let onWake = () => {};
+let stateSent = '';
+
+// Waits on the Listener for a wake, again and again (a long request, answered when "LightMoon" is heard).
+async function waitForWakes() {
+  for (;;) {
+    try {
+      const res = await fetch(`${LISTENER_URL}/events`, { signal: AbortSignal.timeout(30000) });
+      if (res.status === 404) return; // an older Listener: it wakes LightMoon by bringing it to the front
+      if (res.ok && (await res.json()).wake) onWake();
+      else if (!res.ok) await new Promise(resolve => setTimeout(resolve, 15000));
+    } catch {
+      await new Promise(resolve => setTimeout(resolve, connected ? 2000 : 15000)); // the Listener isn't running
+    }
+  }
+}
+
+// 'idle', 'listening', 'thinking' or 'speaking', when it changes (and now and then, so the Listener knows it's here).
+export function reportState(state) {
+  if (isNativeApp || !onWindows || testCopy) return;
+  const activated = Boolean(navigator.userActivation?.hasBeenActive);
+  const key = `${state}|${activated}`;
+  if (key === stateSent) return;
+  stateSent = key;
+  fetch(`${LISTENER_URL}/state`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, activated }), signal: AbortSignal.timeout(3000),
+  }).catch(() => { stateSent = ''; });
+}
+let lastState = 'idle';
+export const noteState = state => {
+  lastState = state;
+  reportState(state);
+};
+
+// Its window, for what needs the user (the lock screen).
+export function showWindow() {
+  fetch(`${LISTENER_URL}/show`, { method: 'POST', signal: AbortSignal.timeout(3000) }).catch(() => {});
 }

@@ -819,6 +819,35 @@ class OrbBridge
         string query = path.Contains("?") ? path.Substring(path.IndexOf('?') + 1) : "";
         path = path.Split('?')[0];
         if (method == "OPTIONS") { Send(stream, 204, origin, null, true); return; }
+        // LightMoon kept in the tray (TrayMode.cs): waiting for a wake, what it's doing, and asking for its window.
+        if (path == "/events" || path == "/state" || path == "/show")
+        {
+            if (origin == null) { Send(stream, 403, null, null, false); return; }
+            if (method == "GET" && path == "/events")
+            {
+                bool woke = TrayMode.WaitForWake();
+                Send(stream, 200, origin, woke ? "{\"wake\":true}" : "{}", false);
+                return;
+            }
+            if (method == "POST" && path == "/state")
+            {
+                Dictionary<string, object> fields = null;
+                try { fields = Json.DeserializeObject(Encoding.UTF8.GetString(body)) as Dictionary<string, object>; }
+                catch (Exception) { }
+                if (fields == null) { Send(stream, 400, origin, null, false); return; }
+                string state = fields.ContainsKey("state") ? Convert.ToString(fields["state"]) : "idle";
+                bool activated = fields.ContainsKey("activated") && Convert.ToBoolean(fields["activated"]);
+                ui.Send(_ => TrayMode.SetPageState(state, activated), null);
+                Send(stream, 204, origin, null, false);
+                return;
+            }
+            if (method == "POST" && path == "/show")
+            {
+                ui.Send(_ => TrayMode.ShowWindow(), null);
+                Send(stream, 204, origin, null, false);
+                return;
+            }
+        }
         // What's on screen in an open app, and the notifications that popped up (ScreenReader.cs). Only from LightMoon's
         // own page (an Origin is required here, so another program can't use LightMoon to read the screen either).
         if (method == "GET" && (path == "/read" || path == "/notifications"))

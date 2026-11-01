@@ -366,6 +366,8 @@ function refresh() {
   else if (speaker.active) mode = 'speaking';
   else if (busy) mode = 'thinking';
   document.body.dataset.state = mode;
+  desktop.noteState(mode); // the line at the top of the screen, while LightMoon is in the tray
+  if (document.hidden && mode !== 'idle') hiddenAt = Date.now(); // used out of sight (in the tray): the relock time starts again
   const idle = !state?.ai.ready
     ? 'Offline: add an API key in settings'
     : prefs.handsFree ? `Say "${assistantName()}" to wake me` : 'Standing by';
@@ -2576,7 +2578,19 @@ function start({ auto = false } = {}) {
     onStatus: paintSyncStatus,
   });
   // Done and Snooze pressed on the Windows desktop orb.
-  desktop.start({ onAnswer: (taskId, action, options) => { const reply = answerReminder(taskId, action, options); if (reply) note(reply); } });
+  desktop.start({
+    onAnswer: (taskId, action, options) => { const reply = answerReminder(taskId, action, options); if (reply) note(reply); },
+    // "LightMoon" heard while it's kept in the tray: listen right here, out of sight (the lock screen needs the window).
+    onWake: () => {
+      // Unused for the relock time (Settings): the PIN first, as when it comes back to the front.
+      if (started && lockDue()) showLock();
+      if (locked) return desktop.showWindow();
+      if (!started) start({ auto: true });
+      speaker.stop();
+      listenWhenFree = 'follow-up';
+      refresh();
+    },
+  });
 
   if (phone) {
     phone.addListener('meetingDue', onPhoneSay);

@@ -73,6 +73,7 @@ static class LightMoonListener
             bridge.OnWakePhrase = SetOwnWake;
             bridge.Start();
             ScreenReader.WatchNotifications(Log);
+            TrayMode.Start(Folder, FindLightMoon, Log);
             try { ownWake = Tidy(File.ReadAllText(OwnWakeFile)); } catch { }
             if (voice)
             {
@@ -205,6 +206,8 @@ static class LightMoonListener
     {
         if ((DateTime.Now - lastWake).TotalSeconds < 4) return; // one wake per call
         lastWake = DateTime.Now;
+        // Kept in the tray: it listens where it is, with the line at the top of the screen (TrayMode.cs).
+        if (TrayMode.On && TrayMode.Wake(OpenLightMoon)) return;
         IntPtr window = FindLightMoon();
         if (window != IntPtr.Zero && GetForegroundWindow() == window) { Log("LightMoon is in front: left alone"); return; }
         if (window == IntPtr.Zero) { Log("opening LightMoon"); OpenLightMoon(); return; }
@@ -272,7 +275,11 @@ static class LightMoonListener
             Log(paused ? "paused" : "listening again");
         };
         menu.Items.Add(listenItem);
-        menu.Items.Add("Open LightMoon", null, (s, e) => Wake());
+        menu.Items.Add("Show or hide LightMoon", null, (s, e) => TrayMode.Toggle(OpenLightMoon));
+        var trayItem = new ToolStripMenuItem("Keep LightMoon in the tray") { CheckOnClick = true };
+        trayItem.CheckedChanged += (s, e) => TrayMode.SetOn(trayItem.Checked);
+        menu.Opening += (s, e) => trayItem.Checked = TrayMode.On;
+        menu.Items.Add(trayItem);
         orbItem = new ToolStripMenuItem("Hide the orb", null, (s, e) => orb.OrbShown = !orb.OrbShown);
         menu.Items.Add(orbItem);
         menu.Opening += (s, e) => orbItem.Text = orb.OrbShown ? "Hide the orb" : "Show the orb";
@@ -285,7 +292,8 @@ static class LightMoonListener
             ContextMenuStrip = menu,
             Visible = true,
         };
-        tray.DoubleClick += (s, e) => Wake();
+        // A click shows LightMoon, or puts it away again (the menu is on the right button).
+        tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) TrayMode.Toggle(OpenLightMoon); };
     }
 
     // The tray menu at the pointer, the way the tray icon opens it (so it closes when you click elsewhere).
