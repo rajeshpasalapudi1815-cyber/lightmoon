@@ -46,6 +46,7 @@ static class LightMoonListener
     static DesktopOrb orb;
     static OrbBridge bridge;
     static bool paused;
+    static bool pausedByLock; // paused because Windows was locked: listening again on unlock
     static DateTime lastWake = DateTime.MinValue;
     static SynchronizationContext ui;
 
@@ -82,6 +83,15 @@ static class LightMoonListener
                 Microsoft.Win32.SystemEvents.PowerModeChanged += (s, e) =>
                 {
                     if (e.Mode == Microsoft.Win32.PowerModes.Resume) ui.Post(_ => { Log("woke from sleep: listening afresh"); Restart(); }, null);
+                };
+                // Locked (Windows key + L, or the screen locking by itself): nobody can wake LightMoon until it's
+                // unlocked, so someone at the desk can't have it read out their messages.
+                Microsoft.Win32.SystemEvents.SessionSwitch += (s, e) =>
+                {
+                    if (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionLock)
+                        ui.Post(_ => { if (listenItem.Checked) { pausedByLock = true; listenItem.Checked = false; Log("Windows locked: wake word paused"); } }, null);
+                    else if (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionUnlock)
+                        ui.Post(_ => { if (pausedByLock) { pausedByLock = false; listenItem.Checked = true; Log("Windows unlocked: listening again"); } }, null);
                 };
                 watchdog = new System.Windows.Forms.Timer { Interval = 60000 };
                 watchdog.Tick += (s, e) =>
