@@ -234,7 +234,7 @@ static class LightMoonListener
     {
         if ((DateTime.Now - lastWake).TotalSeconds < 4) return; // one wake per call
         lastWake = DateTime.Now;
-        // Kept in the tray: it listens where it is, with the line at the top of the screen (TrayMode.cs).
+        // Kept in the tray: it listens where it is, with the dot at the top of the screen (TrayMode.cs).
         if (TrayMode.On && TrayMode.Wake(OpenLightMoon, said)) return;
         IntPtr window = FindLightMoon();
         if (window != IntPtr.Zero && GetForegroundWindow() == window) { Log("LightMoon is in front: left alone"); return; }

@@ -1,6 +1,6 @@
 // LightMoon kept in the tray: its window stays out of sight (off the screen and off the taskbar and Alt+Tab) while
 // the page keeps running, and "LightMoon" wakes it there instead of bringing it to the front. While it listens,
-// thinks or speaks, a thin line glows along the top of the screen (EdgeGlow), so it is clear LightMoon is at work
+// thinks or speaks, a small dot pulses at the top of the screen (EdgeGlow), so it is clear LightMoon is at work
 // without showing anything else. Clicking the tray icon shows or hides the window.
 //
 // The page and the Listener talk over the bridge (DesktopOrb.cs): the page waits on GET /events for a wake, posts
@@ -229,11 +229,12 @@ static class TrayMode
     const byte VK_MENU = 0x12, VK_F13 = 0x7C;
 }
 
-// A thin line along the top of the screen while LightMoon works: blue listening, violet thinking, teal speaking,
-// gently breathing. It never takes clicks or the focus, and isn't in the taskbar.
+// A small dot at the top centre of the screen while LightMoon works: blue listening, violet thinking, teal speaking,
+// gently pulsing. It never takes clicks or the focus, and isn't in the taskbar.
 class EdgeGlow : Form
 {
-    const int Height_ = 3;
+    const int Size_ = 12;
+    const int FromTop = 6;
     readonly System.Windows.Forms.Timer breathe = new System.Windows.Forms.Timer { Interval = 50 };
     Color color = Color.DeepSkyBlue;
     double phase;
@@ -244,15 +245,25 @@ class EdgeGlow : Form
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        BackColor = Color.Black;
-        var screen = Screen.PrimaryScreen.Bounds;
-        Bounds = new Rectangle(screen.Left, screen.Top, screen.Width, Height_);
+        BackColor = color;
+        Place();
         breathe.Tick += (s, e) =>
         {
-            phase += 0.12;
-            Opacity = 0.55 + 0.35 * Math.Sin(phase);
-            Invalidate();
+            phase += 0.15;
+            Opacity = 0.45 + 0.5 * (0.5 + 0.5 * Math.Sin(phase)); // between faint and bright, about once a second
         };
+    }
+
+    // Round, at the top centre of the main screen.
+    void Place()
+    {
+        var screen = Screen.PrimaryScreen.Bounds;
+        Bounds = new Rectangle(screen.Left + (screen.Width - Size_) / 2, screen.Top + FromTop, Size_, Size_);
+        using (var shape = new GraphicsPath())
+        {
+            shape.AddEllipse(0, 0, Size_, Size_);
+            Region = new Region(shape);
+        }
     }
 
     protected override bool ShowWithoutActivation { get { return true; } }
@@ -270,31 +281,15 @@ class EdgeGlow : Form
     public void Show(string state)
     {
         color = state == "thinking" ? Color.MediumPurple : state == "speaking" ? Color.MediumAquamarine : Color.DeepSkyBlue;
-        var screen = Screen.PrimaryScreen.Bounds;
-        Bounds = new Rectangle(screen.Left, screen.Top, screen.Width, Height_);
+        BackColor = color;
+        Place();
         if (!Visible) base.Show();
         breathe.Start();
-        Invalidate();
     }
 
     public new void Hide()
     {
         breathe.Stop();
         if (Visible) base.Hide();
-    }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        // Brightest in the middle: a glow rather than a flat bar.
-        using (var brush = new LinearGradientBrush(ClientRectangle, Color.Black, Color.Black, LinearGradientMode.Horizontal))
-        {
-            var blend = new ColorBlend
-            {
-                Colors = new[] { color, Color.White, color },
-                Positions = new[] { 0f, 0.5f, 1f },
-            };
-            brush.InterpolationColors = blend;
-            e.Graphics.FillRectangle(brush, ClientRectangle);
-        }
     }
 }
