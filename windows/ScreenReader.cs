@@ -187,8 +187,16 @@ static class ScreenReader
         }
     }
 
+    // Windows' own store first (everything in the notification centre, oldest first); what the watcher caught if it
+    // can't be read.
     public static List<Dictionary<string, object>> Notifications()
     {
+        var stored = NotificationStore.Recent(KeepNotifications);
+        if (stored.Count > 0)
+        {
+            stored.Reverse();
+            return stored;
+        }
         lock (notifications) return notifications.ToList();
     }
 }
