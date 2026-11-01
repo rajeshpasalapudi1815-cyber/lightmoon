@@ -97,7 +97,7 @@ static class TrayMode
             open(); // opened by the wake word, it listens straight away; Keep() puts it away after
             return true;
         }
-        if (DateTime.Now - pageSeen > TimeSpan.FromSeconds(60))
+        if (DateTime.Now - pageSeen > TimeSpan.FromSeconds(180))
         {
             // The page isn't talking to us (an older version, or still loading): the usual wake, with the window where it can be seen.
             log("tray mode: LightMoon page not connected, showing it");
@@ -118,6 +118,7 @@ static class TrayMode
 
     public static bool WaitForWake()
     {
+        pageSeen = DateTime.Now; // waiting here means the page is alive (hidden pages post their state only now and then)
         if (DateTime.Now - eventsLogged > TimeSpan.FromMinutes(5))
         {
             eventsLogged = DateTime.Now;
@@ -133,7 +134,7 @@ static class TrayMode
     // POST /state from the page.
     public static void SetPageState(string state, bool activated)
     {
-        if (DateTime.Now - pageSeen > TimeSpan.FromSeconds(60)) log("tray mode: LightMoon page connected (" + state + (activated ? ", may speak" : ", needs a key press to speak") + ")");
+        if (DateTime.Now - pageSeen > TimeSpan.FromSeconds(180)) log("tray mode: LightMoon page connected (" + state + (activated ? ", may speak" : ", needs a key press to speak") + ")");
         pageSeen = DateTime.Now;
         pageActivated = activated;
         pageState = state ?? "idle";
