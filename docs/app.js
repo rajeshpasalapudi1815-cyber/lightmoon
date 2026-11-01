@@ -2609,10 +2609,20 @@ function start({ auto = false } = {}) {
   }
 }
 
+// On the computer, not on screen: minimized, behind, or parked off the screen by the Listener's tray mode (which
+// browsers don't count as hidden).
+const outOfSight = () => !isNativeApp && (document.hidden || window.screenX < -10000 || window.screenY < -10000);
+
 // Opened from a home-screen shortcut or the share sheet: do that instead of the usual briefing.
 // Otherwise brief (or greet), then start listening if that setting is on.
 function greet(auto) {
   listener.autoStarted = auto;
+  // Out of sight (kept in the tray on the computer, or reloaded there for an update): no briefing and no listening
+  // until "LightMoon" is said. The microphone is used only after the wake word.
+  if (outOfSight() && launch.action !== 'talk') {
+    refresh();
+    return;
+  }
   if (launch.reminder) {
     listenWhenFree = prefs.listenOnOpen; // say the reminder, then listen in case there's a reply
     announceReminder(launch.reminder);
@@ -2636,7 +2646,7 @@ function greet(auto) {
 function startDesktop() {
   desktop.start({
     onAnswer: (taskId, action, options) => { const reply = answerReminder(taskId, action, options); if (reply) note(reply); },
-    onWake: () => {
+    onWake: (said = '') => {
       // Unused for the relock time (Settings): the PIN first, as when it comes back to the front.
       if (started && lockDue()) showLock();
       if (locked) return desktop.showWindow();
@@ -2645,6 +2655,11 @@ function startDesktop() {
         start({ auto: true });
       }
       speaker.stop();
+      // "LightMoon, WhatsApp wife I'm on my way" in one breath: on with it, no second asking.
+      if (said.split(/\s+/).filter(Boolean).length >= 2 && !busy) {
+        send(said, { byVoice: true });
+        return;
+      }
       listenWhenFree = 'follow-up';
       refresh();
     },

@@ -89,7 +89,9 @@ static class TrayMode
     }
 
     // "LightMoon" heard. -> true when the page was told (it listens where it is); false: wake it the usual way.
-    public static bool Wake(Action open)
+    static volatile string saidWithWake = "";
+
+    public static bool Wake(Action open, string said = "")
     {
         IntPtr window = findWindow();
         if (window == IntPtr.Zero)
@@ -107,6 +109,7 @@ static class TrayMode
         }
         if (!pageActivated) Prime(window);
         if (ui != null) ui.Post(_ => glow.Show("listening"), null); // heard on the recogniser's thread
+        saidWithWake = said ?? "";
         wakePending = true;
         wakeWaiting.Set();
         log("tray mode: told LightMoon to listen");
@@ -115,6 +118,14 @@ static class TrayMode
 
     // GET /events: waits up to 20 s for a wake. -> true if one came.
     static DateTime eventsLogged = DateTime.MinValue;
+
+    // What was said with the wake phrase, taken once (GET /events passes it on).
+    public static string TakeSaid()
+    {
+        string said = saidWithWake;
+        saidWithWake = "";
+        return said;
+    }
 
     public static bool WaitForWake()
     {

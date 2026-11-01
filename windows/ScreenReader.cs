@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Automation;
 
@@ -167,6 +168,73 @@ static class ScreenReader
         }
         var all = string.Join("\n", lines);
         return all.Length > MaxChars ? all.Substring(0, MaxChars) : all;
+    }
+
+    // ---------- Pressing Send on a draft LightMoon wrote ----------
+
+    // "Send it" after LightMoon opened a draft in Teams or Outlook: in that app's window, only if the draft's first
+    // words are in it, press its Send button (UI Automation, the way a screen reader would). Tries for a few
+    // seconds while the app finishes opening. -> "sent", "no window", "no draft" or "no send button".
+    public static string PressSend(string app, string text)
+    {
+        string result = "no window";
+        var worker = new Thread(() =>
+        {
+            string[] titles;
+            if (!Titles.TryGetValue(app ?? "", out titles)) titles = new[] { app ?? "" };
+            string start = (text ?? "").Trim();
+            if (start.Length > 24) start = start.Substring(0, 24);
+            for (int attempt = 0; attempt < 8; attempt++)
+            {
+                var window = TopWindows().FirstOrDefault(w => !w.Name.StartsWith("LightMoon", StringComparison.OrdinalIgnoreCase)
+                    && titles.Any(t => w.Name.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0));
+                if (window != null)
+                {
+                    result = TryPressSend(window.Element, start);
+                    if (result == "sent") return;
+                }
+                Thread.Sleep(1000);
+            }
+        }) { IsBackground = true };
+        worker.SetApartmentState(ApartmentState.MTA);
+        worker.Start();
+        worker.Join(12000);
+        return result;
+    }
+
+    static string TryPressSend(AutomationElement window, string start)
+    {
+        bool hasDraft = start.Length == 0;
+        AutomationElement send = null;
+        foreach (AutomationElement element in window.FindAll(TreeScope.Descendants, Condition.TrueCondition))
+        {
+            try
+            {
+                var type = element.Current.ControlType;
+                string name = element.Current.Name ?? "";
+                if (type == ControlType.Button && send == null && Regex.IsMatch(name, @"^Send\b", RegexOptions.IgnoreCase) && element.Current.IsEnabled) send = element;
+                if (!hasDraft && (type == ControlType.Edit || type == ControlType.Document || type == ControlType.Text))
+                {
+                    if (name.IndexOf(start, StringComparison.OrdinalIgnoreCase) >= 0) hasDraft = true;
+                    object pattern;
+                    if (!hasDraft && element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)
+                        && (((ValuePattern)pattern).Current.Value ?? "").IndexOf(start, StringComparison.OrdinalIgnoreCase) >= 0) hasDraft = true;
+                    if (!hasDraft && element.TryGetCurrentPattern(TextPattern.Pattern, out pattern)
+                        && (((TextPattern)pattern).DocumentRange.GetText(2000) ?? "").IndexOf(start, StringComparison.OrdinalIgnoreCase) >= 0) hasDraft = true;
+                }
+            }
+            catch (Exception) { } // the element went away
+        }
+        if (!hasDraft) return "no draft";
+        if (send == null) return "no send button";
+        try
+        {
+            object invoke;
+            if (!send.TryGetCurrentPattern(InvokePattern.Pattern, out invoke)) return "no send button";
+            ((InvokePattern)invoke).Invoke();
+            return "sent";
+        }
+        catch (Exception) { return "no send button"; }
     }
 
     // ---------- Notifications ----------

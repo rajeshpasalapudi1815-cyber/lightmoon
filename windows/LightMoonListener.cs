@@ -186,7 +186,8 @@ static class LightMoonListener
                 Log(string.Format("near miss \"{0}\" ({1:0.00})", e.Result.Text, e.Result.Confidence));
             if (paused || !IsWake(e.Result)) return;
             Log(string.Format("heard \"{0}\" ({1:0.00}, {2})", e.Result.Text, e.Result.Confidence, e.Result.Grammar.Name));
-            ui.Post(_ => Wake(), null);
+            string said = AfterWakePhrase(e.Result.Text);
+            ui.Post(_ => Wake(said), null);
         };
         return recognizer;
     }
@@ -202,12 +203,29 @@ static class LightMoonListener
 
     // ---------- Waking LightMoon ----------
 
-    static void Wake()
+    // What was said straight after the wake phrase in one breath ("LightMoon, WhatsApp wife I'm on my way"), or "".
+    static string AfterWakePhrase(string text)
+    {
+        string heard = text ?? "";
+        int end = -1;
+        var name = Name.Match(heard);
+        if (name.Success) end = name.Index + name.Length;
+        if (ownWake.Length > 0)
+        {
+            var own = Regex.Match(heard, Regex.Escape(ownWake).Replace("\\ ", @"\s*"), RegexOptions.IgnoreCase);
+            if (own.Success) end = Math.Max(end, own.Index + own.Length);
+        }
+        return end < 0 ? "" : heard.Substring(end).Trim(' ', ',', '.', '!', '?');
+    }
+
+    static void Wake() { Wake(""); }
+
+    static void Wake(string said)
     {
         if ((DateTime.Now - lastWake).TotalSeconds < 4) return; // one wake per call
         lastWake = DateTime.Now;
         // Kept in the tray: it listens where it is, with the line at the top of the screen (TrayMode.cs).
-        if (TrayMode.On && TrayMode.Wake(OpenLightMoon)) return;
+        if (TrayMode.On && TrayMode.Wake(OpenLightMoon, said)) return;
         IntPtr window = FindLightMoon();
         if (window != IntPtr.Zero && GetForegroundWindow() == window) { Log("LightMoon is in front: left alone"); return; }
         if (window == IntPtr.Zero) { Log("opening LightMoon"); OpenLightMoon(); return; }

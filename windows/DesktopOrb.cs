@@ -834,6 +834,21 @@ class OrbBridge
         if (method == "OPTIONS") { Send(stream, 204, origin, null, true); return; }
         // Asked of LightMoon by voice: open a website or search in the browser (POST /open {url}, web addresses only),
         // and play, pause or skip whatever is playing (POST /media {action}: the keyboard's media keys).
+        // "Send it" for a draft LightMoon opened in Teams or Outlook (POST /send {app, text}): ScreenReader.PressSend.
+        if (method == "POST" && path == "/send")
+        {
+            if (origin == null) { Send(stream, 403, null, null, false); return; }
+            Dictionary<string, object> draft = null;
+            try { draft = Json.DeserializeObject(Encoding.UTF8.GetString(body)) as Dictionary<string, object>; }
+            catch (Exception) { }
+            string app = draft != null && draft.ContainsKey("app") ? Convert.ToString(draft["app"]) : "";
+            string words = draft != null && draft.ContainsKey("text") ? Convert.ToString(draft["text"]) : "";
+            if (words.Trim().Length == 0 || (app != "teams" && app != "outlook")) { Send(stream, 400, origin, null, false); return; }
+            string outcome = ScreenReader.PressSend(app, words);
+            log("send helper: " + app + ": " + outcome);
+            Send(stream, 200, origin, Json.Serialize(new Dictionary<string, object> { { "result", outcome } }), false);
+            return;
+        }
         if (method == "POST" && (path == "/open" || path == "/media"))
         {
             if (origin == null) { Send(stream, 403, null, null, false); return; }
@@ -869,7 +884,7 @@ class OrbBridge
             if (method == "GET" && path == "/events")
             {
                 bool woke = TrayMode.WaitForWake();
-                Send(stream, 200, origin, woke ? "{\"wake\":true}" : "{}", false);
+                Send(stream, 200, origin, woke ? Json.Serialize(new Dictionary<string, object> { { "wake", true }, { "said", TrayMode.TakeSaid() } }) : "{}", false);
                 return;
             }
             if (method == "POST" && path == "/state")

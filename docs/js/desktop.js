@@ -150,7 +150,8 @@ async function waitForWakes() {
     try {
       const res = await fetch(`${LISTENER_URL}/events`, { signal: AbortSignal.timeout(30000) });
       if (res.status === 404) return; // an older Listener: it wakes LightMoon by bringing it to the front
-      if (res.ok && (await res.json()).wake) onWake();
+      const event = res.ok ? await res.json() : {};
+      if (event.wake) onWake(String(event.said ?? '')); // with what was said in the same breath, if anything
       else if (!res.ok) await new Promise(resolve => setTimeout(resolve, 15000));
     } catch {
       await new Promise(resolve => setTimeout(resolve, connected ? 2000 : 15000)); // the Listener isn't running
@@ -209,4 +210,16 @@ export async function mediaKey(action) {
   });
   if (res.status === 404) throw new Error('The LightMoon Listener on this computer is too old for media keys: it needs updating.');
   if (!res.ok) throw new Error("The media key didn't go.");
+}
+
+// "Send it" for a draft LightMoon opened in Teams or Outlook on this computer: the Listener presses that app's own Send
+// button, only if the draft is in its window. -> 'sent', 'no window', 'no draft' or 'no send button'.
+export async function pressSend(app, text) {
+  if (!connected) throw new Error('The LightMoon Listener is not running on this computer.');
+  const res = await fetch(`${LISTENER_URL}/send`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app, text }), signal: AbortSignal.timeout(15000),
+  });
+  if (res.status === 404) throw new Error('The LightMoon Listener on this computer is too old to press Send: it needs updating.');
+  if (!res.ok) throw new Error("Couldn't press Send.");
+  return (await res.json()).result;
 }

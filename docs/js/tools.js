@@ -674,6 +674,16 @@ const handlers = {
       throw new Error('Only they can send it, by saying "send it".');
     }
     if (!draft) throw new Error("There's no draft you opened in the last ten minutes. The Send helper only sends a message LightMoon wrote; tell them to tap Send themselves.");
+    // On the computer: the Listener presses Send in Teams or Outlook, if the draft is in its window.
+    if (!phoneApp && desktop.listenerConnected() && ['teams', 'email'].includes(draft.kind)) {
+      const app = draft.kind === 'teams' ? 'teams' : 'outlook';
+      const outcome = await desktop.pressSend(app, draft.text);
+      const where = app === 'teams' ? 'Teams' : 'Outlook';
+      if (outcome === 'sent') return { text: `Sent in ${where}`, result: `Pressed Send in ${where}.` };
+      throw new Error(outcome === 'no window' ? `${where} isn't open, so I couldn't press Send.`
+        : outcome === 'no draft' ? `I couldn't find the message in ${where}, so I didn't press Send. Please check it and send it yourself.`
+          : `I couldn't find ${where}'s Send button. Please press Send yourself.`);
+    }
     if (!phoneApp?.tapSend) throw new Error('Tapping Send needs LightMoon app 1.14 or later on their phone; tell them to tap Send themselves.');
     const helper = await phoneApp.sendHelper().catch(() => ({ enabled: false }));
     if (!helper.enabled) {
@@ -895,7 +905,7 @@ export async function quickReply(text) {
   if (!SEND_NOW.test(said) || !recentDraft()) return null;
   const out = await runTool('tap_send', {});
   if (!out.ok && /Send helper is off/.test(String(out.error))) return helperOff();
-  if (!out.ok) return { reply: "I couldn't press Send. Please tap Send in the app yourself.", actions: [] };
+  if (!out.ok) return { reply: phoneApp ? "I couldn't press Send. Please tap Send in the app yourself." : String(out.error), actions: [] }; // on the computer the reason is said as is
   return { reply: 'Sending it now.', actions: [out.action].filter(Boolean) };
 }
 
