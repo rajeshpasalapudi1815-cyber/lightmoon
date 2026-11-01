@@ -366,7 +366,9 @@ public class WakeWordService extends Service implements RecognitionListener {
         resumeAt = now + REARM_AFTER_MS; // if the app doesn't open (e.g. unlock cancelled), listen again soon
         stopListening();
         show("heard");
-        chime();
+        // LightMoon beeps itself when it starts listening; two sounds per wake was too many. Locked, it may take a
+        // moment to show, so the chime says it heard.
+        if (getSystemService(android.app.KeyguardManager.class).isKeyguardLocked()) chime();
         WakeWordPlugin.wakeUp(this, ownerHeard);
         main.postDelayed(refresh, REARM_AFTER_MS);
     }

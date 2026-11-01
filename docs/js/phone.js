@@ -166,6 +166,11 @@ export const heardMessages = () => (allowed?.messages ? messageRefs().map(m => (
 
 // ---------- Asking first ----------
 
+// Their own latest message asks to send a joke (or riddle, quote, wish) to someone: something light that LightMoon
+// writes and they want sent straight away. Anything else is read back first.
+const SEND_LIGHT = /\b(send|whats ?app|text|message|forward)\b.*\b(jokes?|riddles?|puns?|shayari|quotes?|good (morning|night)|wish(es)?)\b/i;
+export const askedToSendNow = () => SEND_LIGHT.test(String(lastUserMessage()?.content ?? ''));
+
 const lastUserMessage = () => chat.recent(30).filter(m => m.role === 'user').at(-1);
 function lastUserMessageAt() {
   return lastUserMessage()?.at ?? 0;
@@ -329,6 +334,7 @@ export function phoneTools() {
         to: WHO,
         via: { type: 'string', enum: ['sms', 'whatsapp'] },
         confirm_id: CONFIRM,
+        send_now: { type: 'boolean', description: 'Only when they asked you to send them a joke, riddle, quote or wish you write: it goes on WhatsApp without the read-back.' },
       },
       ['text'],
     ));
@@ -463,7 +469,7 @@ export const phoneHandlers = {
     return { text: show_in === 'truecaller' ? 'Opened the number in Truecaller' : 'Looked up the number', result: lines.join(' ') };
   },
 
-  async phone_message({ text, reply_to, to, via = 'sms', confirm_id }) {
+  async phone_message({ text, reply_to, to, via = 'sms', confirm_id, send_now: sendNow = false }) {
     if (confirm_id) return runConfirmed(confirm_id);
     const words = String(text ?? '').trim();
     if (!words) throw new Error('text is required.');
@@ -487,15 +493,22 @@ export const phoneHandlers = {
     const person = await findPerson(to);
     if (via === 'whatsapp') {
       // Read back like a text; on their yes WhatsApp opens that chat with the message and the Send helper sends it.
-      return askFirst(`WhatsApp ${named(person)}: "${words}"`, async () => {
+      const send = async () => {
         await call(phone.whatsapp({ number: withCountryCode(person.number), text: words }));
         const helper = phone.tapSend ? await phone.sendHelper?.().catch(() => null) : null;
         if (helper?.enabled && await phone.tapSend({ apps: SEND_APPS.whatsapp, text: words, chat: '', stay: true }).then(() => true, () => false)) {
           return { text: `Sending on WhatsApp to ${person.name ?? person.number}`, result: 'WhatsApp opened that chat with the message and the Send helper is tapping Send; the phone shows "LightMoon tapped Send" when it has.' };
         }
         rememberDraft('whatsapp', words);
-        return { text: `WhatsApp ready for ${person.name ?? person.number}`, result: 'WhatsApp is open in that chat with the message typed in. The Send helper is off, so they tap Send (or say "send it" once it is on: Settings → Phone → Send helper).' };
-      });
+        // Said to them as is (a quick yes skips the AI): plainly, and what to do about it.
+        return {
+          text: `It's typed in WhatsApp for ${person.name ?? person.number}, but I can't press Send: the Send helper is switched off. Tap Send this time, and say "turn on the Send helper" so I can do it next time`,
+          result: 'WhatsApp is open in that chat with the message typed in. The Send helper is off, so they tap Send; if they want it on, tell them to say "turn on the Send helper".',
+        };
+      };
+      // "Send a joke to my wife": they asked for something you write, to go now; their asking is the yes (askedToSendNow).
+      if (sendNow && askedToSendNow()) return send();
+      return askFirst(`WhatsApp ${named(person)}: "${words}"`, send);
     }
     if (!allowed?.texts) throw new Error('Texting is off. Ask the user to allow it in Settings → Phone, or use via "whatsapp".');
     return askFirst(`Text ${named(person)}: "${words}"`, async () => {

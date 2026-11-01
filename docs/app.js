@@ -356,7 +356,8 @@ function offerShared(text) {
 function refresh() {
   listener.sync();
   if (listenWhenFree && started && !busy && !speaker.active && !locked && listener.mode !== 'command') {
-    if (listenWhenFree === 'follow-up') chime(); // "your turn"
+    // "Your turn": on the phone Android's recogniser beeps as it starts, so a second beep would be one too many.
+    if (listenWhenFree === 'follow-up' && !isNativeApp) chime();
     listenWhenFree = false;
     listener.start('command');
   }

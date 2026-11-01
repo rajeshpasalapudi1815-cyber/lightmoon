@@ -753,6 +753,7 @@ async function quickMessage(said) {
     };
     const split = await splitNameAndText(order.rest, isPerson);
     if (!split) return null; // no contact by that name: the AI asks
+    if (/^(a |an |some )?(jokes?|riddles?|puns?|shayari|quotes?|good (morning|night)|wish(es)?)\b/i.test(split.text)) return null; // the AI writes it
     ({ to } = split);
     ({ via } = order);
     words = split.text;
@@ -784,6 +785,12 @@ export async function quickReply(text) {
     }
   }
   if (asked && !saidYes(said)) forgetConfirms(); // they moved on: the old read-back can't be confirmed later
+  if (TURN_ON_HELPER.test(said) && phoneApp?.openSendHelperSettings) {
+    const helper = await phoneApp.sendHelper().catch(() => null);
+    if (helper?.enabled) return { reply: 'The Send helper is already on.', actions: [] };
+    await phoneApp.openSendHelperSettings().catch(() => {});
+    return { reply: "I've opened the setting: tap LightMoon Send helper and switch it on. That's all.", actions: [] };
+  }
   const message = await quickMessage(said);
   if (message) return message;
   if (asked) return null; // a longer answer: the AI handles it (runConfirmed still needs their yes)
@@ -795,9 +802,24 @@ export async function quickReply(text) {
   }
   if (!SEND_NOW.test(said) || !recentDraft()) return null;
   const out = await runTool('tap_send', {});
-  if (!out.ok) return { reply: String(out.error ?? "I couldn't send it. Please tap Send yourself."), actions: [] };
+  if (!out.ok && /Send helper is off/.test(String(out.error))) return helperOff();
+  if (!out.ok) return { reply: "I couldn't press Send. Please tap Send in the app yourself.", actions: [] };
   return { reply: 'Sending it now.', actions: [out.action].filter(Boolean) };
 }
+
+// The Send helper is switched off (Android turns it off when LightMoon is force-stopped, some phones on updates):
+// open its switch so they only tap it, and say so plainly.
+async function helperOff() {
+  const opened = await phoneApp?.openSendHelperSettings?.().then(() => true, () => false);
+  return {
+    reply: opened
+      ? "I can't press Send: the Send helper got switched off. I've opened the setting: tap LightMoon Send helper, switch it on, then come back and say send it."
+      : "I can't press Send: the Send helper is switched off. Please tap Send yourself, and switch it on in LightMoon's Settings, Phone, Send helper.",
+    actions: [],
+  };
+}
+
+const TURN_ON_HELPER = /\b(turn|switch|put)\s+on\s+(the\s+)?send\s*helper\b|\bsend\s*helper\s+on\b/i;
 
 export async function runTool(name, rawArgs) {
   const outcome = await runToolInner(name, rawArgs);
