@@ -883,28 +883,113 @@ public class PhonePlugin extends Plugin {
         }
     }
 
-    // { action: "play" | "pause" | "toggle" | "next" | "previous" }: for whichever app is playing (Spotify, YouTube Music...).
+    // { action: "play" | "pause" | "toggle" | "next" | "previous", query?, app? }: for whichever app is playing (Spotify,
+    // YouTube Music...). "play" with nothing to resume, or with a song, artist or mood to play, opens a music app and
+    // has it play that (Android's "play from search"). -> { musicActive, app }: whether music is heard now, so
+    // LightMoon never says "playing" when nothing is.
     @PluginMethod
     public void media(PluginCall call) {
         String action = call.getString("action", "toggle");
-        int key;
-        switch (action) {
-            case "play": key = KeyEvent.KEYCODE_MEDIA_PLAY; break;
-            case "pause": key = KeyEvent.KEYCODE_MEDIA_PAUSE; break;
-            case "next": key = KeyEvent.KEYCODE_MEDIA_NEXT; break;
-            case "previous": key = KeyEvent.KEYCODE_MEDIA_PREVIOUS; break;
-            default: key = KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE;
+        String query = call.getString("query", "").trim();
+        AudioManager audio = getContext().getSystemService(AudioManager.class);
+        boolean play = "play".equals(action) || ("toggle".equals(action) && !audio.isMusicActive());
+        if (!play || query.isEmpty()) {
+            int key;
+            switch (action) {
+                case "play": key = KeyEvent.KEYCODE_MEDIA_PLAY; break;
+                case "pause": key = KeyEvent.KEYCODE_MEDIA_PAUSE; break;
+                case "next": key = KeyEvent.KEYCODE_MEDIA_NEXT; break;
+                case "previous": key = KeyEvent.KEYCODE_MEDIA_PREVIOUS; break;
+                default: key = KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE;
+            }
+            try {
+                pressMediaKey(audio, key);
+            } catch (RuntimeException err) {
+                call.reject("The music app didn't take it.");
+                return;
+            }
         }
-        try {
-            AudioManager audio = getContext().getSystemService(AudioManager.class);
-            audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
-            audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
-            JSObject result = new JSObject();
-            result.put("musicActive", audio.isMusicActive());
-            call.resolve(result);
-        } catch (RuntimeException err) {
-            call.reject("The music app didn't take it.");
+        Handler main = new Handler(Looper.getMainLooper());
+        if (!play) {
+            main.postDelayed(() -> resolveMedia(call, audio, ""), 600);
+            return;
         }
+        // Give a paused player a moment to start again before opening one.
+        main.postDelayed(() -> {
+            if (query.isEmpty() && audio.isMusicActive()) {
+                resolveMedia(call, audio, "");
+                return;
+            }
+            String[] player = musicApp(call.getString("app", ""));
+            if (player == null) {
+                resolveMedia(call, audio, "");
+                return;
+            }
+            Intent search = new Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+                .setPackage(player[0])
+                .putExtra(android.app.SearchManager.QUERY, query)
+                .putExtra(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                getActivity().startActivity(search);
+            } catch (RuntimeException noSearch) {
+                Intent launch = getContext().getPackageManager().getLaunchIntentForPackage(player[0]);
+                try {
+                    if (launch != null) getActivity().startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (RuntimeException ignored) {
+                    // Answered below: nothing playing.
+                }
+            }
+            // Some apps open but wait for a play: press it once they're up, then see whether music is heard.
+            main.postDelayed(() -> {
+                if (!audio.isMusicActive()) {
+                    try {
+                        pressMediaKey(audio, KeyEvent.KEYCODE_MEDIA_PLAY);
+                    } catch (RuntimeException ignored) {
+                        // Reported as not playing.
+                    }
+                }
+                main.postDelayed(() -> resolveMedia(call, audio, player[1]), 2500);
+            }, 4000);
+        }, query.isEmpty() ? 900 : 0);
+    }
+
+    private static void pressMediaKey(AudioManager audio, int key) {
+        audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
+        audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
+    }
+
+    private static void resolveMedia(PluginCall call, AudioManager audio, String app) {
+        JSObject result = new JSObject();
+        result.put("musicActive", audio.isMusicActive());
+        result.put("app", app);
+        call.resolve(result);
+    }
+
+    // The music app to play with: the one asked for if it's installed, else the first installed of the usual ones.
+    // -> { package, label } or null.
+    private static final String[][] MUSIC_APPS = {
+        { "com.spotify.music", "Spotify" },
+        { "com.google.android.apps.youtube.music", "YouTube Music" },
+        { "com.jio.media.jiobeats", "JioSaavn" },
+        { "com.bsbportal.music", "Wynk Music" },
+        { "com.gaana", "Gaana" },
+        { "com.amazon.mp3", "Amazon Music" },
+        { "com.apple.android.music", "Apple Music" },
+    };
+
+    private String[] musicApp(String wanted) {
+        PackageManager pm = getContext().getPackageManager();
+        String asked = simplify(wanted);
+        if (!asked.isEmpty()) {
+            for (String[] app : MUSIC_APPS) {
+                if (simplify(app[1]).contains(asked) && pm.getLaunchIntentForPackage(app[0]) != null) return app;
+            }
+            String[] other = findApp(wanted);
+            if (other != null) return other;
+        }
+        for (String[] app : MUSIC_APPS) if (pm.getLaunchIntentForPackage(app[0]) != null) return app;
+        return null;
     }
 
     // { destination, mode?: "drive" | "walk" | "bike" | "transit" }: turn-by-turn directions in Google Maps.

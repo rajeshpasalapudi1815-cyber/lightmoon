@@ -11,7 +11,7 @@ import { messages as chat, nicknames, settings } from './store.js';
 import { choosePerson, lookAlikeNotes, conversationsFrom } from './people.js';
 import { linkNote } from './links.js';
 import { moneyNote } from './money.js';
-import { rememberDraft } from './compose.js';
+import { rememberDraft, SEND_APPS } from './compose.js';
 import { saidYes } from './orders.js';
 
 const REFRESH_AFTER_MS = 60_000;
@@ -220,15 +220,18 @@ const looksLikeNumber = text => /^\+?[\d\s().-]{5,}$/.test(text);
 async function findPerson(whom) {
   const said = String(whom ?? '').trim();
   if (!said) throw new Error('Who? Give a name or a number.');
-  // "Mom" may be saved as "Lakshmi P": the user's nicknames come first.
-  const wanted = nicknames.lookUp(said) ?? said;
+  // "Mom" may be saved as "Lakshmi P": the user's nicknames come first (not one that stands for an email address
+  // or a Teams link: "Deeksha" for Teams is still Deeksha in the contacts).
+  const nick = nicknames.lookUp(said);
+  const wanted = nick && !/@|^https?:/i.test(nick) ? nick : said;
   if (looksLikeNumber(wanted)) return { name: null, number: wanted.replace(/[\s().-]/g, '') };
   const { contacts } = await phone.contacts({ query: wanted });
   if (!contacts.length) throw new Error(`No contact matches "${wanted}". Ask the user for the name as saved, or the number.`);
   // Two Ashas, or one with two numbers: their recent calls and messages say which is likelier (people.js).
   const chosen = choosePerson(wanted, contacts, { calls: await recentCalls(), messages: seen.messages });
   if (chosen.ask) throw new Error(chosen.ask);
-  return chosen.person;
+  // Found by how it sounds ("Diksha" for Deeksha): the read-back names them, so a yes covers the right person.
+  return contacts.every(c => c.soundsLike) ? { ...chosen.person, soundsLike: true } : chosen.person;
 }
 
 // The last month of calls, for telling look-alike contacts apart; none if call history is off.
@@ -291,7 +294,7 @@ export function phoneTools() {
     tools.push(tool(
       'phone_message',
       'Send a message: reply_to answers one from your context in its own chat; to + via sends a new one. The first call reads it back; '
-        + 'call again with confirm_id after their yes (not for whatsapp, where they tap send).',
+        + 'call again with confirm_id after their yes. Only with the words they want sent; ask first if they didn\'t say.',
       {
         text: { type: 'string' },
         reply_to: { type: 'string', description: 'e.g. "M3"' },
@@ -340,8 +343,10 @@ export function phoneTools() {
       end: { type: 'boolean' },
       remember_car: { type: 'boolean' },
     }),
-    tool('phone_media', 'Control the music or video playing.', {
+    tool('phone_media', 'Play music (resumes, or opens a music app and plays "what"), pause, skip or go back. Say it plays only if the result says so.', {
       action: { type: 'string', enum: ['play', 'pause', 'toggle', 'next', 'previous'] },
+      what: { type: 'string', description: 'For play: a song, artist, album, mood or language, e.g. "Telugu melodies". Empty resumes their music.' },
+      app: { type: 'string', description: 'Only if they name one, e.g. "Spotify", "YouTube Music".' },
     }, ['action']),
     tool('phone_navigate', 'Directions in Google Maps.', {
       destination: { type: 'string' },
@@ -453,9 +458,16 @@ export const phoneHandlers = {
     }
     const person = await findPerson(to);
     if (via === 'whatsapp') {
-      await call(phone.whatsapp({ number: withCountryCode(person.number), text: words }));
-      rememberDraft('whatsapp', words);
-      return { text: `WhatsApp ready for ${person.name ?? person.number}`, result: 'WhatsApp is open with the message written in; the user taps send.' };
+      // Read back like a text; on their yes WhatsApp opens that chat with the message and the Send helper sends it.
+      return askFirst(`WhatsApp ${named(person)}: "${words}"`, async () => {
+        await call(phone.whatsapp({ number: withCountryCode(person.number), text: words }));
+        const helper = phone.tapSend ? await phone.sendHelper?.().catch(() => null) : null;
+        if (helper?.enabled && await phone.tapSend({ apps: SEND_APPS.whatsapp, text: words, chat: '' }).then(() => true, () => false)) {
+          return { text: `Sending on WhatsApp to ${person.name ?? person.number}`, result: 'WhatsApp opened that chat with the message and the Send helper is tapping Send; the phone shows "LightMoon tapped Send" when it has.' };
+        }
+        rememberDraft('whatsapp', words);
+        return { text: `WhatsApp ready for ${person.name ?? person.number}`, result: 'WhatsApp is open in that chat with the message typed in. The Send helper is off, so they tap Send (or say "send it" once it is on: Settings → Phone → Send helper).' };
+      });
     }
     if (!allowed?.texts) throw new Error('Texting is off. Ask the user to allow it in Settings → Phone, or use via "whatsapp".');
     return askFirst(`Text ${named(person)}: "${words}"`, async () => {
@@ -541,9 +553,21 @@ export const phoneHandlers = {
     return { text: `Driving mode until ${clock(state.until)}`, result: `Driving mode on until ${clock(state.until)}: messages are read out in full. Keep your answers short.` };
   },
 
-  async phone_media({ action }) {
-    await call(phone.media({ action }));
-    return { play: 'Playing', pause: 'Paused', next: 'Next track', previous: 'Previous track' }[action] ?? 'Play/pause';
+  async phone_media({ action, what = '', app = '' }) {
+    const query = String(what ?? '').trim().slice(0, 120);
+    const out = (await call(phone.media({ action, query, app: String(app ?? '') }))) ?? {};
+    const playing = ['play', 'toggle'].includes(action) && out.musicActive !== false;
+    if (!['play', 'toggle'].includes(action) || (action === 'toggle' && out.musicActive === false && !out.app)) {
+      return { pause: 'Paused', next: 'Next track', previous: 'Previous track' }[action] ?? (out.musicActive ? 'Playing' : 'Paused');
+    }
+    // Older apps don't say whether music is heard (musicActive undefined): believe the key press, as before.
+    if (playing) return `Playing${out.app ? ` on ${out.app}` : ''}${query ? `: ${query}` : ''}`;
+    return {
+      text: out.app ? `Opened ${out.app}` : 'Nothing playing',
+      result: out.app
+        ? `${out.app} is open${query ? ` with "${query}"` : ''}, but no music is heard yet. Say you opened it and they may need to tap play; never say it's playing.`
+        : "No music app is installed or nothing could be played. Say so; never say it's playing.",
+    };
   },
 
   async phone_navigate({ destination, mode = 'drive' }) {

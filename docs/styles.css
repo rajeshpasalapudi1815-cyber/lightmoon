@@ -319,6 +319,7 @@ body[data-state='listening'] .mic { color: var(--amber); border-color: var(--amb
 .item-main { flex: 1; min-width: 0; }
 .item-title { overflow-wrap: anywhere; }
 .item-meta { font-size: 12px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+.note-text { white-space: pre-wrap; }
 .item-actions { display: flex; gap: 2px; }
 .tag { font: 600 11px var(--hud); letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan); opacity: 0.8; }
 .tick { width: 20px; height: 20px; margin-top: 2px; flex-shrink: 0; border-radius: 50%; border: 1.5px solid var(--cyan-dim); background: transparent; cursor: pointer; }

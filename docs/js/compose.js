@@ -4,6 +4,8 @@
 // LightMoon can't move around inside another app (open a channel, @mention someone), so a Teams channel opens
 // from its link with the message on the clipboard to paste. tools.js runs the plan; tests/compose.test.mjs checks it.
 
+import { either, NATIVE_YES_ONLY, NATIVE_SEND_NOW } from './language.js';
+
 const EMAIL = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
 
 // The last draft LightMoon opened in an app the Send helper works in (Android packages), so "send it" can tap Send
@@ -16,9 +18,12 @@ export const SEND_APPS = {
 const DRAFT_FOR_MS = 10 * 60_000;
 // A message that is only a yes ("yes", "ok send it", "haan ji", "sare"), nothing more: it answers LightMoon's
 // read-back on the phone itself (tools.js quickReply). "Yes, but make it Friday" is not one.
-export const YES_ONLY = /^\W*(?:(?:yes|yeah|yep|yup|ya|ok(?:ay)?|sure|haan|ha|ji|sare|sari|avunu|theek hai|go ahead|do it|confirm(?:ed)?|correct|please)[\s,.!]*)+(?:(?:send|pampu|pampinchu)(?:\s+(?:it|now|please|cheyyi|chey))*)?\W*$/i;
+const YES_ONLY_WORDS = /^[^\p{L}\p{M}\p{N}]*(?:(?:yes|yeah|yep|yup|ya|ok(?:ay)?|sure|haan|ha|ji|sare|sari|avunu|theek hai|go ahead|do it|confirm(?:ed)?|correct|please)[\s,.!]*)+(?:(?:send|pampu|pampinchu)(?:\s+(?:it|now|please|cheyyi|chey))*)?[^\p{L}\p{M}\p{N}]*$/iu;
 // A plain "send it" (also in Telugu: "pampu", "send cheyyi"), answered without the AI (tools.js quickReply).
-export const SEND_NOW = /^\W*(?:(?:ok(?:ay)?|yes|ya|haan|ha|sare|please|ji)[\s,.!]+)*(?:send|pampu|pampinchu)(?:\s+(?:it|that|this|now|please|cheyyi|chey|cheyandi|the (?:message|msg|mail|email|draft)))*\W*$/i;
+const SEND_NOW_WORDS = /^[^\p{L}\p{M}\p{N}]*(?:(?:ok(?:ay)?|yes|ya|haan|ha|sare|please|ji)[\s,.!]+)*(?:send|pampu|pampinchu)(?:\s+(?:it|that|this|now|please|cheyyi|chey|cheyandi|the (?:message|msg|mail|email|draft)))*[^\p{L}\p{M}\p{N}]*$/iu;
+// Also in Telugu, Hindi or Tamil letters (language.js), when LightMoon listens in that language.
+export const YES_ONLY = either(YES_ONLY_WORDS, NATIVE_YES_ONLY);
+export const SEND_NOW = either(SEND_NOW_WORDS, NATIVE_SEND_NOW);
 let lastDraft = null;
 let draftListener = null;
 // Told about each new draft (tools.js: the phone then listens for "send it" for a while).

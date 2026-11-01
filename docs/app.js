@@ -15,9 +15,10 @@ import { chat, briefing, weeklyLetter } from './js/brain.js';
 import { wireLearning } from './js/learning.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 import { speechChunks, lastSentenceEnd } from './js/speech.js';
-import { genderOf, wantedGender, bestVoice } from './js/voices.js';
+import { genderOf, wantedGender, bestVoice, scriptOf, voiceForLanguage } from './js/voices.js';
 import { refreshWorkAccount, awaitingYes } from './js/tools.js';
 import { learnedFix, applyFixes, withFix } from './js/hearing.js';
+import { listeningLanguage, languageCode } from './js/language.js';
 import * as updates from './js/updates.js';
 import * as problems from './js/problems.js';
 
@@ -63,6 +64,9 @@ let listenWhenFree = false; // start listening once the briefing, greeting or re
 let audioCtx = null;
 
 // ---------- Small helpers ----------
+
+// What to listen in: Telugu when they asked LightMoon to talk Telugu (on any device), else this device's choice.
+const listenLang = () => listeningLanguage(store.settings.get('talk_language'), prefs.lang);
 
 function loadPrefs() {
   const inIndia = /^Asia\/(Kolkata|Calcutta)$/.test(Intl.DateTimeFormat().resolvedOptions().timeZone);
@@ -448,8 +452,25 @@ const speaker = {
   // One phrase: { phrase, voiceName, rate, generation }. If an online voice fails (the connection dropped), this
   // phrase and the ones after it are said again, in order, with an offline voice.
   say(entry) {
-    const chosen = this.pickVoice(entry.voiceName);
+    // A phrase in Telugu (or Hindi, Tamil) letters goes to a voice of that language, whatever voice is chosen.
+    const script = scriptOf(entry.phrase);
+    const own = script && !this.pickVoice(entry.voiceName)?.lang.toLowerCase().startsWith(script)
+      ? voiceForLanguage(this.voices, script, VOICE_GENDER, { online: navigator.onLine && Date.now() - this.onlineFailedAt > ONLINE_VOICE_REST_MS })
+      : null;
+    const chosen = own ?? this.pickVoice(entry.voiceName);
     const utterance = new SpeechSynthesisUtterance(entry.phrase);
+    if (script && !own && !chosen?.lang.toLowerCase().startsWith(script)) {
+      utterance.lang = `${script}-IN`; // no voice of that language listed: the device's own for it
+      utterance.rate = entry.rate;
+      utterance.onend = utterance.onerror = () => {
+        if (entry.dropped || entry.generation !== this.generation) return;
+        this.queue = this.queue.filter(other => other !== entry);
+        if (!this.queue.length) this.finish();
+      };
+      this.queue.push(entry);
+      speechSynthesis.speak(utterance);
+      return;
+    }
     if (chosen) {
       utterance.voice = chosen;
       utterance.lang = chosen.lang;
@@ -575,7 +596,7 @@ const listener = {
     if (!this.supported) return;
     const Recognizer = speechRecognizer();
     const rec = new Recognizer();
-    rec.lang = prefs.lang;
+    rec.lang = listenLang();
     rec.continuous = true;
     rec.interimResults = true;
     rec.maxAlternatives = 3;
@@ -976,6 +997,7 @@ function applyState() {
   document.body.classList.toggle('offline', !state.ai.ready);
   renderTasks();
   renderGoals();
+  renderNotes();
   renderMemories();
   refresh();
 }
@@ -1044,6 +1066,19 @@ function renderGoals() {
       iconButton('del', '×', `Drop "${goal.title}"`, () => store.goals.setStatus(goal.id, 'dropped')),
     );
     item.append(main, actions);
+    list.append(item);
+  }
+}
+
+function renderNotes() {
+  const list = $('#noteList');
+  list.replaceChildren();
+  if (!state.notes.length) list.append(el('li', 'empty', 'No notes yet. Say: "Make a note: the plumber is Ravi, 98480 12345."'));
+  for (const note of state.notes) {
+    const item = el('li', 'item');
+    const main = el('div', 'item-main');
+    main.append(el('div', 'item-title', note.title), el('div', 'item-meta note-text', note.text));
+    item.append(main, iconButton('del', '×', `Delete the note "${note.title}"`, () => confirm(`Delete the note "${note.title}"?`) && store.notes.remove(note.id)));
     list.append(item);
   }
 }
@@ -1133,7 +1168,7 @@ function openSettings() {
   fields.weeklyLetter.value = store.settings.get('weekly_letter', 'on');
   fields.buddyName.value = store.settings.get('buddy_name');
   fields.buddyContact.value = store.settings.get('buddy_contact');
-  fields.lang.value = prefs.lang;
+  fields.lang.value = listenLang();
   fields.apiKey.value = '';
   fillAiFields(fields, store.aiConfig());
   fillVoices(fields.voice);
@@ -2107,7 +2142,12 @@ function saveSettings(event) {
     return void settingsProblem('ai', 'The API address changed: enter the API key for the new address too.');
   }
 
-  const langChanged = fields.lang.value !== prefs.lang;
+  const langChanged = fields.lang.value !== listenLang();
+  // Telugu, Hindi or Tamil here is the language LightMoon talks in, on every device; an English one is this device's.
+  if (langChanged) {
+    const code = languageCode(fields.lang.value);
+    if (code !== (store.settings.get('talk_language') || 'en')) store.settings.set('talk_language', code);
+  }
   Object.assign(prefs, {
     voice: fields.voice.value,
     rate: Number(fields.rate.value),
@@ -2117,7 +2157,7 @@ function saveSettings(event) {
     listenOnOpen: fields.listenOnOpen.checked,
     followUp: fields.followUp.value,
     look: fields.look.value,
-    lang: fields.lang.value,
+    lang: fields.lang.value.startsWith('en') ? fields.lang.value : prefs.lang,
   });
   savePrefs();
   speaker.shareVoice();

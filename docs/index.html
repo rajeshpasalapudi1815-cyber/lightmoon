@@ -69,7 +69,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <span id="chatUnread" class="unread" hidden></span>
         </button>
-        <button id="panelsBtn" class="icon-btn only-mobile" aria-label="Tasks, goals and memory">
+        <button id="panelsBtn" class="icon-btn only-mobile" aria-label="Tasks, goals, notes and memory">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
         </button>
         <button id="settingsBtn" class="icon-btn" aria-label="Settings">
@@ -115,6 +115,7 @@
         <div class="tabs" role="tablist">
           <button role="tab" data-tab="tasks" aria-selected="true">Tasks <span id="taskCount" class="count" hidden></span></button>
           <button role="tab" data-tab="goals" aria-selected="false">Goals</button>
+          <button role="tab" data-tab="notes" aria-selected="false">Notes</button>
           <button role="tab" data-tab="memory" aria-selected="false">Memory</button>
         </div>
         <div class="tab-body" data-panel="tasks">
@@ -122,6 +123,7 @@
           <div id="doneList"></div>
         </div>
         <div class="tab-body" data-panel="goals" hidden><ul id="goalList" class="list"></ul></div>
+        <div class="tab-body" data-panel="notes" hidden><ul id="noteList" class="list"></ul></div>
         <div class="tab-body" data-panel="memory" hidden><ul id="memoryList" class="list"></ul></div>
       </aside>
     </main>

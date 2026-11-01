@@ -1,5 +1,6 @@
 // Tools the model can call to change LightMoon's memory, tasks and goals, and to check the weather.
-import { memories, tasks, goals, routines, pronunciations, nicknames, messages as chat, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
+import { memories, tasks, goals, routines, pronunciations, nicknames, notes, settings, messages as chat, MEMORY_CATEGORIES, GOAL_STATUSES } from './store.js';
+import { languageCode, TALK_LANGUAGES } from './language.js';
 
 // Hands a mailto: link to the system: the phone's mail app (the Android app passes it on), or the computer's.
 function openMailApp(url) {
@@ -131,6 +132,22 @@ export const TOOLS = [
     ['to', 'body'],
   ),
   tool(
+    'add_note',
+    'Write down a note they asked for ("make a note", "note that", "write this down"). A note with the same title gets the text added to it.',
+    {
+      title: { type: 'string', description: 'Short, e.g. "Shopping list", "Plumber", "AWS exam".' },
+      text: { type: 'string', description: 'What to write, in their words; lists one item per line.' },
+    },
+    ['title', 'text'],
+  ),
+  tool('update_note', 'Change a note: add to it (add), or replace its text (text) when they correct it.', {
+    id: ID, add: { type: 'string', description: 'A new line at the end.' }, text: { type: 'string', description: 'The whole new text.' }, title: { type: 'string' },
+  }, ['id']),
+  tool('delete_note', 'Delete a note they no longer want.', { id: ID }, ['id']),
+  tool('set_language', 'They ask you to talk in another language ("speak in Telugu", "English please"): replies and listening switch to it on all their devices.', {
+    language: { type: 'string', enum: ['english', 'telugu', 'hindi', 'tamil'] },
+  }, ['language']),
+  tool(
     'set_pronunciation',
     'Your voice says a word wrong and they tell you how it sounds: save it, and say it that way from now on. An empty say_as goes back to normal.',
     {
@@ -240,18 +257,20 @@ export function toolsFor(text, loaded = new Set()) {
 
 // The phone tools a request needs, by its words.
 const PHONE_PARTS = [
-  [/\b(tell|message|msg|text|sms|whats ?app|reply|send|chat|call(ed|ing)?|ring|dial|missed|contact|number|who (is|was)|truecaller)\b/i,
+  [/\b(tell|message|msg|text|sms|whats ?app|reply|send|chat|call(ed|ing)?|ring|dial|missed|contact|number|who (is|was)|truecaller)\b|కాల్|ఫోన్|మెసేజ్|వాట్సాప్|చెప్పు|कॉल|फोन|मैसेज/i,
     ['phone_message', 'phone_messages', 'phone_call', 'phone_recent_calls', 'phone_number_info']],
   [/\b(calendar|meetings?|events?|schedule|appointment|tomorrow|today|next week)\b/i, ['phone_calendar', 'phone_add_event']],
   [/\b(alarms?|timer|wake me|remind me in|minutes?)\b/i, ['phone_alarm']],
   [/\b(flash ?light|torch|volume|ringer|silent|vibrate|mute|louder|quieter)\b/i, ['phone_device']],
   [/\b(focus|disturb|deep work|busy)\b/i, ['phone_focus']],
   [/\b(driving|drive|car)\b/i, ['phone_driving']],
-  [/\b(music|songs?|play|pause|skip|next track|previous)\b/i, ['phone_media']],
+  [/\b(music|songs?|play|pause|skip|next track|previous|spotify|paata\w*|paat\w*|gaana|gaane)\b|పాట|సంగీతం|गाना|संगीत/i, ['phone_media']],
   [/\b(navigate|directions|maps?|route|how far)\b/i, ['phone_navigate']],
   [/\b(search|youtube|google|find)\b/i, ['phone_search']],
   [/\b(open|launch|start|app)\b/i, ['phone_open_app']],
 ];
+// Notes come up as "make a note", "note it down", "my notes", "నోట్".
+export const NOTE_WORDS = /\b(notes?|noted|jot|write (it|this|that|these) down|keep (a )?(note|record))\b|నోట్|రాసి పెట్ట|नोट/i;
 // Core tools sent only when their words come up.
 const EXTRA_TOOLS = new Map([
   ['add_goal', /\bgoals?\b/i], ['log_goal_progress', /\b(goals?|progress)\b/i], ['set_goal_status', /\bgoals?\b/i],
@@ -260,6 +279,8 @@ const EXTRA_TOOLS = new Map([
   ['set_weather_place', /\b(i live|moved to|my city|weather (in|for)|weather place)\b/i],
   ['news_headlines', /\b(news|headlines?)\b/i],
   ['draft_email', /\b(e-?mails?|mails?)\b/i],
+  ...['add_note', 'update_note', 'delete_note'].map(name => [name, NOTE_WORDS]),
+  ['set_language', /\b(telugu|hindi|tamil|english|language|speak in|talk in)\b|తెలుగు|हिंदी|हिन्दी|தமிழ்/i],
 ]);
 
 function toId(value) {
@@ -319,15 +340,32 @@ function clashWith(at, title) {
 
 // Whether their latest message asks for a task or reminder, says yes to one, or is one of their routines (whose
 // steps may add tasks). The AI's own suggestions never go on their list by themselves.
-const ASKS_FOR_TASK = /\bremind(?:er|ing)? me\b|\b(?:add|create|make|set|schedule|put|new)\b[^.?!]*\b(?:tasks?|to-?dos?|reminders?|alarms?)\b|don'?t let me forget|\bchase me\b/i;
-const SAYS_YES = /\b(?:yes|yeah|yep|yup|ok(?:ay)?|sure|do it|go ahead|add it|set it|haan|ji|avunu|sare|sari|pettu)\b/i;
-function askedForTask() {
-  const said = String(chat.recent(4).filter(m => m.role === 'user').at(-1)?.content ?? '');
+// A yes counts only as the answer to LightMoon offering one in its reply just before ("Shall I add that?"): an "ok"
+// somewhere in "ok, what should I work on?" is not a yes to a task it thought of.
+const ASKS_FOR = {
+  task: /\bremind(?:er|ing)? me\b|\b(?:add|create|make|set|schedule|put|new)\b[^.?!]*\b(?:tasks?|to-?dos?|reminders?|alarms?)\b|don'?t let me forget|\bchase me\b|\bgurthu? ?che|\byaad dila|గుర్తు చే|గుర్తు చెయ్య|రిమైండ|టాస్క్|याद दिला/i,
+  goal: /\b(?:goals?|targets?)\b|లక్ష్యం|गोल|लक्ष्य/i,
+  note: NOTE_WORDS,
+};
+const OFFERS = {
+  task: /\b(?:add|remind|reminder|task|list|chase|schedule|put|set)\b[^?]*\?|(?:జోడించ|చేర్చ|గుర్తు|రిమైండ|టాస్క్|add|remind)[^?]*\?/i,
+  goal: /\bgoals?\b[^?]*\?|(?:లక్ష్యం|goal)[^?]*\?/i,
+  note: /\bnotes?\b[^?]*\?|(?:నోట్|note)[^?]*\?/i,
+};
+const SAYS_YES = /^[^\p{L}\p{N}]*(?:yes|yeah|yep|yup|ok(?:ay)?|sure|do it|go ahead|add it|set it|put it|please|haan|ji|avunu|sare|sari|pettu|correct)\b/iu;
+function askedFor(kind) {
+  const recent = chat.recent(4);
+  const said = String(recent.filter(m => m.role === 'user').at(-1)?.content ?? '');
   if (said.startsWith('(Automatic message')) return false; // a briefing or letter: nobody asked for anything
-  if (ASKS_FOR_TASK.test(said) || SAYS_YES.test(said)) return true;
+  if (ASKS_FOR[kind].test(said)) return true;
+  const offered = String(recent.filter(m => m.role === 'assistant').at(-1)?.content ?? '');
+  if ((SAYS_YES.test(said) || saidYes(said)) && OFFERS[kind].test(offered)) return true;
   const lower = said.toLowerCase();
   return routines.list().some(r => lower.includes(r.trigger.toLowerCase()));
 }
+const askedForTask = () => askedFor('task');
+// What the refusal says; brain.js ends the reply there, so the AI can't answer its own question.
+export const NOT_ASKED = 'They did not ask for';
 
 const handlers = {
   remember({ content, category }) {
@@ -343,7 +381,7 @@ const handlers = {
 
   add_task({ title, due_at, remind_at, announcement, check_in, heads_up }) {
     const name = toText(title, 'title', 200);
-    if (!askedForTask()) throw new Error('They did not ask for a task or reminder. Ask them first ("Shall I add that?"), and add it only after their yes.');
+    if (!askedForTask()) throw new Error(`${NOT_ASKED} a task or reminder. Ask them in one short question ("Shall I add that?") and end your reply; add it only after their yes.`);
     const dueAt = toTime(due_at, 'due_at');
     // Anything with a due time gets a reminder, so LightMoon can chase it: at the due time, or 10 am on a due day.
     const dueReminder = dueAt && (dueAt.length > 10 ? dueAt : `${dueAt}T10:00`);
@@ -390,8 +428,50 @@ const handlers = {
     return `Deleted: ${title}`;
   },
 
+  add_note({ title, text }) {
+    const name = toText(title, 'title', 80);
+    const words = toText(text, 'text', 4000);
+    if (!askedFor('note')) throw new Error(`${NOT_ASKED} a note. Ask in one short question ("Shall I note that down?") and end your reply.`);
+    const same = notes.byTitle(name);
+    if (same) {
+      notes.update(same.id, { add: words });
+      return `Added to the note "${same.title}"`;
+    }
+    notes.add({ title: name, text: words });
+    return `Noted: ${name}`;
+  },
+
+  update_note({ id, add, text, title }) {
+    const note = notes.get(toId(id));
+    if (!note) throw new Error(`There is no note #${id}.`);
+    if (add == null && text == null && !title) throw new Error('Give add (a new line), text (the whole new text) or title.');
+    notes.update(note.id, { title: title ? String(title).trim().slice(0, 80) : null, text: text == null ? null : String(text), add: add ? String(add).trim() : null });
+    return `Note updated: ${title || note.title}`;
+  },
+
+  delete_note({ id }) {
+    const note = notes.get(toId(id));
+    if (!note) throw new Error(`There is no note #${id}.`);
+    const { title } = note; // removing empties the record
+    notes.remove(note.id);
+    return `Deleted the note "${title}"`;
+  },
+
+  set_language({ language }) {
+    const code = languageCode(language);
+    if (!code) throw new Error('language must be english, telugu, hindi or tamil.');
+    settings.set('talk_language', code);
+    const { name } = TALK_LANGUAGES[code];
+    return {
+      text: `Talking in ${name}`,
+      result: code === 'en' ? 'Done: you talk in English again, starting with this reply.'
+        : `Done: from this reply on, write in ${name} letters only (your voice reads them), and you'll hear them in ${name}.`,
+    };
+  },
+
   add_goal({ title, why, target_date }) {
     const name = toText(title, 'title', 200);
+    if (!askedFor('goal')) throw new Error(`${NOT_ASKED} a goal. Ask in one short question ("Shall I track that as a goal?") and end your reply.`);
     goals.add({
       title: name,
       why: why ? String(why).trim().slice(0, 300) : null,
@@ -489,6 +569,10 @@ const handlers = {
     const byName = Boolean(phoneApp?.openTeamsChat) && Boolean((await phoneApp.sendHelper?.().catch(() => null))?.enabled);
     const plan = planCompose({ app, to, group, text: toText(text, 'text', 2000), lookUp: name => nicknames.lookUp(name), byName });
     if (plan.ask) throw new Error(plan.ask);
+    // WhatsApp and texts go through phone_message: it finds the contact, reads back and sends.
+    if (phoneApp?.whatsapp && /whats ?app|^sms$|^text/i.test(String(app ?? ''))) {
+      throw new Error('For WhatsApp and SMS use phone_message (to, text, via), which opens the right chat and sends it after their yes.');
+    }
     if (plan.kind === 'chat') {
       await phoneApp.openTeamsChat({ chat: plan.chat, text: plan.text, send: false });
       rememberDraft('teams', plan.text, plan.chat);
@@ -583,7 +667,7 @@ const handlers = {
   ...lifeHandlers,
   // Their Life Levelling list is theirs too: only what they asked for or said yes to.
   life_add_task(args) {
-    if (!askedForTask()) throw new Error('They did not ask for a task. Ask them first ("Shall I add that to Life Levelling?"), and add it only after their yes.');
+    if (!askedForTask()) throw new Error(`${NOT_ASKED} a task. Ask them in one short question ("Shall I add that to Life Levelling?") and end your reply; add it only after their yes.`);
     return lifeHandlers.life_add_task(args);
   },
   ...phoneHandlers,

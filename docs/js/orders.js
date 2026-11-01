@@ -3,18 +3,20 @@
 // into, a change that takes its wording from a message, or that takes something away when the user didn't ask,
 // waits until the AI has asked the user and they've answered (tools.js).
 
+import { NATIVE_YES } from './language.js';
+
 // Tools that only look things up, and the two that already ask first every time (phone.js).
 const LEAVE_ALONE = new Set([
   'get_weather', 'look_up', 'check_link', 'news_headlines', 'phone_calendar', 'phone_recent_calls', 'phone_messages',
   'phone_number_info', 'phone_search', 'phone_navigate', 'phone_open_app', 'phone_media', 'phone_call', 'phone_message', 'phone_driving', 'compose_message', 'tap_send', 'teams_send', 'work_email_send',
 ]);
 // Tools that take something away, and those that answer a reminder.
-const TAKE_AWAY = new Set(['forget', 'delete_task', 'delete_routine', 'life_delete_task']);
+const TAKE_AWAY = new Set(['forget', 'delete_task', 'delete_routine', 'life_delete_task', 'delete_note']);
 const ANSWER = new Set(['complete_task', 'stop_checking_in', 'snooze_reminder', 'set_goal_status', 'life_complete_task', 'life_miss_task']);
 
 const TAKE_AWAY_WORDS = /\b(forget|delete|remove|clear|erase|wipe|drop|cancel|scrap|undo|abandon|pause|give up|get rid|no longer|anymore|don'?t (need|want)|never ?mind)\b/i;
 const ANSWER_WORDS = /\b(missed|skipped|failed|didn'?t|couldn'?t|can'?t|could not|did not|unable|not able|yes|yeah|yep|yup|sure|ok|okay|done|did|finished|completed?|achieved|tick|mark|stop|later|snooze|not now|remind|minutes?|hours?|tonight|tomorrow|haan|avunu)\b/i;
-const YES = /^\W*(yes|yeah|yep|yup|ya|sure|ok|okay|go ahead|please do|do it|send( it)?|go|correct|right|confirm(ed)?|haan|ha|ji|haan ji|theek hai|avunu|sare|sari)\b/i;
+const YES = /^[^\p{L}\p{M}\p{N}]*(yes|yeah|yep|yup|ya|sure|ok|okay|go ahead|please do|do it|send( it)?|go|correct|right|confirm(ed)?|haan|ha|ji|haan ji|theek hai|avunu|sare|sari)\b/iu;
 
 // Words too common to say where an idea came from.
 const COMMON = new Set(('the and for you your yours with that this these those from have has had are was were will would can could '
@@ -68,7 +70,7 @@ export function holdBack(name, args, { chat = [], heard = [], about = '' } = {})
 
 // Whether the user's message is a yes ("yes", "sure, go ahead", "haan"), the only answer that lets a held-back call
 // through.
-export const saidYes = text => YES.test(String(text ?? ''));
+export const saidYes = text => YES.test(String(text ?? '')) || NATIVE_YES.test(String(text ?? ''));
 
 // The same call, however the AI orders its arguments: to recognise it when the AI asks again after the user's yes.
 export function callKey(name, args) {

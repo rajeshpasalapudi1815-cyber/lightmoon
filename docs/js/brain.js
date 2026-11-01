@@ -2,7 +2,7 @@
 // (Groq by default), streams the reply back as it is written, and runs any tools the model asks for.
 import { aiConfig, messages, DEFAULT_AI, SPARE_MODEL } from './store.js';
 import { buildSystemPrompt } from './prompt.js';
-import { toolsFor, LOAD_TOOLS, runTool, quickReply, startTurn } from './tools.js';
+import { toolsFor, LOAD_TOOLS, runTool, quickReply, startTurn, NOT_ASKED } from './tools.js';
 import { report } from './problems.js';
 import { weatherSummary } from './weather.js';
 import { refresh as refreshLifeLevelling } from './lifelevelling.js';
@@ -107,6 +107,7 @@ export async function chat(text, { onText, heardAlso = [], shared = '' } = {}) {
       }
 
       convo.push({ role: 'assistant', content: reply.content || null, tool_calls: reply.tool_calls });
+      const outcomes = [];
       for (const call of reply.tool_calls) {
         if (call.function?.name === LOAD_TOOLS.function.name) {
           // Life Levelling's tools also bring its details into the prompt.
@@ -122,12 +123,20 @@ export async function chat(text, { onText, heardAlso = [], shared = '' } = {}) {
           continue;
         }
         const outcome = await runTool(call.function?.name, call.function?.arguments);
+        outcomes.push(outcome);
         if (outcome.ok) actions.push(outcome.action);
         convo.push({
           role: 'tool',
           tool_call_id: call.id,
           content: JSON.stringify(outcome.ok ? { ok: true, result: outcome.result } : { ok: false, error: outcome.error }),
         });
+      }
+      // Adding something they didn't ask for was refused, or it asked them something and the tools didn't work out:
+      // the reply ends with the question, so the AI can't go on to answer it itself ("Shall I add it? Yes. Added.").
+      const sofar = written.join('').trim();
+      const refused = outcomes.some(o => !o.ok && String(o.error).startsWith(NOT_ASKED));
+      if (refused || (outcomes.length && outcomes.every(o => !o.ok) && /\?$/.test(sofar))) {
+        return finish(/\?$/.test(sofar) ? sofar : `${sofar ? `${sofar} ` : ''}Shall I add that?`.trim(), actions);
       }
       if (written.length) emit(' '); // keep text from before and after the tools apart
     }

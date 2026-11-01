@@ -25,7 +25,7 @@ const DATA_KEY = 'assistant.data.v1';
 const AI_KEY = 'assistant.ai'; // kept apart from the data so backups never contain the API key
 const MAX_MESSAGES = 400;
 const KEEP_DELETED_MS = 60 * 86_400_000; // deletions are remembered this long so they reach other devices
-const COLLECTIONS = ['memories', 'tasks', 'goals', 'checkins', 'routines', 'outcomes'];
+const COLLECTIONS = ['memories', 'tasks', 'goals', 'checkins', 'routines', 'outcomes', 'notes'];
 const LOCAL_SETTINGS = new Set(['last_briefing']); // per device, never synced
 
 const blank = () => ({
@@ -38,6 +38,7 @@ const blank = () => ({
   checkins: [],
   routines: [], // "good night" -> steps the AI carries out with its tools
   outcomes: [], // how each reminder went, for the rhythm learner (rhythm.js)
+  notes: [], // what they asked to have written down
 });
 
 // Short random ids that won't clash between a phone and a computer.
@@ -77,6 +78,7 @@ function normalize(saved) {
     checkins: list('checkins'),
     routines: list('routines'),
     outcomes: list('outcomes'),
+    notes: list('notes'),
   };
   return upgradeRecords(data);
 }
@@ -548,6 +550,34 @@ export const goals = {
   },
 };
 
+// Notes: what they ask to have written down ("make a note: the plumber is Ravi, 98480..."), kept until they delete
+// them. Each has a title, so "add eggs to my shopping note" finds the one to add to. Newest change first.
+const MAX_NOTE_CHARS = 4000;
+export const notes = {
+  list: () => live('notes').sort((a, b) => b.updated_at - a.updated_at),
+  get: id => find('notes', id),
+  byTitle: title => live('notes').find(n => n.title.toLowerCase() === String(title ?? '').trim().toLowerCase()) ?? null,
+  add({ title, text }) {
+    const note = { id: newId(), title, text: text.slice(0, MAX_NOTE_CHARS), created_at: localStamp(), updated_at: Date.now() };
+    data.notes.push(note);
+    save();
+    return note;
+  },
+  // text replaces the note's text; add puts a new line at its end.
+  update(id, { title, text, add }) {
+    const note = notes.get(id);
+    if (!note) return null;
+    if (title) note.title = title;
+    if (text != null) note.text = text;
+    if (add) note.text = note.text ? `${note.text}\n${add}` : add;
+    note.text = note.text.slice(0, MAX_NOTE_CHARS);
+    touch(note);
+    save();
+    return note;
+  },
+  remove: id => remove('notes', id),
+};
+
 // A routine: a phrase ("good night") and what to do when the user says it, in their words; the AI carries
 // the steps out with its tools. Saving one with an existing phrase replaces it.
 export const routines = {
@@ -640,6 +670,7 @@ export function snapshot() {
     goals: goals.active(),
     memories: memories.list(),
     routines: routines.list(),
+    notes: notes.list(),
   };
 }
 

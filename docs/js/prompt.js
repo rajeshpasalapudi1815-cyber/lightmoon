@@ -1,10 +1,11 @@
 // Builds the system prompt: LightMoon's personality plus a fresh snapshot of everything it knows.
-import { profile, memories, tasks, goals, routines, rhythm, settings, nicknames } from './store.js';
+import { profile, memories, tasks, goals, routines, rhythm, settings, nicknames, notes } from './store.js';
 import { isPast, describeAgo } from './time.js';
 import { savedPlace } from './weather.js';
 import { promptSection as lifeLevellingSection, summary as lifeLevellingSummary } from './lifelevelling.js';
 import { promptSection as phoneSection } from './phone.js';
-import { LIFE_WORDS } from './tools.js';
+import { LIFE_WORDS, NOTE_WORDS } from './tools.js';
+import { languageRule } from './language.js';
 import { coachStyle } from './announce.js';
 
 // How LightMoon holds them to things (Settings → Reminders; announce.js uses the same choice for check-ins).
@@ -18,6 +19,8 @@ const MAX_MEMORIES = 80;
 // Asking what to do or how the day/week looks: Life Levelling's plan helps.
 const PLANNING = /\b(plan|what (should|do) i|what's next|next step|my day|today|tonight|this week|tasks?|to-?dos?|priorit\w*|coach|motivat\w*|tired|stress\w*)\b/i;
 const MAX_TASKS = 40;
+const MAX_NOTES = 30;
+const NOTE_PREVIEW = 90; // characters of each note, unless the talk is about notes
 
 function weekInShort() {
   const done = tasks.doneSince(7);
@@ -86,7 +89,7 @@ export function buildSystemPrompt({ focus } = {}) {
   const phone = phoneSection();
   const phoneGuidance = phone ? `
 - You are on their phone (PHONE below): answer "what's on today", "any calls or messages" from it; phone_* tools do the rest.
-- Calling or sending: the tool gives a question to read back; ask it, end your reply, and call again with confirm_id only after their yes. Never on a guess.
+- Calling or sending: the tool gives a question to read back; ask it, end your reply, and call again with confirm_id only after their yes. Never on a guess. A message needs its words: if they didn't say what to write, ask that first and open nothing. Once they pick one of two contacts for a nickname ("wife", "Mom"), save it with set_nickname as that number, so it's never asked again.
 - Look-alikes (two contacts or chats with one name, several emails from one sender): pick the likely one from the conversation and what the tool says; if unsure, ask once with your best guess first, told apart by surname, app, group or what it said ("Asha Rao, who messaged this morning, or Asha from the office?"), then offer set_nickname. Settle the chat before replying to a message marked SAME NAME.
 - Once and briefly: offer to answer an important missed call or message, mention a meeting soon, and a battery under 20%. A message marked ASKS SOMETHING OF THEM gets one offer of a reminder before it's due.
 - "focus for an hour", "don't disturb me" → phone_focus (ask who may get through). "I'm driving" → phone_driving; "this is my car" → remember_car. In FOCUS or DRIVING MODE, keep it short.${/SPENT|BILL/.test(phone) ? `
@@ -98,6 +101,12 @@ export function buildSystemPrompt({ focus } = {}) {
   const nicknameLine = nickPairs.length
     ? `\n\nNICKNAMES (what they call people; calls, messages and emails understand these): ${nickPairs.map(([nick, who]) => `${nick} = ${who}`).join('; ')}`
     : '';
+  // Notes: titles and a glimpse, all of each when they talk about notes (or for a briefing).
+  const fullNotes = focus == null || NOTE_WORDS.test(focus);
+  const noteLines = notes.list().slice(0, MAX_NOTES).map(n => {
+    const text = n.text.replace(/\s*\n\s*/g, ' / ');
+    return `- [#${n.id}] ${n.title}: ${fullNotes || text.length <= NOTE_PREVIEW ? text.slice(0, 1500) : `${text.slice(0, NOTE_PREVIEW)}...`}`;
+  });
   const routineLines = routines.list().map(r => `- [#${r.id}] "${r.trigger}": ${r.steps}`);
 
   const goalLines = goals.active().map(g => {
@@ -118,6 +127,7 @@ export function buildSystemPrompt({ focus } = {}) {
 HOW YOU SPEAK
 - Your replies are usually read aloud. Talk like a person: plain sentences, no markdown, no lists, no headings, no emojis.
 - Write for the ear: short sentences that each carry one idea, words instead of symbols and abbreviations ("for example", not "e.g."; "about", not "~"), and times, dates and amounts the way you would say them ("half past five", "the 3rd of November", "fifteen hundred rupees"). No brackets: make it a sentence of its own.
+${languageRule(settings.get('talk_language'))}
 - If they say you pronounce a word wrong, ask how it sounds if they haven't said, save it with set_pronunciation, and say it again their way.
 - Be brief: one to three sentences, unless they ask for detail, a plan or an explanation.
 - Sound like someone who knows them: use what you remember about them, their people and their plans.
@@ -136,6 +146,7 @@ WHAT YOU DO
 - Routines: save_routine; when they say a ROUTINES phrase, do its steps (yes-steps still need their yes) and sum up.
 - Messages: write in the language they use. If they speak Telugu or mix Telugu and English, write Tenglish in English letters, as they'd type it ("Hi, akkada unnava? Nenu late avthunna"), never translated into English or in Telugu script. Tidy spelling in their voice ("I tidied it up"); asked what to say, give two short options and your pick; asked what one means, explain plainly (what they want, how they feel, anything due). Read the mood of people and answer to fit; acknowledge feelings first when someone is upset.
 - Sending: with teams_send and work_email_send in your tools, send Teams messages and work email directly (read back, then send after their yes); use those first. Otherwise you can't press Send in other apps. Email → draft_email at once (no extra question); Teams and other apps → compose_message (any Teams chat by its name; send: true only if they said to send it now); say they tap Send there, never that you sent it. WhatsApp and SMS → phone_message. If they then say "send it" for a draft you opened in Teams, WhatsApp, Gmail or Outlook, call tap_send.
+- Notes: "make a note", "note that", "write this down" → add_note with a short title (the same title adds to that note); "add milk to my shopping note" → update_note add; read them out from NOTES. Notes are for things to keep, tasks for things to do.
 - Where things are: "the passport is in the blue bag" → remember (category place, with the date), replacing the older one; answer "where's my…" from those.
 - Hearing: their words come through speech recognition and English may not be their first language. Read by sound and context ("pulav top 5" about hotels = "pull up the top 5"; "draft mile" = "draft mail"), use the recogniser's other guesses, ask only if it could really mean two things, and never correct how they speak.
 - Links: check_link for any they ask about; never call one safe.
@@ -161,6 +172,9 @@ ${rhythmLines.join('\n') || '- Nothing learned yet.'}
 
 GOALS
 ${goalLines.join('\n') || '- None set yet.'}
+
+NOTES (what they asked to have written down)
+${noteLines.join('\n') || '- None yet.'}
 
 ROUTINES (when they say the phrase, do the steps)
 ${routineLines.join('\n') || '- None yet.'}${weekLine}${nicknameLine}${buddyLine}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}${phone ? `\n\n${phone}` : ''}`;

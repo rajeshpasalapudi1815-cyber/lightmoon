@@ -57,3 +57,24 @@ export function bestVoice(voices, gender) {
   }
   return voices.find(v => v.lang.startsWith('en') && genderOf(v) === gender && !/-language$/.test(v.name)) ?? null;
 }
+
+// Indian scripts, for replies in Telugu, Hindi or Tamil: a phrase written in one is said by a voice of that language
+// (an English voice reads Telugu letters as nothing, or spells them out).
+const SCRIPTS = [['te', /[ఀ-౿]/], ['hi', /[ऀ-ॿ]/], ['ta', /[஀-௿]/]];
+// 'te', 'hi', 'ta' for a phrase mostly in that script, else null.
+export function scriptOf(text) {
+  for (const [lang, letters] of SCRIPTS) {
+    const count = (String(text).match(new RegExp(letters.source, 'g')) ?? []).length;
+    if (count && count * 3 >= String(text).replace(/[^\p{L}]/gu, '').length) return lang;
+  }
+  return null;
+}
+
+// The voice for a phrase in another language: of the wanted kind if one is known, online first when allowed
+// (it sounds better), never Android's "any voice" entry. null when the device has none.
+export function voiceForLanguage(voices, lang, gender, { online = true } = {}) {
+  const ofLang = voices.filter(v => v.lang.replace('_', '-').toLowerCase().startsWith(`${lang}-`) && !/-language$/.test(v.name)
+    && (online || v.localService !== false));
+  const rank = v => (genderOf(v) === gender ? 0 : genderOf(v) ? 2 : 1) * 2 + (online && v.localService === false ? 0 : 1);
+  return ofLang.sort((a, b) => rank(a) - rank(b))[0] ?? null;
+}
