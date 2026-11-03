@@ -1289,7 +1289,12 @@ function openSettings() {
   fields.apiKey.value = '';
   fillAiFields(fields, store.aiConfig());
   fillVoices(fields.voice);
-  $('#modelInfo').textContent = `Brain: ${state.ai.model} via ${state.ai.provider}${state.ai.hasKey ? '' : ' (no API key yet)'}.`;
+  $('#modelInfo').textContent = state.ai.claude
+    ? `Brain: Claude Sonnet 5.5, with ${state.ai.model} via ${state.ai.provider} as the backup${state.ai.hasKey ? '' : ' (no key yet)'}.`
+    : `Brain: ${state.ai.model} via ${state.ai.provider}${state.ai.hasKey ? '' : ' (no API key yet)'}.`;
+  fields.claudeKey.value = '';
+  $('#claudeStatus').textContent = state.ai.claude ? 'On' : 'Off';
+  $('#claudeRemove').hidden = !state.ai.claude;
   $('#settingsError').textContent = '';
   paintWeatherSettings();
   paintLockSettings();
@@ -2258,6 +2263,8 @@ function saveSettings(event) {
 
   const apiKey = fields.apiKey.value.trim();
   if (/\s/.test(apiKey)) return void settingsProblem('ai', "That API key doesn't look right. Copy it again.");
+  const claudeKey = fields.claudeKey.value.trim();
+  if (claudeKey && !/^sk-ant-\S+$/.test(claudeKey)) return void settingsProblem('ai', "That Claude key doesn't look right: it starts with sk-ant-. Copy it again.");
   const baseUrl = fields.baseUrl.value.trim();
   if (!/^https:\/\/[^\s]+$/.test(baseUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(baseUrl)) {
     return void settingsProblem('ai', 'The API address must start with https://');
@@ -2302,6 +2309,7 @@ function saveSettings(event) {
     model: fields.model.value.trim(),
     fallbackModel: fields.fallbackModel.value.trim(),
     ...(apiKey && { apiKey }),
+    ...(claudeKey && { claudeKey }),
   });
   applyState();
   $('#settings').close();
@@ -2411,6 +2419,13 @@ function wireUp() {
   $('#settings').addEventListener('close', onSettingsClosed);
   addEventListener('popstate', onSettingsHistory);
   $('#resetAi').addEventListener('click', () => fillAiFields($('#settingsForm').elements, store.DEFAULT_AI));
+  $('#claudeRemove').addEventListener('click', () => {
+    store.saveAiConfig({ claudeKey: '' });
+    applyState();
+    $('#claudeStatus').textContent = 'Off';
+    $('#claudeRemove').hidden = true;
+    note('Claude is off on this device. Groq answers again.');
+  });
   wireLearning(); // Settings -> AI brain -> Our own model
   $('#clearChatBtn').addEventListener('click', clearChat);
   $('#exportBtn').addEventListener('click', downloadBackup);

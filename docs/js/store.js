@@ -285,11 +285,13 @@ export function aiConfig() {
   ai.fallbackModel = RETIRED_MODELS[ai.fallbackModel] ?? ai.fallbackModel;
   // Local servers such as Ollama don't need a key.
   const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(`${ai.baseUrl}/`);
-  return { ...ai, ready: isLocal || Boolean(ai.apiKey) };
+  // claudeKey: Claude as the main brain (claude.js), with this service as its backup.
+  const groqReady = isLocal || Boolean(ai.apiKey);
+  return { ...ai, groqReady, ready: groqReady || Boolean(ai.claudeKey) };
 }
 
 export function saveAiConfig(changes) {
-  const { ready, ...current } = aiConfig();
+  const { ready, groqReady, ...current } = aiConfig();
   writeJson(AI_KEY, { ...current, ...changes });
 }
 
@@ -673,7 +675,7 @@ export function snapshot() {
   }
   return {
     profile: profile(),
-    ai: { ready: ai.ready, hasKey: Boolean(ai.apiKey), model: ai.model, provider },
+    ai: { ready: ai.ready, hasKey: Boolean(ai.apiKey), model: ai.model, provider, claude: Boolean(ai.claudeKey) },
     tasks: tasks.open(),
     doneToday: tasks.doneToday(),
     goals: goals.active(),

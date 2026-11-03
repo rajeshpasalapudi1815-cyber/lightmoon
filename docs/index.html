@@ -398,6 +398,15 @@
             <label>API key <input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Leave blank to keep the current key"></label>
           </div>
           <div class="set-card">
+            <div class="card-head"><h3 class="card-title">Claude (Sonnet 5.5)</h3><span id="claudeStatus" class="card-status"></span></div>
+            <label>Claude API key <input name="claudeKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-..."></label>
+            <span class="row actions"><button type="button" id="claudeRemove" class="btn-ghost" hidden>Stop using Claude</button></span>
+            <details class="help">
+              <summary>How it works</summary>
+              <p>With a Claude key, LightMoon thinks with Claude Sonnet 5.5: smarter answers and no free-tier limits. Groq stays as the backup if Claude can't be reached. Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> (it needs a little prepaid credit) and paste it here on each device: like the Groq key, it stays on this device and is never synced or backed up. Set a monthly spend limit in the Anthropic console to stay in budget.</p>
+            </details>
+          </div>
+          <div class="set-card">
             <h3 class="card-title">Advanced</h3>
             <label>API address <input name="baseUrl" spellcheck="false" inputmode="url"></label>
             <label>Model <input name="model" spellcheck="false"></label>

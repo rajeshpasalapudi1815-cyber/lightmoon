@@ -10,6 +10,7 @@ import { refresh as refreshPhone } from './phone.js';
 import { learnFrom, answerLocally } from './learning.js';
 import { answerOffline } from './offline.js';
 import { saidAgain } from './hearing.js';
+import { askClaude, CLAUDE_MODEL } from './claude.js';
 
 const HISTORY_LIMIT = 8;
 const OLD_MESSAGE_CHARS = 400; // older messages are cut short: every request counts against the free tier's tokens per minute
@@ -106,7 +107,7 @@ export async function chat(text, { onText, heardAlso = [], shared = '' } = {}) {
         return finish(written.join(''), actions);
       }
 
-      convo.push({ role: 'assistant', content: reply.content || null, tool_calls: reply.tool_calls });
+      convo.push({ role: 'assistant', content: reply.content || null, tool_calls: reply.tool_calls, ...(reply.claude && { claude: reply.claude }) });
       const outcomes = [];
       for (const call of reply.tool_calls) {
         if (call.function?.name === LOAD_TOOLS.function.name) {
@@ -228,6 +229,18 @@ async function complete(convo, tools, onText, { onWait } = {}) {
   if (!ai.ready) throw new BrainError('no-key');
   const local = await answerLocally(convo, tools, onText); // our own model, for kinds it has proven reliable at
   if (local) return local;
+  // Claude first when it has a key (claude.js); Groq answers if Claude can't, unless Claude had already started talking.
+  if (ai.claudeKey) {
+    let started = false;
+    try {
+      return await askClaude(ai.claudeKey, convo, tools, delta => { started = true; onText?.(delta); });
+    } catch (err) {
+      const e = err.claudeError ?? { kind: 'api', detail: String(err?.message ?? err) };
+      const claudeError = new BrainError(e.kind, `${CLAUDE_MODEL} ${e.status ?? ''} ${e.detail}`.trim(), { waitSeconds: e.waitSeconds ?? null });
+      if (started || !ai.groqReady) throw claudeError;
+      report('ai', `${claudeError.message} (Groq answered instead)`);
+    }
+  }
   const cost = estimateTokens(convo, tools);
   const models = modelsInOrder(ai, cost);
   let emitted = false;
@@ -346,7 +359,8 @@ function learnLimit(model, detail) {
 }
 
 async function request(ai, model, convo, tools, onText) {
-  const body = { model, messages: convo, temperature: 0.7, stream: true };
+  // Claude's own copy of its replies (claude.js) isn't for other services.
+  const body = { model, messages: convo.map(({ claude, ...m }) => m), temperature: 0.7, stream: true };
   if (tools) Object.assign(body, { tools, tool_choice: 'auto' });
   if (model.includes('gpt-oss')) body.reasoning_effort = 'low'; // quicker replies for voice
 
