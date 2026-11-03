@@ -20,7 +20,7 @@
 
   <!-- Boot screen: first-run setup, then a tap to start (browsers need a tap before sound and the microphone). -->
   <div id="boot" class="boot">
-    <div class="reactor reactor-lg" aria-hidden="true"><i></i><i></i><i></i><b></b></div>
+    <div id="bootFace" class="reactor reactor-lg" aria-hidden="true"></div>
     <h1 class="boot-title">LIGHTMOON</h1>
     <p class="boot-sub">Your light in every phase</p>
 
@@ -81,7 +81,7 @@
     <main class="layout">
       <section class="stage">
         <div class="core-wrap">
-          <button id="core" class="reactor" aria-label="Tap to talk"><i></i><i></i><i></i><b></b></button>
+          <button id="core" class="reactor" aria-label="Tap to talk"></button>
           <p id="status" class="status" aria-live="polite">Standing by</p>
           <p id="caption" class="caption" aria-live="polite"></p>
           <div class="edge-glow" aria-hidden="true"></div>
@@ -101,7 +101,7 @@
         </div>
         <div id="transcript" class="transcript" aria-live="polite"></div>
         <form id="composer" class="composer">
-          <input id="input" autocomplete="off" placeholder="Type a message, or tap the core to talk">
+          <input id="input" autocomplete="off" placeholder="Type a message, or tap the eyes to talk">
           <button type="button" id="micBtn" class="icon-btn mic" aria-label="Talk">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
           </button>
@@ -323,11 +323,20 @@
                 <option value="1500">a short pause (1.5 seconds)</option>
                 <option value="2500">a normal pause (2.5 seconds)</option>
                 <option value="4000">a long pause (4 seconds)</option>
-                <option value="0">only when I tap the moon again</option>
+                <option value="0">only when I tap the eyes again</option>
               </select>
             </label>
-            <label class="switch-row">Let me check the words before they're sent <input type="checkbox" name="reviewSpeech"></label>
-            <small class="hint">What it heard waits in the box: fix any word, then tap send. You can also tap any message you sent to fix it and send it again.</small>
+            <label>Before what I said is sent
+              <select name="reviewWait">
+                <option value="0">send it straight away</option>
+                <option value="2000">show it for 2 seconds</option>
+                <option value="3000">show it for 3 seconds</option>
+                <option value="5000">show it for 5 seconds</option>
+                <option value="8000">show it for 8 seconds</option>
+                <option value="-1">wait until I tap send</option>
+              </select>
+            </label>
+            <small class="hint">While a bar runs along the box, tap the box to stop it and fix any word, then tap send. Leave it and it goes by itself; tap the eyes to send at once. You can also tap any message you sent to fix it and send it again.</small>
             <label>After answering you out loud
               <select name="followUp">
                 <option value="questions">listen when it asks you something</option>

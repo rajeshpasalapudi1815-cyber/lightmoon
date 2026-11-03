@@ -12,6 +12,9 @@
   --amber-rgb: 255, 181, 71;
   --amber: rgb(var(--amber-rgb));
   --amber-light: #fff6e6;
+  --violet-rgb: 178, 140, 255;
+  --eye-glass-in: #0d1b2b;
+  --eye-glass-out: #01040a;
   --core-light: #effcff;
   --bg-rgb: 4, 7, 13;
   --ink-rgb: 255, 255, 255;
@@ -115,59 +118,41 @@ small { color: var(--muted); }
 .card-note.error-text { color: var(--danger); }
 .muted { color: var(--muted); font-size: 13px; margin: 0; }
 
-/* ---------- Arc-reactor core ---------- */
+/* ---------- The face: two eyes (js/eyes.js) ---------- */
 .reactor {
   position: relative;
-  width: 132px;
-  height: 132px;
+  width: 180px;
+  height: 90px;
   flex-shrink: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: 45%;
   padding: 0;
   display: grid;
   place-items: center;
   cursor: pointer;
-  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.18) 0%, rgba(var(--bg-rgb), 0) 70%);
+  background: radial-gradient(ellipse at center, rgba(var(--accent-rgb), calc(0.06 + var(--glow))) 0%, rgba(var(--bg-rgb), 0) 70%);
+  -webkit-tap-highlight-color: transparent;
 }
 .reactor:focus-visible { outline: 2px solid var(--cyan); outline-offset: 6px; }
-.reactor i { position: absolute; border-radius: 50%; border: 2px solid transparent; }
-.reactor i:nth-child(1) { inset: 0; border-top-color: var(--cyan); border-bottom-color: var(--cyan); animation: spin 9s linear infinite; }
-.reactor i:nth-child(2) { inset: 16%; border-width: 3px; border-left-color: var(--cyan-dim); border-right-color: var(--cyan-dim); animation: spin 6s linear infinite reverse; }
-.reactor i:nth-child(3) { inset: 30%; border: 1px dashed rgba(var(--accent-rgb), 0.5); animation: spin 16s linear infinite; }
-.reactor b {
-  width: 30%;
-  height: 30%;
-  border-radius: 50%;
-  background: radial-gradient(circle, var(--core-light) 0%, var(--cyan) 45%, rgba(var(--accent-rgb), 0) 75%);
-  box-shadow: 0 0 28px var(--cyan), 0 0 60px rgba(var(--accent-rgb), 0.35);
-  animation: breathe 3.2s ease-in-out infinite;
+.reactor-lg { width: 300px; height: 150px; cursor: default; }
+.eyes {
+  width: 100%; height: 100%; overflow: visible;
+  --eye-core: var(--core-light);
+  color: var(--cyan);
+  transition: color 0.45s ease;
+  filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.45));
 }
-.reactor-lg { width: 190px; height: 190px; cursor: default; }
-
-body[data-state='thinking'] .reactor i:nth-child(1) { animation-duration: 1.2s; }
-body[data-state='thinking'] .reactor i:nth-child(2) { animation-duration: 0.9s; }
-body[data-state='thinking'] .reactor i:nth-child(3) { animation-duration: 2s; }
-
-body[data-state='speaking'] .reactor b { animation: talk 0.35s ease-in-out infinite alternate; }
-
-body[data-state='listening'] .reactor b {
-  background: radial-gradient(circle, var(--amber-light) 0%, var(--amber) 45%, rgba(var(--amber-rgb), 0) 75%);
-  box-shadow: 0 0 28px var(--amber), 0 0 60px rgba(var(--amber-rgb), 0.35);
-}
-body[data-state='listening'] .reactor i:nth-child(1) { border-top-color: var(--amber); border-bottom-color: var(--amber); }
-body[data-state='listening'] .reactor::after {
-  content: '';
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  border: 2px solid var(--amber);
-  animation: ripple 1.4s ease-out infinite;
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
-@keyframes breathe { 50% { transform: scale(1.12); opacity: 0.85; } }
-@keyframes talk { from { transform: scale(0.9); } to { transform: scale(1.3); } }
-@keyframes ripple { from { transform: scale(0.9); opacity: 0.9; } to { transform: scale(1.35); opacity: 0; } }
+.eyes[data-mood='listening'] { color: var(--amber); --eye-core: var(--amber-light); filter: drop-shadow(0 0 9px rgba(var(--amber-rgb), 0.6)); }
+.eyes[data-mood='thinking'] { color: rgb(var(--violet-rgb)); filter: drop-shadow(0 0 8px rgba(var(--violet-rgb), 0.55)); }
+.eyes[data-mood='speaking'] { filter: drop-shadow(0 0 10px rgba(var(--accent-rgb), 0.65)); }
+.eyes .glass-in { stop-color: var(--eye-glass-in); }
+.eyes .glass-out { stop-color: var(--eye-glass-out); }
+.eyes .lid { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.eyes[data-mood='resting'] .lid { stroke-width: 3; opacity: calc(0.45 + 0.55 * var(--breathe, 1)); }
+.eyes .iris-halo { fill: currentColor; opacity: 0.12; }
+.eyes .iris-ring { fill: none; stroke: var(--eye-core); stroke-width: 1.2; stroke-dasharray: 1.6 3.2; opacity: 0.55; }
+.eyes .pupil { fill: #02050a; }
+.eyes .shine { fill: #fff; opacity: 0.85; }
 
 /* ---------- Boot screen ---------- */
 .boot {
@@ -287,7 +272,15 @@ body[data-state='thinking'] .status, body[data-state='speaking'] .status { color
 .action-chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: rgba(var(--accent-rgb), 0.1); color: var(--cyan); border: 1px solid rgba(var(--accent-rgb), 0.2); }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 
-.composer { display: flex; gap: 8px; padding-top: 12px; }
+.composer { display: flex; gap: 8px; padding-top: 12px; position: relative; }
+/* Heard words waiting to go (app.js review): a bar runs out along the box; tapping the box stops it. */
+.composer::after {
+  content: ''; position: absolute; left: 22px; right: 130px; bottom: 2px; height: 3px; border-radius: 3px;
+  background: var(--cyan); box-shadow: 0 0 8px var(--cyan); transform-origin: left; transform: scaleX(0); opacity: 0;
+}
+.composer.reviewing::after { opacity: 1; animation: review-run var(--review-ms, 3000ms) linear forwards; }
+.composer.reviewing input { border-color: var(--cyan-dim); }
+@keyframes review-run { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 .composer input { flex: 1; min-width: 0; border-radius: 999px; padding: 12px 18px; }
 .composer .icon-btn { width: 46px; height: 46px; border-radius: 50%; }
 .send { color: var(--cyan); }
@@ -357,8 +350,8 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
   .clock { display: none; }
   .topbar { padding: 10px 16px; }
   .stage { padding: 10px 16px 16px; }
-  .reactor { width: 96px; height: 96px; }
-  .reactor-lg { width: 150px; height: 150px; }
+  .reactor { width: 150px; height: 75px; }
+  .reactor-lg { width: 260px; height: 130px; }
   .msg { max-width: 92%; }
   .panels {
     position: fixed;
@@ -425,7 +418,7 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
 /* ---------- Voice view: the conversation is kept, but shown only when asked for ---------- */
 body:not(.show-chat) .transcript { display: none; }
 body:not(.show-chat) .core-wrap { flex: 1; justify-content: center; gap: 14px; }
-body:not(.show-chat) .reactor:not(.reactor-lg) { width: 200px; height: 200px; }
+body:not(.show-chat) .reactor:not(.reactor-lg) { width: 320px; height: 160px; }
 .caption { margin: 0; max-width: 32em; min-height: 1.4em; padding: 0 8px; text-align: center; font-size: 15px; color: var(--muted); }
 .caption.reminder { color: var(--amber); }
 .caption.error { color: var(--danger); }
@@ -433,7 +426,7 @@ body:not(.show-chat) .reactor:not(.reactor-lg) { width: 200px; height: 200px; }
 #chatBtn[aria-pressed='true'] { color: var(--cyan); border-color: var(--cyan); }
 .unread { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
 @media (max-width: 860px) {
-  body:not(.show-chat) .reactor:not(.reactor-lg) { width: 170px; height: 170px; }
+  body:not(.show-chat) .reactor:not(.reactor-lg) { width: min(280px, 80vw); height: min(140px, 40vw); }
 }
 @media (max-width: 420px) {
   .topbar-right { gap: 5px; }
@@ -714,7 +707,8 @@ html[data-look="calm"] {
 html[data-look="daylight"] {
   --bg: #f6f4ef; --bg-rgb: 246, 244, 239; --panel-rgb: 255, 255, 255; --panel-solid: #ffffff;
   --accent-rgb: 61, 90, 254; --core-light: #e8edff; --text: #1d1f24; --muted: #63666f; --ink-rgb: 0, 0, 0;
-  --amber-rgb: 196, 120, 0; --amber-light: #fff2d6; --danger: #c62844; --ok: #12805a;
+  --amber-rgb: 196, 120, 0; --amber-light: #fff2d6; --danger: #c62844; --ok: #12805a; --violet-rgb: 112, 64, 220;
+  --eye-glass-in: #232a44; --eye-glass-out: #0b0e1a;
   --glow: 0; --grid: 0; --hud: var(--body); color-scheme: light;
   --field: #ffffff; --field-soft: rgba(0, 0, 0, 0.03); --title-glow: 0;
 }

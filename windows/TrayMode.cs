@@ -1,6 +1,6 @@
 // LightMoon kept in the tray: its window stays out of sight (off the screen and off the taskbar and Alt+Tab) while
 // the page keeps running, and "LightMoon" wakes it there instead of bringing it to the front. While it listens,
-// thinks or speaks, a small dot pulses at the top of the screen (EdgeGlow), so it is clear LightMoon is at work
+// thinks or speaks, a tiny eye opens at the top of the screen (TrayEye), so it is clear LightMoon is at work
 // without showing anything else. Clicking the tray icon shows or hides the window.
 //
 // The page and the Listener talk over the bridge (DesktopOrb.cs): the page waits on GET /events for a wake, posts
@@ -21,7 +21,7 @@ static class TrayMode
     static string settingFile;
     static Action<string> log;
     static Func<IntPtr> findWindow;
-    static EdgeGlow glow;
+    static TrayEye glow;
     static SynchronizationContext ui; // the glow is a window: changed on the UI thread only
 
     // What the page last said: "idle", "listening", "thinking", "speaking"; whether it has had a key press.
@@ -46,7 +46,7 @@ static class TrayMode
         // Off unless switched on in the tray menu: LightMoon shows itself when woken, and hides only when asked
         // ("go to the background", HideNow).
         On = File.Exists(settingFile) && File.ReadAllText(settingFile).Trim() == "on";
-        glow = new EdgeGlow();
+        glow = new TrayEye();
         ui = SynchronizationContext.Current;
         var keeper = new System.Windows.Forms.Timer { Interval = 3000 };
         keeper.Tick += (s, e) => Keep();
@@ -156,7 +156,7 @@ static class TrayMode
         pageSeen = DateTime.Now;
         pageActivated = activated;
         pageState = state ?? "idle";
-        // The dot only while LightMoon is out of sight: on screen, it shows what it is doing itself.
+        // The eye only while LightMoon is out of sight: on screen, it shows what it is doing itself.
         IntPtr window = findWindow();
         bool unseen = window != IntPtr.Zero && hidden.Contains(window);
         if (unseen && (pageState == "listening" || pageState == "thinking" || pageState == "speaking")) glow.Show(pageState);
@@ -256,41 +256,44 @@ static class TrayMode
     const byte VK_MENU = 0x12, VK_F13 = 0x7C;
 }
 
-// A small dot at the top centre of the screen while LightMoon works: blue listening, violet thinking, teal speaking,
-// gently pulsing. It never takes clicks or the focus, and isn't in the taskbar.
-class EdgeGlow : Form
+// A tiny eye at the top centre of the screen while LightMoon works out of sight. It opens when LightMoon wakes,
+// blinks now and then, and shows what it is doing: amber and wide open while listening, violet and glancing about
+// while thinking, cool blue with a pulsing iris while speaking; it closes again before going away. Drawn with soft
+// edges on a see-through window (a layered window) that never takes clicks or the focus, and isn't in the taskbar.
+class TrayEye : Form
 {
-    const int Size_ = 12;
-    const int FromTop = 6;
-    readonly System.Windows.Forms.Timer breathe = new System.Windows.Forms.Timer { Interval = 50 };
-    Color color = Color.DeepSkyBlue;
-    double phase;
+    const int W = 46, H = 30;   // the window: the eye and its glow
+    const int FromTop = 4;
+    readonly System.Windows.Forms.Timer tick = new System.Windows.Forms.Timer { Interval = 33 };
+    readonly Random random = new Random();
+    string state = "listening";
+    bool closing;
+    double open, look, lookTo, pulse, t;
+    DateTime blinkAt = DateTime.Now.AddSeconds(2), blinkStart = DateTime.MinValue, glanceAt = DateTime.MinValue;
 
-    public EdgeGlow()
+    [DllImport("user32.dll")] static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref Point pptDst, ref Size psize, IntPtr hdcSrc, ref Point pprSrc, int crKey, ref Blend pblend, int dwFlags);
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr hDC);
+    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr hDC, IntPtr hObject);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr hObject);
+    [StructLayout(LayoutKind.Sequential, Pack = 1)] struct Blend { public byte Op, Flags, Alpha, Format; }
+
+    public TrayEye()
     {
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        BackColor = color;
         Place();
-        breathe.Tick += (s, e) =>
-        {
-            phase += 0.15;
-            Opacity = 0.45 + 0.5 * (0.5 + 0.5 * Math.Sin(phase)); // between faint and bright, about once a second
-        };
+        tick.Tick += (s, e) => Step();
     }
 
-    // Round, at the top centre of the main screen.
     void Place()
     {
         var screen = Screen.PrimaryScreen.Bounds;
-        Bounds = new Rectangle(screen.Left + (screen.Width - Size_) / 2, screen.Top + FromTop, Size_, Size_);
-        using (var shape = new GraphicsPath())
-        {
-            shape.AddEllipse(0, 0, Size_, Size_);
-            Region = new Region(shape);
-        }
+        Bounds = new Rectangle(screen.Left + (screen.Width - W) / 2, screen.Top + FromTop, W, H);
     }
 
     protected override bool ShowWithoutActivation { get { return true; } }
@@ -300,23 +303,111 @@ class EdgeGlow : Form
         get
         {
             var p = base.CreateParams;
-            p.ExStyle |= 0x80 | 0x20 | 0x8000000 | 0x8; // tool window, click-through, no activate, topmost
+            p.ExStyle |= 0x80 | 0x20 | 0x8000000 | 0x8 | 0x80000; // tool window, click-through, no activate, topmost, layered
             return p;
         }
     }
 
-    public void Show(string state)
+    public void Show(string newState)
     {
-        color = state == "thinking" ? Color.MediumPurple : state == "speaking" ? Color.MediumAquamarine : Color.DeepSkyBlue;
-        BackColor = color;
+        state = newState;
+        closing = false;
         Place();
-        if (!Visible) base.Show();
-        breathe.Start();
+        if (!Visible) { open = 0; base.Show(); }
+        tick.Start();
     }
 
+    // Closes the eye, then goes.
     public new void Hide()
     {
-        breathe.Stop();
-        if (Visible) base.Hide();
+        if (Visible) closing = true;
+    }
+
+    static Color Tint(string state)
+    {
+        if (state == "listening") return Color.FromArgb(255, 181, 71);
+        if (state == "thinking") return Color.FromArgb(178, 140, 255);
+        return Color.FromArgb(63, 216, 255);
+    }
+
+    void Step()
+    {
+        t += 0.033;
+        var now = DateTime.Now;
+        double want = closing ? 0 : state == "listening" ? 1.05 : state == "thinking" ? 0.7 : 0.92;
+        open += (want - open) * 0.22;
+        if (closing && open < 0.04) { tick.Stop(); closing = false; base.Hide(); return; }
+        // A blink every few seconds: down and up in about a quarter of a second.
+        double shut = 0;
+        if (!closing && now > blinkAt) { blinkStart = now; blinkAt = now.AddMilliseconds(2600 + random.Next(3200)); }
+        double since = (now - blinkStart).TotalMilliseconds;
+        if (since < 90) shut = since / 90; else if (since < 250) shut = 1 - (since - 90) / 160;
+        // Thinking: glances from side to side; listening: looks at you; otherwise a small drift.
+        if (now > glanceAt)
+        {
+            lookTo = state == "thinking" ? (lookTo > 0 ? -0.8 : 0.8) : state == "listening" ? 0 : (random.NextDouble() - 0.5) * 0.6;
+            glanceAt = now.AddMilliseconds(state == "thinking" ? 550 + random.Next(400) : 1500 + random.Next(2500));
+        }
+        look += (lookTo - look) * 0.35;
+        pulse = state == "speaking" ? 0.5 + 0.5 * Math.Sin(t * 14 + Math.Sin(t * 5) * 2) : state == "listening" ? 0.5 + 0.5 * Math.Sin(t * 4) : 0;
+        Draw(Math.Max(0, open * (1 - shut)));
+    }
+
+    void Draw(double lid)
+    {
+        using (var bmp = new Bitmap(W, H, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+        {
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.Clear(Color.Transparent);
+                Color c = Tint(state);
+                float cx = W / 2f, cy = H / 2f, half = 17f, tall = (float)(7.5 * lid);
+                float bend = 1.6f * (1 - (float)Math.Min(1, lid));
+                using (var eye = new GraphicsPath())
+                {
+                    // Almond: two curves meeting at the corners; shut, both bend down into a closed lid.
+                    float up = cy - 2 * (tall - bend), down = cy + 2 * (tall * 0.95f + bend);
+                    eye.AddBezier(cx - half, cy, cx - half / 2, up, cx + half / 2, up, cx + half, cy);
+                    eye.AddBezier(cx + half, cy, cx + half / 2, down, cx - half / 2, down, cx - half, cy);
+                    for (int i = 3; i >= 1; i--) // the glow
+                        using (var glowPen = new Pen(Color.FromArgb((int)(28 + 22 * pulse) / i, c), 2 + i * 2.2f)) g.DrawPath(glowPen, eye);
+                    using (var glass = new SolidBrush(Color.FromArgb(240, 6, 12, 22))) g.FillPath(glass, eye);
+                    var keep = g.Clip;
+                    g.SetClip(eye);
+                    float r = (float)(6.2 + (state == "listening" ? 0.8 : 0) + pulse * 0.7), ix = cx + (float)(look * 6);
+                    using (var iris = new SolidBrush(c)) g.FillEllipse(iris, ix - r, cy - r, r * 2, r * 2);
+                    using (var inner = new SolidBrush(Color.FromArgb(150, 255, 255, 255))) g.FillEllipse(inner, ix - r * 0.55f, cy - r * 0.55f, r * 1.1f, r * 1.1f);
+                    float p = r * (state == "listening" ? 0.55f : 0.42f);
+                    using (var pupil = new SolidBrush(Color.FromArgb(255, 2, 5, 10))) g.FillEllipse(pupil, ix - p, cy - p, p * 2, p * 2);
+                    using (var shine = new SolidBrush(Color.White)) g.FillEllipse(shine, ix - r * 0.55f, cy - r * 0.6f, 2.2f, 2.2f);
+                    g.Clip = keep;
+                    using (var rim = new Pen(c, 1.4f)) g.DrawPath(rim, eye);
+                }
+            }
+            PutOnScreen(bmp);
+        }
+    }
+
+    // Puts the drawing on the screen with its see-through edges (a layered window).
+    void PutOnScreen(Bitmap bmp)
+    {
+        IntPtr screen = GetDC(IntPtr.Zero), mem = CreateCompatibleDC(screen), hbmp = IntPtr.Zero, old = IntPtr.Zero;
+        try
+        {
+            hbmp = bmp.GetHbitmap(Color.FromArgb(0));
+            old = SelectObject(mem, hbmp);
+            var size = new Size(bmp.Width, bmp.Height);
+            var from = new Point(0, 0);
+            var to = new Point(Left, Top);
+            var blend = new Blend { Op = 0, Flags = 0, Alpha = 255, Format = 1 }; // AC_SRC_OVER, AC_SRC_ALPHA
+            UpdateLayeredWindow(Handle, screen, ref to, ref size, mem, ref from, 0, ref blend, 2); // ULW_ALPHA
+        }
+        finally
+        {
+            ReleaseDC(IntPtr.Zero, screen);
+            if (hbmp != IntPtr.Zero) { SelectObject(mem, old); DeleteObject(hbmp); }
+            DeleteDC(mem);
+        }
     }
 }

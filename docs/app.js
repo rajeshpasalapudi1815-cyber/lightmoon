@@ -19,6 +19,7 @@ import { genderOf, wantedGender, bestVoice, scriptOf, voiceForLanguage } from '.
 import { refreshWorkAccount, awaitingYes } from './js/tools.js';
 import { learnedFix, applyFixes, withFix } from './js/hearing.js';
 import { listeningLanguage, languageCode } from './js/language.js';
+import { mountEyes } from './js/eyes.js';
 import * as updates from './js/updates.js';
 import * as problems from './js/problems.js';
 
@@ -74,7 +75,9 @@ function loadPrefs() {
   // sendAfterMs: how long a pause ends a spoken request (0 = only when the moon is tapped again).
   // followUp: after a spoken request, listen for the answer once the reply is said: 'questions' (when the
   // reply asks something), 'always', or 'off' (wait for a tap).
-  const defaults = { voice: '', rate: 1, speak: true, lang, handsFree: false, sendAfterMs: 2500, listenOnOpen: true, followUp: 'questions', look: 'hud', reviewSpeech: false };
+  // reviewMs: after a spoken request, how long its words wait in the box before going (0 = straight away, -1 = until
+  // Send is tapped); tapping the box stops the wait so they can be fixed.
+  const defaults = { voice: '', rate: 1, speak: true, lang, handsFree: false, sendAfterMs: 2500, listenOnOpen: true, followUp: 'questions', look: 'hud', reviewMs: 3000 };
   try {
     // Move preferences saved under the app's earlier names.
     for (const oldKey of ['vega.prefs', 'jarvis.prefs']) {
@@ -88,6 +91,11 @@ function loadPrefs() {
     if (!saved.langIndiaSet) {
       if (inIndia && saved.lang === 'en-US') saved.lang = 'en-IN';
       saved.langIndiaSet = true;
+      localStorage.setItem(PREFS_KEY, JSON.stringify(saved));
+    }
+    if (saved.reviewMs === undefined) { // was a yes/no switch, "Let me check the words before they're sent"
+      saved.reviewMs = saved.reviewSpeech ? -1 : defaults.reviewMs;
+      delete saved.reviewSpeech;
       localStorage.setItem(PREFS_KEY, JSON.stringify(saved));
     }
     if (!saved.voiceGenderSet) {
@@ -355,6 +363,7 @@ function offerShared(text) {
 // Recomputes what the core shows, and starts or stops wake-word listening to match.
 function refresh() {
   listener.sync();
+  if (listenWhenFree && typing()) listenWhenFree = false; // they're typing: listening now would wipe the box
   if (listenWhenFree && started && !busy && !speaker.active && !locked && listener.mode !== 'command') {
     // "Your turn": on the phone Android's recogniser beeps as it starts, so a second beep would be one too many.
     if (listenWhenFree === 'follow-up' && !isNativeApp) chime();
@@ -585,6 +594,63 @@ function joinPhrases(phrases) {
   return joined.join(' ');
 }
 
+// Typing in the box right now (or words typed there and not sent yet): voice keeps out of the way.
+const typing = () => document.activeElement === input || typedDraft();
+let typed = false; // the box holds words typed by hand (not heard)
+const typedDraft = () => (typed || review.held) && Boolean(input.value.trim());
+
+// What was heard waits in the box with a bar running down before it is sent. Tapping or typing in the box stops it
+// there, to be fixed and sent with Send; tapping the core or Send sends it straight away.
+const review = {
+  timer: null,
+  heardAlso: [],
+  get waiting() { return Boolean(this.timer) || this.held; },
+  held: false,
+
+  start(text, heardAlso) {
+    input.value = text;
+    typed = false;
+    fixingHeard = text;
+    this.heardAlso = heardAlso;
+    if (prefs.reviewMs < 0) return this.hold('Check the words, then tap send');
+    const composer = $('#composer');
+    composer.style.setProperty('--review-ms', `${prefs.reviewMs}ms`);
+    composer.classList.remove('reviewing');
+    void composer.offsetWidth; // restart the bar
+    composer.classList.add('reviewing');
+    showCaption('Sending... tap the box to fix it', 'system');
+    this.timer = setTimeout(() => this.sendNow(), prefs.reviewMs);
+  },
+
+  // Stopped: the words stay in the box until Send.
+  hold(caption = 'Fix the words, then tap send') {
+    if (!this.timer && this.held) return;
+    clearTimeout(this.timer);
+    this.timer = null;
+    this.held = true;
+    $('#composer').classList.remove('reviewing');
+    showCaption(caption, 'system');
+  },
+
+  sendNow() {
+    const text = input.value.trim();
+    const heardAlso = this.heardAlso;
+    this.clear();
+    input.value = '';
+    if (!text) return;
+    learnHearing(text);
+    send(text, { byVoice: true, heardAlso });
+  },
+
+  clear() {
+    clearTimeout(this.timer);
+    this.timer = null;
+    this.held = false;
+    this.heardAlso = [];
+    $('#composer').classList.remove('reviewing');
+  },
+};
+
 const listener = {
   rec: null,
   mode: null, // 'command' = taking a request (after a tap or the wake word), 'wake' = waiting for the wake word
@@ -631,6 +697,9 @@ const listener = {
       return;
     }
     if (this.capturing) {
+      // Words typed before talking stay, and what is said follows them.
+      if (!resume && typedDraft()) opening = this.opening = `${input.value.trim()} ${opening}`.trim();
+      if (!resume) { review.clear(); typed = false; }
       showHeard(opening);
       if (!resume) this.waitForSilence();
     }
@@ -645,11 +714,13 @@ const listener = {
     }
   },
 
-  // Tap the moon or the mic: start listening; tap again to send straight away.
+  // Tap the eyes or the mic: start listening; tap again to send straight away.
   pushToTalk() {
     if (!this.supported) return note('Voice input needs Chrome or Edge. You can still type.');
     if (speaker.active) speaker.stop(); // a tap always silences, even while a reply is still arriving
     if (busy) return;
+    if (review.timer) return review.sendNow(); // heard words waiting to go: send them now
+    review.clear();
     this.autoStarted = false;
     if (this.mode === 'command') return this.finish();
     this.start('command');
@@ -689,13 +760,9 @@ const listener = {
     input.value = '';
     refresh();
     if (!text) return;
-    // "Let me check the words first": the words wait in the box to be corrected, and go when Send is tapped.
-    if (prefs.reviewSpeech && !panelMode.on) {
-      input.value = text;
-      fixingHeard = text;
-      showCaption('Check the words, then tap send', 'system');
-      return;
-    }
+    // The words wait in the box for a moment (or until Send) so they can be fixed; not in the quick panel or out of
+    // sight in the tray, where there is no box to look at.
+    if (prefs.reviewMs && !panelMode.on && !offScreen()) return review.start(text, heardAlso);
     send(text, { byVoice: true, heardAlso });
   },
 
@@ -704,6 +771,15 @@ const listener = {
     this.capturing = false;
     this.stopRec();
     input.value = '';
+    refresh();
+  },
+
+  // They started typing while it listened: listening stops, and what was heard stays in the box with their typing.
+  cancelKeepingWords() {
+    clearTimeout(this.silenceTimer);
+    this.capturing = false;
+    this.stopRec();
+    typed = true;
     refresh();
   },
 
@@ -721,7 +797,7 @@ const listener = {
   onError(event) {
     if (event.error === 'no-speech' || event.error === 'aborted') return; // normal
     this.failed = true;
-    if (event.error === 'not-allowed' && this.autoStarted) return note('Tap the moon whenever you want to talk.');
+    if (event.error === 'not-allowed' && this.autoStarted) return note('Tap the eyes whenever you want to talk.');
     const problems = {
       'not-allowed': 'Microphone access is blocked. Allow the microphone for LightMoon in your browser or app settings, then try again.',
       'service-not-allowed': 'Speech recognition is not available in this browser. Try Chrome or Edge.',
@@ -780,7 +856,7 @@ async function send(text, { context = null, byVoice = false, heardAlso = [] } = 
   if (!text || busy) return;
   context ??= pendingShare;
   pendingShare = null;
-  input.placeholder = 'Type a message, or tap the core to talk';
+  input.placeholder = 'Type a message, or tap the eyes to talk';
   if (speaker.active) speaker.stop();
   addMessage('user', text, [], { spoken: byVoice });
   busy = true;
@@ -1178,7 +1254,7 @@ function openSettings() {
   fields.rate.value = prefs.rate;
   fields.speak.checked = prefs.speak;
   fields.sendAfter.value = String(prefs.sendAfterMs);
-  fields.reviewSpeech.checked = prefs.reviewSpeech;
+  fields.reviewWait.value = String(prefs.reviewMs);
   fields.listenOnOpen.checked = prefs.listenOnOpen;
   fields.followUp.value = prefs.followUp;
   fields.reminderChecks.value = store.settings.get('reminder_checks', 'on');
@@ -1312,7 +1388,7 @@ async function paintHealth() {
     ['Test', () => sayInChosenVoice(`This is ${assistantName()}.`)]);
   const mic = await microphoneState();
   row(mic === 'denied' ? 'bad' : mic === 'granted' ? 'ok' : 'warn', 'Microphone',
-    { granted: 'Allowed', denied: 'Blocked: allow it in the phone or browser settings for LightMoon', prompt: 'Asked for the first time you tap the moon', unknown: 'Unknown' }[mic]);
+    { granted: 'Allowed', denied: 'Blocked: allow it in the phone or browser settings for LightMoon', prompt: 'Asked for the first time you tap the eyes', unknown: 'Unknown' }[mic]);
 
   if (isNativeApp) {
     if (alarms) {
@@ -2179,7 +2255,7 @@ function saveSettings(event) {
     rate: Number(fields.rate.value),
     speak: fields.speak.checked,
     sendAfterMs: Number(fields.sendAfter.value),
-    reviewSpeech: fields.reviewSpeech.checked,
+    reviewMs: Number(fields.reviewWait.value),
     listenOnOpen: fields.listenOnOpen.checked,
     followUp: fields.followUp.value,
     look: fields.look.value,
@@ -2270,14 +2346,31 @@ function toggleHandsFree() {
 function wireUp() {
   $('#composer').addEventListener('submit', event => {
     event.preventDefault();
+    if (review.waiting && !busy) return review.sendNow(); // heard words, fixed or not: still a spoken request
     const text = input.value;
     input.value = '';
+    typed = false;
+    review.clear();
     if (text.trim()) setChatOpen(true); // typed messages are read, not heard: show the reply
     if (!busy) learnHearing(text);
     send(text);
   });
   $('#chatBtn').addEventListener('click', () => setChatOpen(!chatOpen()));
   $('#core').addEventListener('click', () => listener.pushToTalk());
+  // Tapping the box: heard words waiting to go stop and wait there to be fixed; LightMoon stops talking once they
+  // start typing, and doesn't start listening over what they type.
+  input.addEventListener('pointerdown', () => { if (review.timer) review.hold(); });
+  input.addEventListener('focus', () => { if (review.timer) review.hold(); });
+  input.addEventListener('input', () => {
+    if (review.timer) review.hold();
+    if (!review.waiting && !listener.capturing) typed = true;
+    if (speaker.active) speaker.stop();
+    if (listener.capturing) listener.cancelKeepingWords();
+  });
+  // Tapping anywhere on the stage (not a button or the box) stops LightMoon talking.
+  $('.stage').addEventListener('click', event => {
+    if (speaker.active && !event.target.closest('button, input, a, form, .msg')) speaker.stop();
+  });
   $('#micBtn').addEventListener('click', () => listener.pushToTalk());
   $('#handsFreeBtn').addEventListener('click', toggleHandsFree);
   $('#settingsBtn').addEventListener('click', openSettings);
@@ -2585,6 +2678,7 @@ function start({ auto = false } = {}) {
 
   $('#boot').classList.add('leaving');
   $('#app').hidden = false;
+  mountEyes($('#core'), { intro: true }); // they open as LightMoon appears
   setTimeout(() => { $('#boot').hidden = true; }, 600);
 
   renderHistory();
@@ -2742,6 +2836,7 @@ function boot() {
   problems.install();
   updates.start({ isQuiet: quietForRestart, onReady: offerRestart });
   wireUp();
+  mountEyes($('#bootFace'), { intro: true, rest: false });
   applyState();
   const setup = !state.profile.userName || !state.ai.ready;
   startDesktop(); // reachable from the Windows Listener even before the tap below (nothing in the Android app)
