@@ -109,7 +109,9 @@ public class WakeWordService extends Service implements RecognitionListener {
     }
 
     private void update() {
-        boolean wanted = model != null && !MainActivity.visible && SystemClock.elapsedRealtime() >= resumeAt;
+        // Paused while LightMoon is on screen or a conversation goes on with the screen off (TalkService): the app's
+        // own listening has the microphone then.
+        boolean wanted = model != null && !MainActivity.visible && !TalkService.active && SystemClock.elapsedRealtime() >= resumeAt;
         if (wanted && speech == null) startListening();
         else if (!wanted && speech != null) stopListening();
         boolean justHeard = SystemClock.elapsedRealtime() < resumeAt && !MainActivity.visible;
@@ -402,7 +404,7 @@ public class WakeWordService extends Service implements RecognitionListener {
                 text = "Listening again in a few seconds.";
                 break;
             case "paused":
-                title = "Paused: LightMoon is open";
+                title = TalkService.active && !MainActivity.visible ? "Paused: talking with you" : "Paused: LightMoon is open";
                 text = "The app is using the microphone itself. Listening resumes when you leave it.";
                 break;
             default:

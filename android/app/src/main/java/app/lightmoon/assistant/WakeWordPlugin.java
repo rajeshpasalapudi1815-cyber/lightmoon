@@ -333,6 +333,27 @@ public class WakeWordPlugin extends Plugin {
         call.resolve();
     }
 
+    // { on }: a conversation started or ended (docs/app.js keepTalking). While it lasts, TalkService keeps it going with
+    // the screen off; the wake word stays paused.
+    @PluginMethod
+    public void talking(PluginCall call) {
+        TalkService.set(getContext(), Boolean.TRUE.equals(call.getBoolean("on", false)));
+        call.resolve();
+    }
+
+    private static volatile WakeWordPlugin current;
+
+    @Override
+    public void load() {
+        current = this;
+    }
+
+    // Stop was tapped on the "Talking with you" notification: the page ends the conversation.
+    static void talkStopped() {
+        WakeWordPlugin plugin = current;
+        if (plugin != null) plugin.notifyListeners("talkStopped", new JSObject());
+    }
+
     @PluginMethod
     public void takeWake(PluginCall call) {
         JSObject result = new JSObject();

@@ -237,7 +237,8 @@ async function complete(convo, tools, onText, { onWait } = {}) {
   };
   let lastError;
   let mainError; // why the main model failed: worth more than "the backup model doesn't exist"
-  const worst = err => (mainError && err.missingModel ? mainError : err);
+  // The spare being too small for this request says less than "the main models are busy for a minute".
+  const worst = err => (mainError && (err.missingModel || (err.kind === 'too-large' && mainError.kind === 'rate-limit')) ? mainError : err);
   for (let pass = 0; pass < 2; pass++) {
     let waitFor = null; // the soonest any model's minute resets
     for (const model of models) {
@@ -331,11 +332,17 @@ function modelsInOrder(ai, cost) {
   return [...pool.filter(fits), ...pool.filter(model => !fits(model))];
 }
 
-// A model whose whole allowance is smaller than the request answers 413 "Limit 6000, Requested 6543": remember it.
-const limits = new Map();
+// A model whose whole allowance is smaller than the request answers 413 "Limit 6000, Requested 6543": remember it,
+// across restarts too, so it isn't asked (and refused) again every time the app opens.
+const LIMITS_KEY = 'assistant.modelLimits';
+const limits = new Map((() => {
+  try { return Object.entries(JSON.parse(localStorage.getItem(LIMITS_KEY) || '{}')); } catch { return []; }
+})());
 function learnLimit(model, detail) {
   const limit = Number(/Limit (\d+)/i.exec(detail)?.[1]);
-  if (limit) limits.set(model, limit);
+  if (!limit || limits.get(model) === limit) return;
+  limits.set(model, limit);
+  try { localStorage.setItem(LIMITS_KEY, JSON.stringify(Object.fromEntries(limits))); } catch { /* kept for this session */ }
 }
 
 async function request(ai, model, convo, tools, onText) {

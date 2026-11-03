@@ -59,6 +59,12 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!-- A conversation going on with the screen off (TalkService). -->
+        <service
+            android:name=".TalkService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|mediaPlayback" />
+
         <!-- Send helper: taps Send on a draft LightMoon wrote, after the user says "send it" (SendHelper.java). -->
         <service
             android:name=".SendHelper"

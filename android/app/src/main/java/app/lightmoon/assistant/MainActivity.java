@@ -37,6 +37,9 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         WebView web = getBridge() == null ? null : getBridge().getWebView();
         if (web != null) web.setBackgroundColor(Color.TRANSPARENT); // the page paints its own background
+        // The page keeps its full share of the phone while out of sight, so a conversation goes on with the screen
+        // off (TalkService) instead of the page being slowed or dropped.
+        if (web != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         if (getBridge() != null) {
             getBridge().setWebViewClient(new com.getcapacitor.BridgeWebViewClient(getBridge()) {
                 @Override

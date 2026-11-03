@@ -375,6 +375,7 @@ function refresh() {
   else if (speaker.active) mode = 'speaking';
   else if (busy) mode = 'thinking';
   document.body.dataset.state = mode;
+  keepTalking(mode !== 'idle' || Boolean(listenWhenFree) || review.waiting);
   desktop.noteState(mode); // the line at the top of the screen, while LightMoon is in the tray
   if (document.hidden && mode !== 'idle') hiddenAt = Date.now(); // used out of sight (in the tray): the relock time starts again
   const idle = !state?.ai.ready
@@ -382,6 +383,28 @@ function refresh() {
     : prefs.handsFree ? `Say "${assistantName()}" to wake me` : 'Standing by';
   const listening = prefs.sendAfterMs ? 'Listening... tap to send now' : 'Listening... tap when done';
   statusEl.textContent = { idle, listening, thinking: 'Thinking...', speaking: 'Speaking...' }[mode];
+}
+
+// On the phone: while a conversation goes on, Android keeps it going with the screen off (TalkService.java), and ends
+// that a few seconds after it is over (not between the reply and listening for the answer).
+let talkingNow = false;
+let talkEndTimer = null;
+function keepTalking(on) {
+  if (!isNativeApp || !wakeWord?.talking) return;
+  if (on) {
+    clearTimeout(talkEndTimer);
+    talkEndTimer = null;
+    if (!talkingNow) {
+      talkingNow = true;
+      wakeWord.talking({ on: true }).catch(() => {});
+    }
+  } else if (talkingNow && !talkEndTimer) {
+    talkEndTimer = setTimeout(() => {
+      talkEndTimer = null;
+      talkingNow = false;
+      wakeWord.talking({ on: false }).catch(() => {});
+    }, 5000);
+  }
 }
 
 function chime() {
@@ -2699,6 +2722,14 @@ function start({ auto = false } = {}) {
 
   if (phone) {
     phone.addListener('meetingDue', onPhoneSay);
+    // Stop on the "Talking with you" notification: the conversation ends there.
+    wakeWord?.addListener?.('talkStopped', () => {
+      listenWhenFree = false;
+      speaker.stop();
+      if (listener.capturing) listener.cancel();
+      talkingNow = false;
+      refresh();
+    });
     phone.addListener('messageArrived', onPhoneSay);
     phone.addListener('focusEnded', onPhoneSay); // focus mode's "while you focused…" (Focus.java)
     tellPhoneAddress();
