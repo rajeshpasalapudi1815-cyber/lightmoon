@@ -21,6 +21,7 @@ import { lookUp, headlines } from './knowledge.js';
 import { findLinks, checkLink } from './links.js';
 import { planCompose, rememberDraft, recentDraft, SEND_NOW, YES_ONLY, onDraft } from './compose.js';
 import { parseSend, splitNameAndText, teluguToLatin, hasTelugu } from './quicksend.js';
+import { voiceCommand } from './voicecontrol.js';
 
 // A draft just opened in another app: the phone hears "send it" for 30 seconds without the wake phrase (app 1.19+).
 onDraft(draft => wakeWord?.expectSend?.({ apps: draft.apps, text: draft.text, chat: draft.chat ?? '', seconds: 30 }).catch(() => {}));
@@ -896,6 +897,11 @@ export async function quickReply(text) {
     }
   }
   if (asked && !saidYes(said)) forgetConfirms(); // they moved on: the old read-back can't be confirmed later
+  const command = voiceCommand(said);
+  if (command) {
+    const done = await runVoiceCommand(command).catch(err => `That didn't work: ${err.message}`);
+    if (done) return { reply: done, actions: [] };
+  }
   if (TURN_ON_HELPER.test(said) && phoneApp?.openSendHelperSettings) {
     const helper = await phoneApp.sendHelper().catch(() => null);
     if (helper?.enabled) return { reply: 'The Send helper is already on.', actions: [] };
@@ -930,7 +936,32 @@ async function helperOff() {
   };
 }
 
-const TURN_ON_HELPER = /\b(turn|switch|put)\s+on\s+(the\s+)?send\s*helper\b|\bsend\s*helper\s+on\b/i;
+// "Turn off the wake word", "hide yourself" (voicecontrol.js): the phone's wake word, or on the computer the
+// Listener's, and the computer's LightMoon window. -> what to say, or null when it doesn't apply here.
+async function runVoiceCommand(command) {
+  if (command === 'wake-off' || command === 'wake-on') {
+    const on = command === 'wake-on';
+    if (wakeWord?.start) {
+      if (on) await wakeWord.start();
+      else await wakeWord.stop();
+      return on ? 'Wake word on.' : 'Wake word off. I won\'t listen for it until you turn it on again, here or in Settings, Voice.';
+    }
+    if (!phoneApp && desktop.listenerConnected()) {
+      await desktop.setListening(on);
+      return on ? 'Wake word on.' : 'Wake word off on this computer. Say "turn on the wake word" here, or use the tray icon, to have it back.';
+    }
+    return null;
+  }
+  if (phoneApp || !desktop.listenerConnected()) return null; // hiding is for the computer's window
+  if (command === 'hide') {
+    desktop.hideWindow();
+    return 'Going to the background. Say the wake word and I\'ll come back.';
+  }
+  desktop.showWindow();
+  return 'Here I am.';
+}
+
+const TURN_ON_HELPER =/\b(turn|switch|put)\s+on\s+(the\s+)?send\s*helper\b|\bsend\s*helper\s+on\b/i;
 
 export async function runTool(name, rawArgs) {
   const outcome = await runToolInner(name, rawArgs);

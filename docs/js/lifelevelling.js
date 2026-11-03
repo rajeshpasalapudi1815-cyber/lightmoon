@@ -98,6 +98,11 @@ const ago = ms => {
   return minutes < 1 ? 'just now' : minutes < 120 ? `${minutes} min ago` : `${Math.round(minutes / 60)} hours ago`;
 };
 
+const OLD_AFTER_MS = 3 * 3_600_000;
+// Made on another day, or more than a few hours ago.
+export const isOld = (s, now = Date.now()) =>
+  Boolean(s?.generatedAt) && (now - s.generatedAt > OLD_AFTER_MS || localStamp(new Date(s.generatedAt)).slice(0, 10) !== localStamp(new Date(now)).slice(0, 10));
+
 export function promptSection() {
   const s = summary();
   if (!s) return '';
@@ -152,7 +157,9 @@ export function promptSection() {
     s.actions?.length && `Recent requests you sent: ${s.actions.slice(0, 5).map(a => `${a.ok ? 'done' : 'FAILED'}: ${a.message}`).join('; ')}`,
   ];
   const where = inApp(s) ? '; it is an app on their phone and computer and only updates while one of them is open' : '';
-  return `LIFE LEVELLING (their game-style growth app; data from ${ago(s.generatedAt)}${where})
+  // From before today (or hours old): today's repeating tasks aren't in it yet, and some listed may be done or failed.
+  const old = isOld(s) ? `\nOLD DATA: Life Levelling hasn't been opened since ${ago(s.generatedAt)}. Asked about tasks or progress, say first that this list is from then and may be missing today's tasks, and ask them to open Life Levelling so it updates. Never present it as today's full list.` : '';
+  return `LIFE LEVELLING (their game-style growth app; data from ${ago(s.generatedAt)}${where})${old}
 ${lines.filter(Boolean).join('\n')}`;
 }
 

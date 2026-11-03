@@ -223,3 +223,17 @@ export async function pressSend(app, text) {
   if (!res.ok) throw new Error("Couldn't press Send.");
   return (await res.json()).result;
 }
+
+// "Hide yourself": the Listener puts LightMoon's window out of sight (until the wake word or "show yourself").
+export function hideWindow() {
+  fetch(`${LISTENER_URL}/hide`, { method: 'POST', signal: AbortSignal.timeout(3000) }).catch(() => {});
+}
+
+// "Turn off the wake word" on the computer: the Listener stops (or starts) listening for it.
+export async function setListening(on) {
+  const res = await fetch(`${LISTENER_URL}/listen`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }), signal: AbortSignal.timeout(3000),
+  });
+  if (res.status === 404) throw new Error('the LightMoon Listener on this computer is too old for that; use its tray icon');
+  if (!res.ok) throw new Error('the Listener did not take it');
+}

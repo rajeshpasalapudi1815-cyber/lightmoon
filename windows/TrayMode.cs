@@ -43,7 +43,9 @@ static class TrayMode
         settingFile = Path.Combine(folder, "tray-only.txt");
         findWindow = find;
         log = logger;
-        On = !File.Exists(settingFile) || File.ReadAllText(settingFile).Trim() != "off"; // on unless switched off
+        // Off unless switched on in the tray menu: LightMoon shows itself when woken, and hides only when asked
+        // ("go to the background", HideNow).
+        On = File.Exists(settingFile) && File.ReadAllText(settingFile).Trim() == "on";
         glow = new EdgeGlow();
         ui = SynchronizationContext.Current;
         var keeper = new System.Windows.Forms.Timer { Interval = 3000 };
@@ -154,9 +156,25 @@ static class TrayMode
         pageSeen = DateTime.Now;
         pageActivated = activated;
         pageState = state ?? "idle";
-        if (pageState == "listening" || pageState == "thinking" || pageState == "speaking") glow.Show(pageState);
+        // The dot only while LightMoon is out of sight: on screen, it shows what it is doing itself.
+        IntPtr window = findWindow();
+        bool unseen = window != IntPtr.Zero && hidden.Contains(window);
+        if (unseen && (pageState == "listening" || pageState == "thinking" || pageState == "speaking")) glow.Show(pageState);
         else glow.Hide();
     }
+
+    // POST /hide: "go to the background". Out of sight until the wake word or "show yourself".
+    public static void HideNow()
+    {
+        IntPtr window = findWindow();
+        if (window == IntPtr.Zero) return;
+        shownByUser = IntPtr.Zero;
+        Hide(window);
+        log("LightMoon went to the background");
+    }
+
+    // Whether LightMoon's window is out of sight (so a wake shows it again).
+    public static bool IsHidden(IntPtr window) { return hidden.Contains(window); }
 
     // POST /show: the page needs the user (its lock screen).
     public static void ShowWindow()

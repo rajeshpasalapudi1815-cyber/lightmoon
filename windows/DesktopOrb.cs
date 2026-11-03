@@ -690,6 +690,7 @@ class OrbBridge
     readonly SynchronizationContext ui;
     readonly Action<string> log;
     TcpListener server;
+    public Action<bool> OnListen; // "turn off the wake word" (POST /listen {on})
     public Action<string> OnWakePhrase; // the user's own wake word, passed on by LightMoon (POST /wake)
     readonly Dictionary<string, DateTime> seenRequests = new Dictionary<string, DateTime>();
     [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
@@ -878,7 +879,7 @@ class OrbBridge
             return;
         }
         // LightMoon kept in the tray (TrayMode.cs): waiting for a wake, what it's doing, and asking for its window.
-        if (path == "/events" || path == "/state" || path == "/show")
+        if (path == "/events" || path == "/state" || path == "/show" || path == "/hide" || path == "/listen")
         {
             if (origin == null) { Send(stream, 403, null, null, false); return; }
             if (method == "GET" && path == "/events")
@@ -897,6 +898,22 @@ class OrbBridge
                 bool activated = fields.ContainsKey("activated") && Convert.ToBoolean(fields["activated"]);
                 string trouble = fields.ContainsKey("problem") ? Convert.ToString(fields["problem"]) : "";
                 ui.Send(_ => TrayMode.SetPageState(state, activated, trouble), null);
+                Send(stream, 204, origin, null, false);
+                return;
+            }
+            if (method == "POST" && path == "/listen")
+            {
+                Dictionary<string, object> asked = null;
+                try { asked = Json.DeserializeObject(Encoding.UTF8.GetString(body)) as Dictionary<string, object>; }
+                catch (Exception) { }
+                bool on = asked != null && asked.ContainsKey("on") && Convert.ToBoolean(asked["on"]);
+                if (OnListen != null) ui.Send(_ => OnListen(on), null);
+                Send(stream, 204, origin, null, false);
+                return;
+            }
+            if (method == "POST" && path == "/hide")
+            {
+                ui.Send(_ => TrayMode.HideNow(), null);
                 Send(stream, 204, origin, null, false);
                 return;
             }

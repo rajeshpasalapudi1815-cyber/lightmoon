@@ -72,6 +72,7 @@ static class LightMoonListener
             orb = new DesktopOrb(Folder, Wake, ShowTrayMenu, Log);
             bridge = new OrbBridge(orb, ui, Log);
             bridge.OnWakePhrase = SetOwnWake;
+            bridge.OnListen = on => { if (listenItem.Enabled) { pausedByLock = false; listenItem.Checked = on; Log(on ? "wake word turned on by voice" : "wake word turned off by voice"); } };
             bridge.Start();
             ScreenReader.WatchNotifications(Log);
             TrayMode.Start(Folder, FindLightMoon, Log);
@@ -237,6 +238,8 @@ static class LightMoonListener
         // Kept in the tray: it listens where it is, with the dot at the top of the screen (TrayMode.cs).
         if (TrayMode.On && TrayMode.Wake(OpenLightMoon, said)) return;
         IntPtr window = FindLightMoon();
+        // Sent to the background ("go to the background"): woken, it comes back on screen.
+        if (window != IntPtr.Zero && TrayMode.IsHidden(window)) TrayMode.ShowWindow();
         if (window != IntPtr.Zero && GetForegroundWindow() == window) { Log("LightMoon is in front: left alone"); return; }
         if (window == IntPtr.Zero) { Log("opening LightMoon"); OpenLightMoon(); return; }
         if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
