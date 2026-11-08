@@ -37,6 +37,8 @@ public class WakeWordPlugin extends Plugin {
     static volatile boolean pendingWake;
     // ... and the voice was checked as the owner's ("only my voice"): the app skips its own PIN for this wake.
     static volatile boolean pendingOwner;
+    // ... and it was the morning call being answered (MorningCall): the app gives the briefing, then listens.
+    static volatile boolean pendingCall;
 
     @PluginMethod
     public void status(PluginCall call) {
@@ -360,8 +362,10 @@ public class WakeWordPlugin extends Plugin {
         result.put("wake", pendingWake);
         result.put("owner", pendingWake && pendingOwner);
         result.put("panel", MainActivity.panel);
+        result.put("call", pendingWake && pendingCall);
         pendingWake = false;
         pendingOwner = false;
+        pendingCall = false;
         call.resolve(result);
     }
 

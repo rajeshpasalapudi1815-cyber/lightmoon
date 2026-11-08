@@ -548,6 +548,8 @@
               <span class="row">
                 <select id="briefingMorning">
                   <option value="">off</option>
+                  <option value="05:00">5:00</option>
+                  <option value="05:30">5:30</option>
                   <option value="06:00">6:00</option>
                   <option value="06:30">6:30</option>
                   <option value="07:00">7:00</option>
@@ -555,10 +557,20 @@
                   <option value="08:00">8:00</option>
                   <option value="08:30">8:30</option>
                   <option value="09:00">9:00</option>
+                  <option value="09:30">9:30</option>
+                  <option value="10:00">10:00</option>
                 </select>
                 <button type="button" id="briefingMorningTest" class="btn-ghost">Hear it now</button>
               </span>
             </label>
+            <div id="callBox" hidden>
+              <label class="switch-row">Ring me like a phone call <input type="checkbox" id="briefingCall"></label>
+              <small class="hint">At the morning time your phone rings with a LightMoon call (your watch buzzes too). Answer it and LightMoon tells you your day, plans it with you and listens for your reply.</small>
+              <span class="row actions">
+                <button type="button" id="callTest" class="btn-ghost">Try the call now</button>
+                <button type="button" id="callAllow" class="btn-ghost" hidden>Let the call show on the lock screen</button>
+              </span>
+            </div>
             <label>Evening preview of tomorrow
               <span class="row">
                 <select id="briefingEvening">

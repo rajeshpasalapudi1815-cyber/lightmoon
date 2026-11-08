@@ -29,6 +29,16 @@ const briefingRequest = weather =>
   + 'End with one useful suggestion. If you know little about me yet, introduce yourself in one sentence and ask what I am working towards. '
   + `Do not use tools.${weather ? ` Today's weather: ${weather} Mention it in a few words if it matters for my day, like rain, heat or cold.` : ''})`;
 
+// The morning call (MorningCall.java): they answered LightMoon's call, so it talks like one and plans the day with them.
+const callRequest = weather =>
+  '(Automatic message: I just answered your morning call. Talk like a friendly phone call, about 120 words, no lists or symbols. '
+  + 'Greet me for the morning in one line. Then the shape of my day: meetings with times, reminders and tasks due today, anything overdue, '
+  + 'and Life Levelling tasks with their times if they are in your context (say which ones fail if missed). '
+  + 'Mention important missed calls or messages from the phone data in a few words. '
+  + 'Then propose a simple plan: what to do first, the hardest thing in my best hours, and when to fit the rest. '
+  + 'End by asking whether to set it up like that or change anything. Do not use tools in this reply; I will answer.'
+  + `${weather ? ` Today's weather: ${weather} Mention it in a few words if it matters.` : ''})`;
+
 const FRIENDLY_ERRORS = {
   'no-key': "My brain isn't connected yet. Add your API key in settings and I'll be right with you.",
   auth: 'The AI service rejected the API key. Please check it in settings.',
@@ -152,9 +162,10 @@ export async function chat(text, { onText, heardAlso = [], shared = '' } = {}) {
   }
 }
 
-export async function briefing({ onText } = {}) {
+export async function briefing({ onText, call = false } = {}) {
   const [weather] = await Promise.all([weatherSummary().catch(() => null), refreshLifeLevelling({ force: true }), refreshPhone({ force: true })]);
-  const convo = [systemMessage(), ...recentHistory().slice(-6), { role: 'user', content: briefingRequest(weather) }];
+  const ask = call ? callRequest(weather) : briefingRequest(weather);
+  const convo = [systemMessage(call ? 'life levelling' : undefined), ...recentHistory().slice(-6), { role: 'user', content: ask }];
   try {
     const reply = await complete(convo, null, onText);
     learnFrom(convo, null, reply);

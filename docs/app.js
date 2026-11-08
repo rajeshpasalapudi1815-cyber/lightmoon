@@ -901,8 +901,14 @@ async function send(text, { context = null, byVoice = false, heardAlso = [] } = 
   }
 }
 
+// The morning call was answered (MorningCall.java): the day and its plan, said like a call, then listening for the reply.
+function answerCall() {
+  listenWhenFree = 'follow-up';
+  runBriefing(true, { call: true });
+}
+
 // One AI briefing per day (unless asked for); later launches get a short greeting instead.
-async function runBriefing(force = false) {
+async function runBriefing(force = false, { call = false } = {}) {
   if (!state.ai.ready) return;
   if (!force && store.settings.get('last_briefing') === today()) {
     speaker.speak(prefs.listenOnOpen ? `Yes, ${addressWord()}?` : `Welcome back, ${addressWord()}.`);
@@ -912,7 +918,7 @@ async function runBriefing(force = false) {
   refresh();
   try {
     const live = streamReply();
-    const out = await briefing({ onText: live.push });
+    const out = await briefing({ onText: live.push, call });
     if (!out.error) store.settings.set('last_briefing', today());
     live.done(out);
   } finally {
@@ -1711,6 +1717,10 @@ async function paintPhonePowers(message) {
   const briefings = typeof status.briefingMorning === 'string';
   $('#briefingBox').hidden = !briefings;
   if (briefings) for (const kind of ['briefingMorning', 'briefingEvening']) $(`#${kind}`).value = status[kind];
+  // The morning call needs app version 1.29.
+  $('#callBox').hidden = typeof status.briefingCall !== 'boolean';
+  $('#briefingCall').checked = Boolean(status.briefingCall);
+  $('#callAllow').hidden = status.callCoversScreen !== false;
 }
 
 // ---------- Messages and email: what LightMoon may read (the rules live on the phone, in ReadRules.java) ----------
@@ -1839,6 +1849,7 @@ function savePhoneChoices() {
     readMessages: $('#readMessages').value,
     briefingMorning: $('#briefingMorning').value,
     briefingEvening: $('#briefingEvening').value,
+    briefingCall: $('#briefingCall').checked,
   }).catch(err => { $('#settingsError').textContent = err.message; }).finally(() => paintPhonePowers());
 }
 
@@ -1943,6 +1954,7 @@ function listenAfterWake() {
     if (!woke || !started || locked) return;
     speaker.stop();
     listener.autoStarted = true;
+    if (woke.call) return answerCall();
     listenWhenFree = 'follow-up'; // a beep the moment it's listening: words said before it would be lost
     refresh();
   });
@@ -2601,7 +2613,7 @@ function wireUp() {
     // Notification access is granted on Android's own screen; the box repaints when the user comes back.
     $('#allowMessages').addEventListener('click', () => phone.openMessageAccess().catch(err => { $('#settingsError').textContent = err.message; }));
     $('#allowSilence').addEventListener('click', () => phone.openSilenceAccess().catch(err => { $('#settingsError').textContent = err.message; }));
-    for (const id of ['#meetingLead', '#announceCalls', '#readMessages', '#briefingMorning', '#briefingEvening', '#streakGuard']) {
+    for (const id of ['#meetingLead', '#announceCalls', '#readMessages', '#briefingMorning', '#briefingEvening', '#briefingCall', '#streakGuard']) {
       $(id).addEventListener('change', savePhoneChoices);
     }
     for (const kind of ['morning', 'evening']) {
@@ -2610,6 +2622,12 @@ function wireUp() {
         phone.briefingNow({ kind }).catch(err => { $('#settingsError').textContent = err.message; });
       });
     }
+    $('#callTest').addEventListener('click', () => {
+      tellPhoneAddress();
+      $('#settings').close();
+      phone.callNow().catch(err => note(err.message));
+    });
+    $('#callAllow').addEventListener('click', () => phone.openCallSettings().catch(err => { $('#settingsError').textContent = err.message; }));
   }
 
   for (const tab of document.querySelectorAll('[role="tab"]')) {
@@ -2754,7 +2772,8 @@ function start({ auto = false } = {}) {
     nativeAlarms.addListener('reminderDue', onReminderAlarm);
     (async () => {
       await askForNotificationsOnce(); // the microphone question comes after this one
-      if (await takeWake()) launch.action = 'talk'; // opened by "LightMoon": skip the briefing and listen
+      const woke = await takeWake();
+      if (woke) launch.action = woke.call ? 'call' : 'talk'; // opened by "LightMoon" (listen) or the morning call (brief)
       greet(auto);
     })();
   } else {
@@ -2787,6 +2806,8 @@ function greet(auto) {
     input.focus();
   } else if (launch.action === 'talk') {
     listenWhenFree = 'follow-up'; // opened by the wake phrase: beep when listening
+  } else if (launch.action === 'call') {
+    answerCall();
   } else {
     listenWhenFree = prefs.listenOnOpen;
     runBriefing(launch.action === 'briefing');

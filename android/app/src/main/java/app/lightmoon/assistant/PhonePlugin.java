@@ -134,6 +134,8 @@ public class PhonePlugin extends Plugin {
         status.put("readMessages", PhonePrefs.readMessages(getContext()));
         status.put("briefingMorning", Briefings.time(getContext(), Briefings.MORNING));
         status.put("briefingEvening", Briefings.time(getContext(), Briefings.EVENING));
+        status.put("briefingCall", MorningCall.on(getContext()));
+        status.put("callCoversScreen", MorningCall.canCoverScreen(getContext()));
         status.put("focusUntil", Focus.active(getContext()) ? Focus.until(getContext()) : 0);
         status.put("driving", Driving.why(getContext()));
         status.put("steps", Steps.available(getContext()) && Steps.allowed(getContext()));
@@ -243,6 +245,8 @@ public class PhonePlugin extends Plugin {
             String time = call.getString(kind.equals(Briefings.MORNING) ? "briefingMorning" : "briefingEvening");
             if (time != null && (time.isEmpty() || time.matches("\\d{2}:\\d{2}"))) edit.putString("briefing_" + kind, time);
         }
+        Boolean briefingCall = call.getBoolean("briefingCall");
+        if (briefingCall != null) edit.putBoolean("briefing_call", briefingCall);
         JSObject place = call.getObject("place");
         if (place != null && place.has("latitude") && place.has("longitude")) {
             edit.putString("placeName", place.optString("name", ""))
@@ -265,6 +269,27 @@ public class PhonePlugin extends Plugin {
             call.resolve();
         } catch (RuntimeException err) {
             call.reject("The phone wouldn't start the briefing right now.");
+        }
+    }
+
+    // Rings the morning call now, to try it.
+    @PluginMethod
+    public void callNow(PluginCall call) {
+        MorningCall.ring(getContext());
+        call.resolve();
+    }
+
+    // Android 14 and later: the page where the user lets LightMoon's call cover the screen (lock screen included).
+    @PluginMethod
+    public void openCallSettings(PluginCall call) {
+        Intent open = Build.VERSION.SDK_INT >= 34
+            ? new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:" + getContext().getPackageName()))
+            : new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, getContext().getPackageName());
+        try {
+            getActivity().startActivity(open);
+            call.resolve();
+        } catch (RuntimeException err) {
+            call.reject("Couldn't open that settings page.");
         }
     }
 

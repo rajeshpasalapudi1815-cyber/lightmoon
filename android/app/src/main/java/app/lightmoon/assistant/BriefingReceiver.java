@@ -13,6 +13,10 @@ public class BriefingReceiver extends BroadcastReceiver {
         String kind = intent.getStringExtra("kind");
         if (kind == null) return;
         Briefings.schedule(context, kind);
+        if (Briefings.MORNING.equals(kind) && MorningCall.on(context)) {
+            MorningCall.ring(context); // the morning briefing as a call: LightMoon gives it once answered
+            return;
+        }
         try {
             ContextCompat.startForegroundService(context, new Intent(context, SpeakService.class).putExtra("briefing", kind));
         } catch (IllegalStateException err) {
