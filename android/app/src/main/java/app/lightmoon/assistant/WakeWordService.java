@@ -111,7 +111,9 @@ public class WakeWordService extends Service implements RecognitionListener {
     private void update() {
         // Paused while LightMoon is on screen or a conversation goes on with the screen off (TalkService): the app's
         // own listening has the microphone then.
-        boolean wanted = model != null && !MainActivity.visible && !TalkService.active && SystemClock.elapsedRealtime() >= resumeAt;
+        // While LightMoon's call rings it listens even with the app open, for "Speak out" (MorningCall).
+        boolean wanted = model != null && SystemClock.elapsedRealtime() >= resumeAt
+            && (MorningCall.ringing || (!MainActivity.visible && !TalkService.active));
         if (wanted && speech == null) startListening();
         else if (!wanted && speech != null) stopListening();
         boolean justHeard = SystemClock.elapsedRealtime() < resumeAt && !MainActivity.visible;
@@ -213,7 +215,8 @@ public class WakeWordService extends Service implements RecognitionListener {
 
     private void startListening() {
         try {
-            recognizer = new Recognizer(model, SAMPLE_RATE, waitingToSend() ? WakePhrases.grammar(phrases, WakePhrases.SEND) : WakePhrases.grammar(phrases));
+            recognizer = new Recognizer(model, SAMPLE_RATE, MorningCall.ringing ? WakePhrases.grammar(phrases, WakePhrases.ANSWER)
+                : waitingToSend() ? WakePhrases.grammar(phrases, WakePhrases.SEND) : WakePhrases.grammar(phrases));
             recognizer.setWords(true); // each word's confidence (heard)
             if (speaker != null && VoicePrint.on(this)) recognizer.setSpeakerModel(speaker);
             speech = new SpeechService(recognizer, SAMPLE_RATE);
@@ -256,12 +259,14 @@ public class WakeWordService extends Service implements RecognitionListener {
 
     @Override
     public void onResult(String hypothesis) {
+        if (heardAnswer(hypothesis)) return;
         if (heardSend(hypothesis, "text")) send();
         else if (heard(hypothesis, "text")) wake();
     }
 
     @Override
     public void onFinalResult(String hypothesis) {
+        if (heardAnswer(hypothesis)) return;
         if (heardSend(hypothesis, "text")) send();
         else if (heard(hypothesis, "text")) wake();
     }
@@ -316,6 +321,37 @@ public class WakeWordService extends Service implements RecognitionListener {
         } catch (JSONException err) {
             return false;
         }
+    }
+
+    // The call is ringing and they said "Speak out" (or a wake phrase): answered, in their voice if "only my voice" is
+    // on. Then LightMoon talks over the lock screen without the fingerprint (MorningCall.answerByVoice).
+    private boolean heardAnswer(String hypothesis) {
+        if (!MorningCall.ringing) return false;
+        try {
+            JSONObject result = new JSONObject(hypothesis);
+            String text = result.optString("text");
+            String phrase = WakePhrases.answer(text);
+            if (phrase == null) phrase = WakePhrases.matched(text, phrases);
+            if (phrase == null) return false;
+            if (phraseConfidence(result.optJSONArray("result"), phrase) < MIN_WORD_CONFIDENCE - 0.1) return false;
+            boolean owner = !VoicePrint.on(this) || VoicePrint.isOwner(this, VoicePrint.from(result));
+            android.util.Log.i("LightMoonWake", "call answer \"" + phrase + "\": " + (owner ? "owner" : "voice not matched"));
+            if (!owner) {
+                lowTone();
+                return true;
+            }
+            stopListening();
+            MorningCall.answerByVoice(this);
+            return true;
+        } catch (JSONException err) {
+            return false;
+        }
+    }
+
+    // The call started or stopped ringing: listen for the answer (or go back to the wake phrases).
+    static void ringingChanged() {
+        WakeWordService service = running;
+        if (service != null) service.main.post(service::restartListening);
     }
 
     private static final long SAID_AGAIN_MS = 12_000;

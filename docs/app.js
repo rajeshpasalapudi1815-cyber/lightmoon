@@ -1,7 +1,7 @@
 // LightMoon app: runs entirely on this device. Chat, voice, memory, tasks, goals and reminders are all
 // handled here; the only thing sent over the internet is the conversation, to the AI service.
 import { isNativeApp, nativeAlarms, wakeWord, fileSaver, phone, workAccount } from './js/native.js'; // first: sets up voice in the Android app
-import { refresh as refreshPhone } from './js/phone.js';
+import { refresh as refreshPhone, onSpendLogged } from './js/phone.js';
 import * as store from './js/store.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
@@ -1291,6 +1291,7 @@ function openSettings() {
   fields.weeklyLetter.value = store.settings.get('weekly_letter', 'on');
   fields.buddyName.value = store.settings.get('buddy_name');
   fields.buddyContact.value = store.settings.get('buddy_contact');
+  fields.autoLogSpends.checked = store.settings.get('auto_log_spends', 'on') !== 'off';
   fields.lang.value = listenLang();
   fields.apiKey.value = '';
   fillAiFields(fields, store.aiConfig());
@@ -2347,6 +2348,7 @@ function saveSettings(event) {
   synced('weekly_letter', fields.weeklyLetter.value, 'on');
   synced('buddy_name', fields.buddyName.value.trim());
   synced('buddy_contact', fields.buddyContact.value.trim());
+  synced('auto_log_spends', fields.autoLogSpends.checked ? 'on' : 'off', 'on');
   store.saveProfile({ userName: fields.userName.value, address: fields.address.value, assistantName: fields.assistantName.value });
   tellPhoneAddress();
   store.saveAiConfig({
@@ -2945,6 +2947,12 @@ function boot() {
   problems.install();
   updates.start({ isQuiet: quietForRestart, onReady: offerRestart });
   wireUp();
+  // A bank spend went to Life Levelling by itself (phone.js): say so, in the conversation, or as a notification.
+  onSpendLogged(({ amount, merchant, category }) => {
+    const line = `Sent ₹${amount.toLocaleString('en-IN')}${merchant ? ` at ${merchant}` : ''} to Life Levelling as ${category}.`;
+    note(line);
+    if (document.hidden) notify(`${assistantName()}: expense logged`, line);
+  });
   mountEyes($('#bootFace'), { intro: true, rest: false });
   applyState();
   const setup = !state.profile.userName || !state.ai.ready;

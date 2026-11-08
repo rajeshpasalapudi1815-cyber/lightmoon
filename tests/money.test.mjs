@@ -3,7 +3,7 @@
 import { pathToFileURL, fileURLToPath } from 'node:url';
 const repo = fileURLToPath(new URL('..', import.meta.url)).replace(/[\/]$/, '');
 import assert from 'node:assert/strict';
-const { spendFrom, billFrom, moneyNote, moneyAmount } = await import(pathToFileURL(`${repo}/docs/js/money.js`));
+const { spendFrom, billFrom, moneyNote, moneyAmount, categoryFor } = await import(pathToFileURL(`${repo}/docs/js/money.js`));
 
 let failed = 0;
 const check = (name, fn) => {
@@ -41,6 +41,14 @@ check('amounts for Life Levelling', () => {
   assert.equal(moneyAmount(99.999), 100);
   assert.throws(() => moneyAmount('lots'));
   assert.throws(() => moneyAmount(0));
+});
+
+check('categories for spends', () => {
+  assert.equal(categoryFor('SWIGGY'), 'Food');
+  assert.equal(categoryFor('BLINKIT'), 'Groceries');
+  assert.equal(categoryFor(null, 'Rs 120 paid to UBER INDIA'), 'Transport');
+  assert.equal(categoryFor('Airtel Payments'), 'Bills');
+  assert.equal(categoryFor('RAMESH KUMAR'), 'Other');
 });
 
 process.exit(failed ? 1 : 0);

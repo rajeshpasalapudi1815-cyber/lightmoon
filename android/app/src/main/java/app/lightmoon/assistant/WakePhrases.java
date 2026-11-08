@@ -83,6 +83,15 @@ final class WakePhrases {
 
     // Said just after LightMoon opened a draft in another app: send it (WakeWordService.expectSend).
     static final List<String> SEND = Arrays.asList("send it", "send", "send it now", "okay send it", "ok send it", "yes send it", "yes send");
+    // Answering LightMoon's call by voice while it rings (MorningCall): "Speak out", "What is it, Moon".
+    static final List<String> ANSWER = Arrays.asList("speak out", "what is it moon", "what is it", "go ahead", "tell me", "yes moon");
+
+    // The answer phrase in what was heard, or null.
+    static String answer(String heard) {
+        String text = " " + String.valueOf(heard).toLowerCase().replaceAll("[^a-z ]", " ").replaceAll("\\s+", " ").trim() + " ";
+        for (String phrase : ANSWER) if (text.contains(" " + phrase + " ")) return phrase;
+        return null;
+    }
 
     // The recogniser's grammar: the chosen phrases, and "[unk]" for everything else.
     static String grammar(List<String> ids) {

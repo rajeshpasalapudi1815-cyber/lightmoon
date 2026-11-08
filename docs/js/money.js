@@ -62,3 +62,20 @@ export function moneyAmount(value) {
   if (!Number.isFinite(amount) || amount <= 0) throw new Error(`"${value}" isn't an amount: give the amount as a number, like 250.`);
   return Math.round(amount * 100) / 100;
 }
+
+// A Life Levelling category for a spend, from the merchant or the message's words; "Other" when nothing fits.
+const CATEGORIES = [
+  ['Groceries', /\b(bigbasket|blinkit|zepto|instamart|dmart|jiomart|grofers|more supermarket|ratnadeep|reliance fresh|kirana|grocer)/i],
+  ['Food', /\b(swiggy|zomato|eatsure|domino|mcdonald|kfc|pizza|burger|cafe|coffee|starbucks|restaurant|hotel|bakery|food|biryani)/i],
+  ['Transport', /\b(uber|ola|rapido|metro|irctc|redbus|fastag|petrol|diesel|fuel|hpcl|bpcl|iocl|indian oil|parking|toll)/i],
+  ['Shopping', /\b(amazon|flipkart|myntra|ajio|meesho|nykaa|tata cliq|croma|reliance digital|decathlon|ikea|lifestyle|westside|trends)/i],
+  ['Bills', /\b(airtel|jio|vodafone|\bvi\b|bsnl|recharge|electricity|bescom|tsspdcl|apspdcl|water bill|gas|broadband|act fibernet|dth|tata play|insurance|emi)/i],
+  ['Health', /\b(pharma|pharmacy|apollo|medplus|netmeds|1mg|pharmeasy|hospital|clinic|diagnostic|lab)/i],
+  ['Entertainment', /\b(netflix|prime video|hotstar|spotify|youtube premium|bookmyshow|pvr|inox|cinema|steam|playstation)/i],
+  ['Education', /\b(udemy|coursera|byju|unacademy|school|college|tuition|course|exam fee)/i],
+];
+export function categoryFor(merchant, text = '') {
+  const words = `${merchant ?? ''} ${text}`;
+  return CATEGORIES.find(([, test]) => test.test(words))?.[0] ?? 'Other';
+}
+

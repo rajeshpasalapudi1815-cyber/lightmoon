@@ -18,6 +18,8 @@ public class MainActivity extends BridgeActivity {
     private static final String OWN_HOST = "rajeshpasalapudi1815-cyber.github.io";
     private static final String OWN_PATH = "/lightmoon/";
     static final String EXTRA_LISTEN = "app.lightmoon.assistant.LISTEN"; // start listening, as after the wake phrase
+    // The call was answered by voice (MorningCall.answerByVoice): show over the lock screen, until LightMoon leaves it.
+    static final String EXTRA_OVER_LOCK = "app.lightmoon.assistant.OVER_LOCK";
     private static final int DARK = 0xFF04070D; // the launcher icon's night sky, behind the page as it loads
 
     // True while LightMoon is on screen: the app then announces reminders itself instead of the alarm
@@ -59,6 +61,7 @@ public class MainActivity extends BridgeActivity {
         }
         setPanel(wantsPanel(getIntent()));
         takeListen(getIntent());
+        overLock(getIntent());
         // The back button steps back inside the web app first (Settings adds a history step for each page),
         // and only leaves LightMoon when there's nothing to go back to.
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
@@ -89,6 +92,22 @@ public class MainActivity extends BridgeActivity {
         }
         setPanel(wantsPanel(intent));
         takeListen(intent);
+        overLock(intent);
+    }
+
+    // Shown over the lock screen only for a call answered by voice; any other time the phone must be unlocked.
+    private void overLock(Intent intent) {
+        boolean on = intent != null && intent.getBooleanExtra(EXTRA_OVER_LOCK, false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(on);
+            setTurnScreenOn(on);
+        }
+    }
+
+    @Override
+    public void onStop() {
+        overLock(null); // left (or the screen went off): back to needing the unlock
+        super.onStop();
     }
 
     private static void takeListen(Intent intent) {

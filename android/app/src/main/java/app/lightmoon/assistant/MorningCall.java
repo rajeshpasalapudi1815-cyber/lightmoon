@@ -29,7 +29,12 @@ import org.json.JSONObject;
 // kept here and rung the same way; answered later in the day, LightMoon gives a check-in instead of the morning plan.
 public class MorningCall extends BroadcastReceiver {
 
-    static final String CHANNEL = "lightmoon_call";
+    // The ringing is played here in bursts (RING_ON_MS, then a pause), so "Speak out" can be heard between them; the
+    // notification itself only vibrates. (The first channel, "lightmoon_call", rang by itself without pauses.)
+    static final String CHANNEL = "lightmoon_call_2";
+    private static final long RING_ON_MS = 2_200, RING_OFF_MS = 2_300;
+    private static final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    private static android.media.Ringtone tone;
     static final int NOTIFICATION = 11;
     private static final int MISSED_NOTIFICATION = 12;
     static final long RING_MS = 45_000;
@@ -75,13 +80,14 @@ public class MorningCall extends BroadcastReceiver {
             .addAction(0, "Decline", decline)
             .addAction(0, "Answer", answer)
             .build();
-        call.flags |= Notification.FLAG_INSISTENT; // rings until answered, declined or timed out
         try {
             NotificationManagerCompat.from(app).notify(NOTIFICATION, call);
         } catch (SecurityException err) {
             ringing = false; // notifications are off: no call
             return;
         }
+        startRinging(app);
+        WakeWordService.ringingChanged(); // listens for "Speak out" between the rings
         PendingIntent missed = PendingIntent.getBroadcast(app, 23, new Intent(app, MorningCall.class).setAction(ACTION_MISSED),
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         app.getSystemService(AlarmManager.class).set(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + RING_MS + 1000, missed);
@@ -94,8 +100,58 @@ public class MorningCall extends BroadcastReceiver {
 
     // Stops the ringing (answered, declined or missed).
     static void stop(Context context) {
+        boolean was = ringing;
         ringing = false;
         NotificationManagerCompat.from(context).cancel(NOTIFICATION);
+        stopRinging();
+        if (was) WakeWordService.ringingChanged();
+    }
+
+    // The ringtone, on and off like a phone's, until stopped or RING_MS has passed.
+    private static void startRinging(Context app) {
+        stopRinging();
+        try {
+            tone = RingtoneManager.getRingtone(app, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
+            if (tone == null) return;
+            tone.setAudioAttributes(new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
+        } catch (RuntimeException err) {
+            tone = null;
+            return;
+        }
+        long until = SystemClock.elapsedRealtime() + RING_MS;
+        Runnable[] burst = new Runnable[1];
+        burst[0] = () -> {
+            if (!ringing || tone == null || SystemClock.elapsedRealtime() > until) return;
+            try { tone.play(); } catch (RuntimeException ignored) { }
+            main.postDelayed(() -> { if (tone != null) tone.stop(); }, RING_ON_MS);
+            main.postDelayed(burst[0], RING_ON_MS + RING_OFF_MS);
+        };
+        main.post(burst[0]);
+    }
+
+    private static void stopRinging() {
+        main.removeCallbacksAndMessages(null);
+        if (tone != null) {
+            try { tone.stop(); } catch (RuntimeException ignored) { }
+            tone = null;
+        }
+    }
+
+    // "Speak out" while it rang, in their voice (WakeWordService): LightMoon talks over the lock screen, no
+    // fingerprint, shown only as the thin panel at the bottom.
+    static void answerByVoice(Context context) {
+        answered(context);
+        WakeWordPlugin.pendingOwner = true;
+        Intent open = new Intent(context, MainActivity.class)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(MainActivity.EXTRA_OVER_LOCK, true)
+            .putExtra(MainActivity.EXTRA_PANEL, MainActivity.panelPossible());
+        try {
+            context.startActivity(open);
+        } catch (RuntimeException err) {
+            // Android wouldn't open it from here: the missed-call note still plays it.
+        }
     }
 
     // Answered: LightMoon opens with the call waiting for it (WakeWordPlugin.takeWake -> call).
@@ -244,15 +300,14 @@ public class MorningCall extends BroadcastReceiver {
     static void createChannel(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationChannel channel = new NotificationChannel(CHANNEL, "Morning call", NotificationManager.IMPORTANCE_HIGH);
-        channel.setDescription("LightMoon calling you with your morning briefing");
-        channel.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), new AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build());
+        channel.setDescription("LightMoon calling you with your morning briefing or a check-in");
+        channel.setSound(null, null); // rung by startRinging, with pauses to hear "Speak out"
         channel.enableVibration(true);
         channel.setVibrationPattern(new long[] { 0, 800, 600, 800, 600 });
         channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         channel.setBypassDnd(false);
-        context.getSystemService(NotificationManager.class).createNotificationChannel(channel);
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        manager.createNotificationChannel(channel);
+        manager.deleteNotificationChannel("lightmoon_call"); // the first one, which rang without pauses
     }
 }

@@ -44,6 +44,7 @@ public class MessageListener extends NotificationListenerService {
         "com.whatsapp", "com.whatsapp.w4b", "org.telegram.messenger", "org.thoughtcrime.securesms",
         "com.google.android.apps.messaging", "com.samsung.android.messaging"));
     private static final String PREFS = "lightmoon.messages";
+    private static final String PREFS_SEEN = "lightmoon.messages.seen"; // conversation -> when its notification went
     private static final int KEEP = 120;
     private static final long KEEP_MS = 2 * 86_400_000L;
     // One-time codes and security messages are never read out loud (only who sent them): a security word and
@@ -135,7 +136,12 @@ public class MessageListener extends NotificationListenerService {
     @Override
     public void onNotificationRemoved(StatusBarNotification sbn) {
         String conversation = conversationOf.remove(sbn.getKey());
-        if (conversation != null) replies.remove(conversation);
+        if (conversation == null) return;
+        replies.remove(conversation);
+        // Its notification went: they opened the chat (and most likely answered it) or cleared it. Noted, so LightMoon
+        // stops bringing it up as waiting for them.
+        SharedPreferences seen = getSharedPreferences(PREFS_SEEN, Context.MODE_PRIVATE);
+        seen.edit().putLong(conversation, System.currentTimeMillis()).apply();
     }
 
     // "chat", "email", or null for anything else.
@@ -312,7 +318,9 @@ public class MessageListener extends NotificationListenerService {
             JSONObject m = all.optJSONObject(i);
             if (m == null || m.optLong("at") < since || !allowed(context, m)) continue;
             boolean email = "email".equals(m.optString("kind"));
-            result.put(new JSONObject(m.toString()).put("canReply", !email && replies.containsKey(m.optString("conversation"))));
+            long seenAt = context.getSharedPreferences(PREFS_SEEN, Context.MODE_PRIVATE).getLong(m.optString("conversation"), 0);
+            result.put(new JSONObject(m.toString()).put("canReply", !email && replies.containsKey(m.optString("conversation")))
+                .put("seen", !email && seenAt >= m.optLong("at")));
         }
         return result;
     }

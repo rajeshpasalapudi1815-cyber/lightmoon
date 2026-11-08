@@ -41,7 +41,14 @@ public class CallActivity extends Activity {
             return;
         }
         setContentView(screen());
-        main.postDelayed(() -> { if (!MorningCall.ringing) finish(); }, MorningCall.RING_MS + 1500);
+        // Gone once the ringing stops (answered by voice, declined from the notification, or not answered).
+        Runnable check = new Runnable() {
+            @Override public void run() {
+                if (!MorningCall.ringing) finish();
+                else main.postDelayed(this, 700);
+            }
+        };
+        main.postDelayed(check, 1500);
     }
 
     private View screen() {
@@ -68,6 +75,9 @@ public class CallActivity extends Activity {
         name.setPadding(0, (int) (28 * dp), 0, (int) (6 * dp));
         root.addView(name);
         root.addView(text(MorningCall.subtitle(), 17, 0xFF7896A8));
+        TextView hint = text("Say “Speak out” to answer", 15, 0xFF4F6A7A);
+        hint.setPadding(0, (int) (18 * dp), 0, 0);
+        root.addView(hint);
 
         View space = new View(this);
         root.addView(space, new LinearLayout.LayoutParams(1, 0, 1f));

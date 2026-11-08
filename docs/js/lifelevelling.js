@@ -268,7 +268,7 @@ export const LIFE_TOOLS = [
 ];
 
 async function send(type, fields, chip) {
-  await sendRequest(APP, { type, ...fields, at: Date.now(), date: localStamp().slice(0, 10) });
+  await sendRequest(APP, { type, date: localStamp().slice(0, 10), ...fields, at: Date.now() });
   const when = inApp()
     ? 'Life Levelling applies it the next time its app is open on their phone or computer (usually within a minute if it is open now).'
     : 'Life Levelling applies it within a minute (while their computer is on).';
@@ -347,9 +347,9 @@ export const lifeHandlers = {
     const text = String(required(intention, 'intention')).trim().slice(0, 140);
     return send('set_intention', { intention: text, why, ifThen: if_then }, `Today's intention: ${text}`);
   },
-  life_log_expense({ amount, category, note }) {
+  life_log_expense({ amount, category, note, date }) {
     const rupees = moneyAmount(required(amount, 'amount'));
-    return send('log_expense', { amount: rupees, category: required(category, 'category'), note },
+    return send('log_expense', { amount: rupees, category: required(category, 'category'), note, ...(date && { date }) },
       `Sent to Life Levelling: spent ${rupees} on ${category}`);
   },
 };
