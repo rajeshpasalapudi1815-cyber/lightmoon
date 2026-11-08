@@ -369,6 +369,17 @@ export function phoneTools() {
       seconds: { type: 'integer', minimum: 0, maximum: 3600 },
       label: { type: 'string' },
     }),
+    ...(typeof phone.callTimes === 'function' ? [
+      tool('phone_schedule_call', 'LightMoon rings them like a phone call at this time and, when answered, checks in on the day '
+        + '(before noon: the morning plan). Only when they ask to be called.', {
+        time: { type: 'string', description: 'HH:MM, 24-hour.' },
+        daily: { type: 'boolean', description: 'Every day at that time. Otherwise once, the next time it comes round.' },
+        date: { type: 'string', description: 'YYYY-MM-DD for a one-off call on another day.' },
+      }, ['time']),
+      tool('phone_cancel_call', 'Cancel calls they scheduled: at this time, or all of them.', {
+        time: { type: 'string', description: 'HH:MM, or "all".' },
+      }, ['time']),
+    ] : []),
     tool('phone_device', 'Flashlight, volume or ringer.', {
       flashlight: { type: 'boolean' },
       volume: { type: 'integer', minimum: 0, maximum: 100, description: 'Percent.' },
@@ -569,6 +580,33 @@ export const phoneHandlers = {
   async phone_open_app({ name }) {
     const { label } = await call(phone.openApp({ name: String(name ?? '') }));
     return `Opened ${label}`;
+  },
+
+  async phone_schedule_call({ time, daily = false, date }) {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(String(time ?? '').trim());
+    if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) throw new Error('Give the time as HH:MM, 24-hour.');
+    const clock = `${match[1].padStart(2, '0')}:${match[2]}`;
+    let day = /^\d{4}-\d{2}-\d{2}$/.test(String(date ?? '')) ? date : null;
+    if (!daily && !day) {
+      const at = new Date();
+      at.setHours(Number(match[1]), Number(match[2]), 0, 0);
+      if (at <= new Date()) at.setDate(at.getDate() + 1);
+      day = localStamp(at).slice(0, 10);
+    }
+    const { calls = [] } = await call(phone.callTimes());
+    const kept = calls.filter(c => !(c.time === clock && (daily ? c.daily : c.date === day)));
+    await call(phone.callTimes({ calls: [...kept, { time: clock, daily: Boolean(daily), ...(!daily && { date: day }) }] }));
+    return `Call scheduled: ${clock} ${daily ? 'every day' : `on ${day}`}`;
+  },
+
+  async phone_cancel_call({ time }) {
+    const { calls = [] } = await call(phone.callTimes());
+    const all = String(time).toLowerCase() === 'all';
+    const clock = String(time ?? '').trim().replace(/^(\d):/, '0$1:');
+    const kept = all ? [] : calls.filter(c => c.time !== clock);
+    if (kept.length === calls.length) return `No call at ${time} was scheduled.`;
+    await call(phone.callTimes({ calls: kept }));
+    return all ? 'All scheduled calls cancelled' : `Cancelled the call at ${clock}`;
   },
 
   async phone_alarm({ time, days, minutes, seconds, label }) {

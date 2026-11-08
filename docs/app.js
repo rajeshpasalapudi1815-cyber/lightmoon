@@ -1721,6 +1721,39 @@ async function paintPhonePowers(message) {
   $('#callBox').hidden = typeof status.briefingCall !== 'boolean';
   $('#briefingCall').checked = Boolean(status.briefingCall);
   $('#callAllow').hidden = status.callCoversScreen !== false;
+  paintCalls();
+}
+
+// Calls at other times (MorningCall.java, app 1.30): any time, every day or once.
+async function paintCalls() {
+  const box = $('#callsBox');
+  box.hidden = typeof phone?.callTimes !== 'function';
+  if (box.hidden) return;
+  const { calls = [] } = await phone.callTimes().catch(() => ({}));
+  const list = $('#callList');
+  list.replaceChildren(...calls.map(entry => {
+    const row = el('li', 'item');
+    row.append(el('span', '', `${entry.time} ${entry.daily ? 'every day' : `on ${entry.date}`}`));
+    const remove = el('button', 'btn-ghost', 'Remove');
+    remove.type = 'button';
+    remove.addEventListener('click', () => saveCalls(calls.filter(c => c.id !== entry.id)));
+    row.append(remove);
+    return row;
+  }));
+  if (!calls.length) list.append(el('li', 'muted', 'None yet.'));
+}
+
+function saveCalls(calls) {
+  return phone.callTimes({ calls }).then(paintCalls).catch(err => { $('#settingsError').textContent = err.message; });
+}
+
+// The next date a one-off call at this time comes round: today if it's still ahead, else tomorrow.
+function nextDateFor(time) {
+  const [h, m] = time.split(':').map(Number);
+  const at = new Date();
+  at.setHours(h, m, 0, 0);
+  if (at <= new Date()) at.setDate(at.getDate() + 1);
+  return localStamp(at).slice(0, 10);
 }
 
 // ---------- Messages and email: what LightMoon may read (the rules live on the phone, in ReadRules.java) ----------
@@ -2627,6 +2660,13 @@ function wireUp() {
       $('#settings').close();
       phone.callNow().catch(err => note(err.message));
     });
+    $('#callAdd').addEventListener('click', async () => {
+      const time = $('#callTime').value;
+      if (!/^\d{2}:\d{2}$/.test(time)) return;
+      const daily = $('#callRepeat').value === 'daily';
+      const { calls = [] } = await phone.callTimes().catch(() => ({}));
+      saveCalls([...calls, { time, daily, ...(!daily && { date: nextDateFor(time) }) }]);
+    });
     $('#callAllow').addEventListener('click', () => phone.openCallSettings().catch(err => { $('#settingsError').textContent = err.message; }));
   }
 
@@ -2755,6 +2795,8 @@ function start({ auto = false } = {}) {
 
   if (phone) {
     phone.addListener('meetingDue', onPhoneSay);
+    // A wake or the morning call answered while LightMoon was already on screen (no visibility change to notice it).
+    wakeWord?.addListener?.('wakeWaiting', () => { if (started && !locked) listenAfterWake(); });
     // Stop on the "Talking with you" notification: the conversation ends there.
     wakeWord?.addListener?.('talkStopped', () => {
       listenWhenFree = false;

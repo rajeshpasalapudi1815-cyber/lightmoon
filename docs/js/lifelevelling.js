@@ -6,6 +6,7 @@
 // Its phone app and its computer app only do this while open (the summary says runsOn: 'phone' or 'desktop').
 import { readFeed, sendRequest, syncCode } from './cloud.js';
 import { localStamp } from './time.js';
+import { moneyAmount } from './money.js';
 
 const APP = 'lifelevelling';
 const KEY = 'assistant.lifelevelling'; // this device only; always re-read from the cloud
@@ -154,7 +155,9 @@ export function promptSection() {
     ], ', '),
     s.lessons?.dueCount ? `Lessons due for review: ${s.lessons.dueCount} (${(s.lessons.due ?? []).join(', ')})` : null,
     s.habits?.length && `Habits today: ${s.habits.map((h, i) => `[H${i + 1}] ${h.name} ${habitProgress(h)}`).join('; ')}`,
-    s.actions?.length && `Recent requests you sent: ${s.actions.slice(0, 5).map(a => `${a.ok ? 'done' : 'FAILED'}: ${a.message}`).join('; ')}`,
+    s.actions?.length && `Recent requests you sent: ${s.actions.slice(0, 5).map(a => `${a.ok ? 'done' : 'FAILED'} ${String(a.type ?? '').replace(/_/g, ' ')}: ${a.message}`).join('; ')}`,
+    s.actions?.some(a => !a.ok && Date.now() - a.at < 86_400_000)
+      && 'A request FAILED today: if it is not mentioned in the conversation yet, tell them once what did not go through and offer to send it again.',
   ];
   const where = inApp(s) ? '; it is an app on their phone and computer and only updates while one of them is open' : '';
   // From before today (or hours old): today's repeating tasks aren't in it yet, and some listed may be done or failed.
@@ -345,7 +348,8 @@ export const lifeHandlers = {
     return send('set_intention', { intention: text, why, ifThen: if_then }, `Today's intention: ${text}`);
   },
   life_log_expense({ amount, category, note }) {
-    return send('log_expense', { amount: Number(required(amount, 'amount')), category: required(category, 'category'), note },
-      `Sent to Life Levelling: spent ${amount} on ${category}`);
+    const rupees = moneyAmount(required(amount, 'amount'));
+    return send('log_expense', { amount: rupees, category: required(category, 'category'), note },
+      `Sent to Life Levelling: spent ${rupees} on ${category}`);
   },
 };

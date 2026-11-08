@@ -350,6 +350,13 @@ public class WakeWordPlugin extends Plugin {
         current = this;
     }
 
+    // LightMoon came to the front with a wake or an answered call waiting: tell the page, which may have been on screen
+    // all along (then it never went hidden, so it wouldn't look by itself).
+    static void wakeWaiting() {
+        WakeWordPlugin plugin = current;
+        if (plugin != null && pendingWake) plugin.notifyListeners("wakeWaiting", new JSObject());
+    }
+
     // Stop was tapped on the "Talking with you" notification: the page ends the conversation.
     static void talkStopped() {
         WakeWordPlugin plugin = current;

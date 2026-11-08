@@ -123,6 +123,7 @@ public class MainActivity extends BridgeActivity {
         WakeWordPlugin.clearHeard(this);
         WakeWordPlugin.resumeIfEnabled(this);
         WakeWordService.appVisibilityChanged();
+        WakeWordPlugin.wakeWaiting();
     }
 
     @Override

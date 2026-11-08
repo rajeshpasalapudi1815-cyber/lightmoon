@@ -285,7 +285,7 @@ export function toolsFor(text, loaded = new Set()) {
 // The phone tools a request needs, by its words.
 const PHONE_PARTS = [
   [/\b(tell|message|msg|text|sms|whats ?app|reply|send|chat|call(ed|ing)?|ring|dial|missed|contact|number|who (is|was)|truecaller)\b|కాల్|ఫోన్|మెసేజ్|వాట్సాప్|చెప్పు|कॉल|फोन|मैसेज/i,
-    ['phone_message', 'phone_messages', 'phone_call', 'phone_recent_calls', 'phone_number_info', 'phone_cancel_scheduled']],
+    ['phone_message', 'phone_messages', 'phone_call', 'phone_recent_calls', 'phone_number_info', 'phone_cancel_scheduled', 'phone_schedule_call', 'phone_cancel_call']],
   [/\b(calendar|meetings?|events?|schedule|appointment|tomorrow|today|next week)\b/i, ['phone_calendar', 'phone_add_event']],
   [/\b(alarms?|timer|wake me|remind me in|minutes?)\b/i, ['phone_alarm']],
   [/\b(flash ?light|torch|volume|ringer|silent|vibrate|mute|louder|quieter)\b/i, ['phone_device']],

@@ -10,16 +10,23 @@ import android.content.Context;
 import android.content.Intent;
 import android.media.AudioAttributes;
 import android.media.RingtoneManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.SystemClock;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
+import java.util.Calendar;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 // The morning briefing as a phone call (Settings → Phone → Morning briefing → "as a call"): at the briefing time the
 // phone rings with a LightMoon call screen (CallActivity), on the lock screen too, and a watch paired with the phone
 // buzzes with it. Answering opens LightMoon, which gives the day's briefing and plan aloud and listens for the reply
 // (docs/app.js, launch action "call"). Declined: nothing more. Not answered within RING_MS: a "missed call" note,
 // which plays the briefing when tapped.
+// Other calls at any time (Settings, or "call me at 3 pm"): a list of { id, time "HH:MM", daily, date "YYYY-MM-DD" }
+// kept here and rung the same way; answered later in the day, LightMoon gives a check-in instead of the morning plan.
 public class MorningCall extends BroadcastReceiver {
 
     static final String CHANNEL = "lightmoon_call";
@@ -28,6 +35,9 @@ public class MorningCall extends BroadcastReceiver {
     static final long RING_MS = 45_000;
     static final String ACTION_DECLINE = "app.lightmoon.assistant.CALL_DECLINE";
     private static final String ACTION_MISSED = "app.lightmoon.assistant.CALL_MISSED";
+    private static final String ACTION_RING = "app.lightmoon.assistant.CALL_RING";
+    private static final String CALLS = "calls";
+    private static final int MAX_CALLS = 12;
 
     static volatile boolean ringing = false;
 
@@ -94,7 +104,24 @@ public class MorningCall extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
-        if (ACTION_DECLINE.equals(action)) {
+        if (ACTION_RING.equals(action)) {
+            int id = intent.getIntExtra("id", -1);
+            JSONArray kept = new JSONArray();
+            boolean found = false;
+            JSONArray all = calls(context);
+            for (int i = 0; i < all.length(); i++) {
+                JSONObject entry = all.optJSONObject(i);
+                if (entry == null) continue;
+                if (entry.optInt("id") == id) {
+                    found = true;
+                    if (!entry.optBoolean("daily")) continue; // a one-off call is used up
+                }
+                kept.put(entry);
+            }
+            saveCalls(context, kept);
+            scheduleCalls(context);
+            if (found) ring(context);
+        } else if (ACTION_DECLINE.equals(action)) {
             stop(context);
         } else if (ACTION_MISSED.equals(action) && ringing) {
             stop(context);
@@ -119,6 +146,94 @@ public class MorningCall extends BroadcastReceiver {
         } catch (SecurityException err) {
             // Notifications are off.
         }
+    }
+
+    // ---------- Calls at other times ----------
+
+    static JSONArray calls(Context context) {
+        try {
+            return new JSONArray(PhonePrefs.get(context).getString(CALLS, "[]"));
+        } catch (JSONException err) {
+            return new JSONArray();
+        }
+    }
+
+    private static void saveCalls(Context context, JSONArray calls) {
+        PhonePrefs.get(context).edit().putString(CALLS, calls.toString()).apply();
+    }
+
+    // Replaces the list ({ time, daily, date }; ids are given here), drops one-offs already past, and sets the alarms.
+    static JSONArray setCalls(Context context, JSONArray wanted) {
+        cancelAll(context);
+        JSONArray kept = new JSONArray();
+        int id = 1;
+        for (int i = 0; i < wanted.length() && kept.length() < MAX_CALLS; i++) {
+            JSONObject entry = wanted.optJSONObject(i);
+            if (entry == null || !entry.optString("time").matches("\\d{2}:\\d{2}")) continue;
+            boolean daily = entry.optBoolean("daily");
+            String date = entry.optString("date", "");
+            if (!daily && !date.matches("\\d{4}-\\d{2}-\\d{2}")) continue;
+            try {
+                JSONObject clean = new JSONObject().put("id", id++).put("time", entry.optString("time")).put("daily", daily);
+                if (!daily) clean.put("date", date);
+                if (next(clean) > 0) kept.put(clean);
+            } catch (JSONException ignored) {
+                // Skipped.
+            }
+        }
+        saveCalls(context, kept);
+        scheduleCalls(context);
+        return kept;
+    }
+
+    // When this call rings next, in ms (0 = never: a one-off already past).
+    static long next(JSONObject entry) {
+        String time = entry.optString("time");
+        Calendar at = Calendar.getInstance();
+        if (!entry.optBoolean("daily")) {
+            String date = entry.optString("date");
+            at.set(Integer.parseInt(date.substring(0, 4)), Integer.parseInt(date.substring(5, 7)) - 1, Integer.parseInt(date.substring(8, 10)));
+        }
+        at.set(Calendar.HOUR_OF_DAY, Integer.parseInt(time.substring(0, 2)));
+        at.set(Calendar.MINUTE, Integer.parseInt(time.substring(3, 5)));
+        at.set(Calendar.SECOND, 0);
+        at.set(Calendar.MILLISECOND, 0);
+        long now = System.currentTimeMillis() + 30_000;
+        if (at.getTimeInMillis() > now) return at.getTimeInMillis();
+        if (!entry.optBoolean("daily")) return 0;
+        at.add(Calendar.DAY_OF_YEAR, 1);
+        return at.getTimeInMillis();
+    }
+
+    static void scheduleCalls(Context context) {
+        AlarmManager alarms = context.getSystemService(AlarmManager.class);
+        JSONArray all = calls(context);
+        for (int i = 0; i < all.length(); i++) {
+            JSONObject entry = all.optJSONObject(i);
+            long at = entry == null ? 0 : next(entry);
+            if (at == 0) continue;
+            PendingIntent operation = ringIntent(context, entry.optInt("id"));
+            try {
+                if (ReminderStore.canUseExactAlarms(context)) {
+                    PendingIntent show = PendingIntent.getActivity(context, 0, new Intent(context, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
+                    alarms.setAlarmClock(new AlarmManager.AlarmClockInfo(at, show), operation);
+                } else {
+                    alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, operation);
+                }
+            } catch (SecurityException ignored) {
+                // Exact alarms not allowed: this call won't ring.
+            }
+        }
+    }
+
+    private static void cancelAll(Context context) {
+        AlarmManager alarms = context.getSystemService(AlarmManager.class);
+        for (int id = 1; id <= MAX_CALLS; id++) alarms.cancel(ringIntent(context, id));
+    }
+
+    private static PendingIntent ringIntent(Context context, int id) {
+        Intent intent = new Intent(context, MorningCall.class).setAction(ACTION_RING).setData(Uri.parse("lightmoon://call/" + id)).putExtra("id", id);
+        return PendingIntent.getBroadcast(context, 100 + id, intent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
     static void createChannel(Context context) {

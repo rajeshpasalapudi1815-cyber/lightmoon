@@ -3,7 +3,7 @@
 import { pathToFileURL, fileURLToPath } from 'node:url';
 const repo = fileURLToPath(new URL('..', import.meta.url)).replace(/[\/]$/, '');
 import assert from 'node:assert/strict';
-const { spendFrom, billFrom, moneyNote } = await import(pathToFileURL(`${repo}/docs/js/money.js`));
+const { spendFrom, billFrom, moneyNote, moneyAmount } = await import(pathToFileURL(`${repo}/docs/js/money.js`));
 
 let failed = 0;
 const check = (name, fn) => {
@@ -33,5 +33,14 @@ console.log('-- notes');
 check('spend note', () => assert.match(moneyNote('Rs.450.00 spent on card at SWIGGY on 30-10'), /SPENT ₹450 at SWIGGY/));
 check('bill note', () => assert.match(moneyNote('Your bill of Rs 1,240 is due on 05-Nov'), /BILL ₹1,240 due 05-Nov/));
 check('ordinary chat: no note', () => assert.equal(moneyNote('can you send me the report by 5'), ''));
+
+check('amounts for Life Levelling', () => {
+  assert.equal(moneyAmount('₹1,250.50'), 1250.5);
+  assert.equal(moneyAmount('Rs. 300'), 300);
+  assert.equal(moneyAmount('250 rupees'), 250);
+  assert.equal(moneyAmount(99.999), 100);
+  assert.throws(() => moneyAmount('lots'));
+  assert.throws(() => moneyAmount(0));
+});
 
 process.exit(failed ? 1 : 0);

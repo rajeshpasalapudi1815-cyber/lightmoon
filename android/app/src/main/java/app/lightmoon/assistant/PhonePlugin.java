@@ -272,6 +272,16 @@ public class PhonePlugin extends Plugin {
         }
     }
 
+    // The calls at other times: -> { calls: [{ id, time, daily, date }] }; with { calls: [...] } replaces them first.
+    @PluginMethod
+    public void callTimes(PluginCall call) {
+        com.getcapacitor.JSArray given = call.getArray("calls");
+        org.json.JSONArray list = given == null ? MorningCall.calls(getContext()) : MorningCall.setCalls(getContext(), given);
+        JSObject result = new JSObject();
+        result.put("calls", list);
+        call.resolve(result);
+    }
+
     // Rings the morning call now, to try it.
     @PluginMethod
     public void callNow(PluginCall call) {

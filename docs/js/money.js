@@ -54,3 +54,11 @@ export function moneyNote(text) {
   if (bill) return `BILL${bill.amount ? ` ${rupees(bill.amount)}` : ''}${bill.due ? ` due ${bill.due}` : ''}: offer once a reminder before it's due`;
   return '';
 }
+
+// "₹1,250.50", "Rs. 300", "250 rupees" or 250 -> 1250.5, 300, 250. Life Levelling refuses anything that isn't a plain
+// positive number (it once arrived empty from "₹1,250" and the expense was lost), so a bad amount is sent back to the AI.
+export function moneyAmount(value) {
+  const amount = typeof value === 'number' ? value : Number(String(value).replace(/,/g, '').match(/\d+(?:\.\d+)?/)?.[0]);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error(`"${value}" isn't an amount: give the amount as a number, like 250.`);
+  return Math.round(amount * 100) / 100;
+}

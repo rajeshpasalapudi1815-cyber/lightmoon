@@ -570,6 +570,19 @@
                 <button type="button" id="callTest" class="btn-ghost">Try the call now</button>
                 <button type="button" id="callAllow" class="btn-ghost" hidden>Let the call show on the lock screen</button>
               </span>
+              <div id="callsBox" hidden>
+                <h3 class="card-title">Calls at other times</h3>
+                <small class="hint">LightMoon calls you then with a check-in: how the day is going, what's next, and new mails. You can also just say "call me at 3 pm" or "call me every day at 1".</small>
+                <ul id="callList" class="list"></ul>
+                <span class="row">
+                  <input type="time" id="callTime" value="15:00">
+                  <select id="callRepeat">
+                    <option value="daily">every day</option>
+                    <option value="once">once</option>
+                  </select>
+                  <button type="button" id="callAdd" class="btn-ghost">Add</button>
+                </span>
+              </div>
             </div>
             <label>Evening preview of tomorrow
               <span class="row">
