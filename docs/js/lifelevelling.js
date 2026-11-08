@@ -157,7 +157,7 @@ export function promptSection() {
     s.habits?.length && `Habits today: ${s.habits.map((h, i) => `[H${i + 1}] ${h.name} ${habitProgress(h)}`).join('; ')}`,
     s.actions?.length && `Recent requests you sent: ${s.actions.slice(0, 5).map(a => `${a.ok ? 'done' : 'FAILED'} ${String(a.type ?? '').replace(/_/g, ' ')}: ${a.message}`).join('; ')}`,
     s.actions?.some(a => !a.ok && Date.now() - a.at < 86_400_000)
-      && 'A request FAILED today: if it is not mentioned in the conversation yet, tell them once what did not go through and offer to send it again.',
+      && 'A request FAILED today: tell them once what did not go through (even if you said earlier it was done or logged, correct that) and offer to send it again.',
   ];
   const where = inApp(s) ? '; it is an app on their phone and computer and only updates while one of them is open' : '';
   // From before today (or hours old): today's repeating tasks aren't in it yet, and some listed may be done or failed.
@@ -272,7 +272,7 @@ async function send(type, fields, chip) {
   const when = inApp()
     ? 'Life Levelling applies it the next time its app is open on their phone or computer (usually within a minute if it is open now).'
     : 'Life Levelling applies it within a minute (while their computer is on).';
-  return { text: chip, result: `${chip}. ${when}` };
+  return { text: chip, result: `${chip}. ${when} It isn't done until Life Levelling confirms it (Recent requests in your context): tell them it's sent, never that it's done or logged.` };
 }
 
 // A reminder Life Levelling made for one of its tasks was answered "Done" here: tick that task off there too.

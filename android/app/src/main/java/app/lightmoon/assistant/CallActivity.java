@@ -67,7 +67,7 @@ public class CallActivity extends Activity {
         name.setTypeface(Typeface.DEFAULT_BOLD);
         name.setPadding(0, (int) (28 * dp), 0, (int) (6 * dp));
         root.addView(name);
-        root.addView(text("Your morning call", 17, 0xFF7896A8));
+        root.addView(text(MorningCall.subtitle(), 17, 0xFF7896A8));
 
         View space = new View(this);
         root.addView(space, new LinearLayout.LayoutParams(1, 0, 1f));

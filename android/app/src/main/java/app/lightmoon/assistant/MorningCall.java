@@ -63,7 +63,7 @@ public class MorningCall extends BroadcastReceiver {
         Notification call = new NotificationCompat.Builder(app, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_moon)
             .setContentTitle("LightMoon")
-            .setContentText("Your morning call")
+            .setContentText(subtitle())
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -85,6 +85,11 @@ public class MorningCall extends BroadcastReceiver {
         PendingIntent missed = PendingIntent.getBroadcast(app, 23, new Intent(app, MorningCall.class).setAction(ACTION_MISSED),
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         app.getSystemService(AlarmManager.class).set(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + RING_MS + 1000, missed);
+    }
+
+    // "Your morning call" before noon, a check-in after (what LightMoon gives once answered: docs/js/brain.js).
+    static String subtitle() {
+        return Calendar.getInstance().get(Calendar.HOUR_OF_DAY) < 12 ? "Your morning call" : "Checking in on your day";
     }
 
     // Stops the ringing (answered, declined or missed).
