@@ -126,21 +126,20 @@ public class CallActivity extends Activity {
 
     // Unlock first if needed, then LightMoon takes the call.
     private void answer() {
+        note("answered");
         MorningCall.answered(this);
         KeyguardManager keyguard = getSystemService(KeyguardManager.class);
+        // LightMoon opens now; on a locked phone it shows once they unlock (some phones never report the unlock back,
+        // so nothing waits for that). MainActivity learns the voice heard during the ring once it's on screen unlocked.
+        startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && keyguard.isKeyguardLocked()) {
             keyguard.requestDismissKeyguard(this, new KeyguardManager.KeyguardDismissCallback() {
-                @Override public void onDismissSucceeded() { open(); }
-                @Override public void onDismissCancelled() { giveUp(); }
-                @Override public void onDismissError() { giveUp(); }
+                @Override public void onDismissSucceeded() { note("unlocked"); finish(); }
+                @Override public void onDismissCancelled() { note("unlock cancelled"); giveUp(); }
+                @Override public void onDismissError() { note("unlock error"); giveUp(); }
             });
             return;
         }
-        open();
-    }
-
-    private void open() {
-        startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         finish();
     }
 
@@ -149,6 +148,12 @@ public class CallActivity extends Activity {
         WakeWordPlugin.pendingWake = false;
         WakeWordPlugin.pendingCall = false;
         finish();
+    }
+
+    // The steps of the last answer, for checking (lightmoon.call "path").
+    private void note(String step) {
+        android.content.SharedPreferences prefs = getSharedPreferences("lightmoon.call", MODE_PRIVATE);
+        prefs.edit().putString("path", prefs.getString("path", "") + step + "; ").apply();
     }
 
     @Override

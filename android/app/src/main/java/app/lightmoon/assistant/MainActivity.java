@@ -142,6 +142,11 @@ public class MainActivity extends BridgeActivity {
         WakeWordPlugin.clearHeard(this);
         WakeWordPlugin.resumeIfEnabled(this);
         WakeWordService.appVisibilityChanged();
+        // The call was answered and the phone is unlocked (fingerprint or PIN): the "Speak out" heard while it rang was
+        // theirs, so it's learnt. Not for a call answered by voice over the lock screen (pendingOwner already).
+        if (WakeWordPlugin.pendingCall && !WakeWordPlugin.pendingOwner && !getSystemService(android.app.KeyguardManager.class).isKeyguardLocked()) {
+            WakeWordService.learnRingVoices(this);
+        }
         WakeWordPlugin.wakeWaiting();
     }
 

@@ -35,6 +35,14 @@ public class MorningCall extends BroadcastReceiver {
     private static final long RING_ON_MS = 2_200, RING_OFF_MS = 2_300;
     private static final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
     private static android.media.Ringtone tone;
+    private static volatile long hushedUntil = 0;
+    private static final long HUSH_MS = 5_000;
+
+    // They started talking: no ring for a few seconds, so the answer words come through clean.
+    static void hush() {
+        hushedUntil = SystemClock.elapsedRealtime() + HUSH_MS;
+        main.post(() -> { if (tone != null) tone.stop(); });
+    }
     static final int NOTIFICATION = 11;
     private static final int MISSED_NOTIFICATION = 12;
     static final long RING_MS = 45_000;
@@ -86,6 +94,7 @@ public class MorningCall extends BroadcastReceiver {
             ringing = false; // notifications are off: no call
             return;
         }
+        WakeWordService.forgetRingVoices(app);
         startRinging(app);
         WakeWordService.ringingChanged(); // listens for "Speak out" between the rings
         PendingIntent missed = PendingIntent.getBroadcast(app, 23, new Intent(app, MorningCall.class).setAction(ACTION_MISSED),
@@ -123,6 +132,10 @@ public class MorningCall extends BroadcastReceiver {
         Runnable[] burst = new Runnable[1];
         burst[0] = () -> {
             if (!ringing || tone == null || SystemClock.elapsedRealtime() > until) return;
+            if (SystemClock.elapsedRealtime() < hushedUntil) {
+                main.postDelayed(burst[0], 500);
+                return;
+            }
             try { tone.play(); } catch (RuntimeException ignored) { }
             main.postDelayed(() -> { if (tone != null) tone.stop(); }, RING_ON_MS);
             main.postDelayed(burst[0], RING_ON_MS + RING_OFF_MS);
@@ -156,6 +169,7 @@ public class MorningCall extends BroadcastReceiver {
 
     // Answered: LightMoon opens with the call waiting for it (WakeWordPlugin.takeWake -> call).
     static void answered(Context context) {
+        hushedUntil = 0;
         stop(context);
         NotificationManagerCompat.from(context).cancel(MISSED_NOTIFICATION);
         WakeWordPlugin.pendingWake = true;

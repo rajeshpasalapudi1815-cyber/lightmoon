@@ -73,13 +73,42 @@ final class VoicePrint {
     }
 
     static void forget(Context context) {
-        prefs(context).edit().remove("samples").putBoolean("on", false).remove("last").apply();
+        prefs(context).edit().remove("samples").remove("answer_samples").putBoolean("on", false).remove("last").apply();
+    }
+
+    // Their voice saying the call's answer words ("Speak out"), kept apart from the wake-phrase samples so it never
+    // pushes those out: added when they answered the call with the fingerprint right after saying it (MorningCall).
+    private static final int MAX_ANSWER_SAMPLES = 6;
+    static void addAnswer(Context context, double[] print) {
+        JSONArray all = answerSamples(context);
+        JSONArray kept = new JSONArray();
+        for (int i = Math.max(0, all.length() - MAX_ANSWER_SAMPLES + 1); i < all.length(); i++) kept.put(all.opt(i));
+        JSONArray values = new JSONArray();
+        for (double value : print) {
+            try {
+                values.put(value);
+            } catch (JSONException err) {
+                return;
+            }
+        }
+        kept.put(values);
+        prefs(context).edit().putString("answer_samples", kept.toString()).apply();
+    }
+
+    private static JSONArray answerSamples(Context context) {
+        try {
+            return new JSONArray(prefs(context).getString("answer_samples", "[]"));
+        } catch (JSONException err) {
+            return new JSONArray();
+        }
     }
 
     // How alike this voice is to the owner's (the best of their samples), 0 to 1, or -1 with nothing to compare.
     static double likeness(Context context, double[] print) {
         if (print == null) return -1;
         JSONArray all = saved(context);
+        JSONArray answers = answerSamples(context);
+        for (int i = 0; i < answers.length(); i++) all.put(answers.opt(i));
         double best = -1;
         for (int i = 0; i < all.length(); i++) {
             JSONArray sample = all.optJSONArray(i);

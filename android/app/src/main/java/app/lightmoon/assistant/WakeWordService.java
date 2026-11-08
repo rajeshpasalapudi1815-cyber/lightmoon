@@ -255,6 +255,8 @@ public class WakeWordService extends Service implements RecognitionListener {
     // Half-heard words never wake it: only a finished phrase, which can be checked word by word and voice by voice.
     @Override
     public void onPartialResult(String hypothesis) {
+        // Someone is talking while the call rings: the ringing pauses so the words are heard clearly.
+        if (MorningCall.ringing && hypothesis != null && hypothesis.matches("(?s).*\"partial\"\\s*:\\s*\"[a-z].*")) MorningCall.hush();
     }
 
     @Override
@@ -330,6 +332,7 @@ public class WakeWordService extends Service implements RecognitionListener {
         try {
             JSONObject result = new JSONObject(hypothesis);
             String text = result.optString("text");
+            noteCallHeard(text, result);
             String phrase = WakePhrases.answer(text);
             if (phrase == null) phrase = WakePhrases.matched(text, phrases);
             if (phrase == null) return false;
@@ -346,6 +349,59 @@ public class WakeWordService extends Service implements RecognitionListener {
         } catch (JSONException err) {
             return false;
         }
+    }
+
+    // What it heard while the call rang, the last few (Settings → Is everything working? and testing): words only,
+    // with how sure it was of them and how much the voice sounded like the owner's. Kept on the phone.
+    private void noteCallHeard(String text, JSONObject result) {
+        if (text.isEmpty()) return;
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences("lightmoon.call", MODE_PRIVATE);
+            org.json.JSONArray heard = new org.json.JSONArray(prefs.getString("heard", "[]"));
+            String phrase = WakePhrases.answer(text);
+            JSONObject entry = new JSONObject().put("at", System.currentTimeMillis()).put("text", text)
+                .put("sure", phrase == null ? -1 : phraseConfidence(result.optJSONArray("result"), phrase));
+            if (VoicePrint.on(this) && phrase != null) entry.put("owner", VoicePrint.isOwner(this, VoicePrint.from(result))).put("voice", VoicePrint.lastScore(this));
+            heard.put(entry);
+            // The voice that said the answer words, kept until the call is answered or rings again (learnRingVoices).
+            org.json.JSONArray spk = result.optJSONArray("spk");
+            if (phrase != null && spk != null && spk.length() > 0) {
+                org.json.JSONArray prints = new org.json.JSONArray(prefs.getString("prints", "[]"));
+                if (prints.length() < 6) prints.put(spk);
+                prefs.edit().putString("prints", prints.toString()).apply();
+            }
+            org.json.JSONArray kept = new org.json.JSONArray();
+            for (int i = Math.max(0, heard.length() - 8); i < heard.length(); i++) kept.put(heard.get(i));
+            prefs.edit().putString("heard", kept.toString()).apply();
+        } catch (JSONException ignored) {
+            // Not noted.
+        }
+    }
+
+    // The voices that said the answer words during this ring (noteCallHeard): if they then answer with the fingerprint,
+    // those were theirs, and they're learnt, so the next "Speak out" is recognised.
+    static void learnRingVoices(android.content.Context context) {
+        android.content.SharedPreferences prefs = context.getSharedPreferences("lightmoon.call", MODE_PRIVATE);
+        int learnt = 0;
+        try {
+            org.json.JSONArray prints = new org.json.JSONArray(prefs.getString("prints", "[]"));
+            for (int i = 0; i < prints.length(); i++) {
+                org.json.JSONArray spk = prints.optJSONArray(i);
+                if (spk == null) continue;
+                double[] print = new double[spk.length()];
+                for (int j = 0; j < print.length; j++) print[j] = spk.optDouble(j);
+                VoicePrint.addAnswer(context, print);
+                learnt++;
+            }
+        } catch (JSONException ignored) {
+            // Nothing learnt.
+        }
+        prefs.edit().remove("prints").putInt("learnt", learnt).putLong("learntAt", System.currentTimeMillis()).apply();
+    }
+
+    // A new ring: the voices heard before it don't count.
+    static void forgetRingVoices(android.content.Context context) {
+        context.getSharedPreferences("lightmoon.call", MODE_PRIVATE).edit().remove("prints").apply();
     }
 
     // The call started or stopped ringing: listen for the answer (or go back to the wake phrases).
