@@ -11,7 +11,8 @@ import * as desktop from './js/desktop.js';
 import { reminderLine, checkInLine, parseAlertId, headsUpLine } from './js/announce.js';
 import { drawQr, pairingText, canScan, scanQr, codeFromScan } from './js/qr.js';
 import { offlineAvailable, offlineStatus, downloadOffline, removeOffline } from './js/offline.js';
-import { chat, briefing, weeklyLetter } from './js/brain.js';
+import { chat, briefing, weeklyLetter, catchUp } from './js/brain.js';
+import * as sleep from './js/sleep.js';
 import { wireLearning } from './js/learning.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 import { speechChunks, lastSentenceEnd } from './js/speech.js';
@@ -52,6 +53,7 @@ const MAX_SHARED_CHARS = 6000;
 const FIRST_WORDS_WAIT_MS = 8000; // stop listening if nothing is said for this long
 const MAX_MIC_RESTARTS = 30; // some phones stop the mic after every pause; keep it going, within reason
 
+sleep.useSettings(store.settings);
 const prefs = loadPrefs();
 const launch = readLaunchParams();
 let state = null; // latest snapshot from the store
@@ -910,6 +912,7 @@ function answerCall() {
 // One AI briefing per day (unless asked for); later launches get a short greeting instead.
 async function runBriefing(force = false, { call = false } = {}) {
   if (!state.ai.ready) return;
+  if (!force && sleep.isAsleep()) return; // asleep: the catch-up on waking covers it
   if (!force && store.settings.get('last_briefing') === today()) {
     speaker.speak(prefs.listenOnOpen ? `Yes, ${addressWord()}?` : `Welcome back, ${addressWord()}.`);
     return;
@@ -937,6 +940,7 @@ async function maybeWeeklyLetter(force = false) {
   const week = store.weekKey();
   if (!force) {
     const now = new Date();
+    if (sleep.isAsleep()) return;
     if (store.settings.get('weekly_letter', 'on') === 'off' || now.getDay() !== 0 || now.getHours() < LETTER_FROM_HOUR) return;
     if (store.settings.get('last_letter') === week || Date.now() - letterFailedAt < LETTER_RETRY_MS) return;
   }
@@ -963,6 +967,7 @@ async function maybeWeeklyLetter(force = false) {
 }
 
 async function pollReminders() {
+  checkSleepEnded();
   await takeAnswers();
   if (nativeAlarms) {
     // In the Android app, the phone's alarms say reminders (and check-ins) while LightMoon is in the
@@ -1000,24 +1005,74 @@ async function pollReminders() {
     const line = sayReminder(reminder);
     if (minutesLate > LATE_REMINDER_MINUTES) {
       addReminderMessage(reminder, `Missed reminder (${formatWhen(reminder.remind_at)}): ${reminder.title}`);
-      speaker.speak(`${addressWord()}, you missed a reminder from ${formatWhen(reminder.remind_at)}. ${line}`, { force: true });
+      sayAlert(reminder, `${addressWord()}, you missed a reminder from ${formatWhen(reminder.remind_at)}. ${line}`, `${assistantName()} reminder`);
     } else {
       addReminderMessage(reminder, line);
-      speaker.speak(line, { force: true });
+      sayAlert(reminder, line, `${assistantName()} reminder`);
     }
-    if (document.hidden) notify(`${assistantName()} reminder`, line);
   }
   for (const early of headsUps.filter(h => !notified[h.id])) {
     addMessage('reminder', early.say);
-    speaker.speak(early.say, { force: true });
-    if (document.hidden) notify(`${assistantName()} heads-up`, early.say);
+    sayAlert(early.task, early.say, `${assistantName()} heads-up`);
   }
   for (const check of checkIns.filter(c => !notified[c.id])) {
     addReminderMessage(check.task, check.say);
-    speaker.speak(check.say, { force: true });
-    if (document.hidden) notify(`${assistantName()} is checking in`, check.say);
+    sayAlert(check.task, check.say, `${assistantName()} is checking in`);
   }
   applyState();
+}
+
+// Says a reminder, heads-up or check-in (and shows a notification when LightMoon is out of sight). Asleep (sleep.js),
+// it's kept back for the catch-up instead, unless it's urgent: then it speaks anyway.
+function sayAlert(task, line, title) {
+  const asleep = sleep.isAsleep();
+  if (asleep && !sleep.isUrgentTask(task) && !lifeLevelling.urgentInLife(task?.ll_task_id)) {
+    sleep.hold(line);
+    return;
+  }
+  speaker.speak(asleep ? `Urgent. ${line}` : line, { force: true });
+  if (document.hidden) notify(title, line);
+}
+
+// ---------- Sleep mode (js/sleep.js) ----------
+let asleepSince = sleep.sleepingSince();
+
+// The wake phrase while asleep: awake again, and the catch-up. Returns whether it was asleep.
+function wakeFromSleep() {
+  const since = sleep.wakeUp();
+  asleepSince = null;
+  if (since == null) return false;
+  catchUpNow(since);
+  return true;
+}
+
+// Sleep that ended by itself (the sleep hours ran out, or "sleep for 2 hours"): the catch-up, on the device in use.
+function checkSleepEnded() {
+  const now = sleep.sleepingSince();
+  const ended = asleepSince && !now && (Number(store.settings.get('sleep_woke')) || 0) < asleepSince;
+  if (ended && started && !locked && (!document.hidden || desktop.listenerConnected())) catchUpNow(asleepSince);
+  asleepSince = now;
+  document.body.classList.toggle('asleep', Boolean(now));
+}
+
+async function catchUpNow(since) {
+  const held = sleep.takeHeld(since);
+  speaker.stop();
+  if (!state.ai.ready) {
+    const lines = held.map(h => h.line);
+    speaker.speak(`I'm awake, ${addressWord()}. ${lines.length ? `While I slept: ${lines.join(' ')}` : 'Nothing came in while I slept.'}`);
+    return;
+  }
+  busy = true;
+  refresh();
+  try {
+    const live = streamReply();
+    live.done(await catchUp({ onText: live.push, request: sleep.catchUpRequest(since, held) }));
+    listenWhenFree = 'follow-up';
+  } finally {
+    busy = false;
+    refresh();
+  }
 }
 
 const sayReminder = task => reminderLine(task, { address: state.profile.address, user_name: state.profile.userName });
@@ -1155,9 +1210,12 @@ function renderTasks() {
     const actions = el('div', 'item-actions');
     if (task.remind_at && !isPast(task.remind_at)) actions.append(calendarLink('mini cal', '+ Cal', task.title, task.remind_at));
     actions.append(iconButton('del', '×', `Delete "${task.title}"`, () => store.tasks.remove(task.id)));
-    item.append(iconButton('tick', '', `Mark "${task.title}" done`, () => store.tasks.complete(task.id)), main, actions);
+    // A Life Levelling task's reminder: ticked off there too.
+    const tick = () => { store.tasks.complete(task.id); lifeLevelling.completeInLife(task.ll_task_id).catch(() => {}); };
+    item.append(iconButton('tick', '', `Mark "${task.title}" done`, tick), main, actions);
     list.append(item);
   }
+  renderLifeTasks(new Set(state.tasks.map(t => t.ll_task_id).filter(Boolean)));
 
   const done = $('#doneList');
   done.replaceChildren();
@@ -1165,6 +1223,32 @@ function renderTasks() {
     done.append(el('div', 'section-label', 'Done today'));
     for (const task of state.doneToday) done.append(el('div', 'done-item', task.title));
   }
+}
+
+// Life Levelling's own open tasks (those without a reminder here already), so the to-do list is the same in both apps.
+// Ticking one off sends it to Life Levelling, which confirms on its next summary.
+function renderLifeTasks(shown) {
+  const box = $('#lifeTasks');
+  box.replaceChildren();
+  const list = lifeLevelling.isConnected() ? lifeLevelling.openTasks().filter(t => !shown.has(t.id)) : [];
+  if (!list.length) return;
+  box.append(el('div', 'section-label', 'In Life Levelling'));
+  const ul = el('ul', 'list');
+  for (const task of list.slice(0, 20)) {
+    const item = el('li', `item${task.pending ? ' pending' : ''}`);
+    const main = el('div', 'item-main');
+    main.append(el('div', 'item-title', task.title));
+    const meta = [task.priority === 1 && 'Urgent', task.due && `Due ${task.due}`, task.pending && 'Sent to Life Levelling…'].filter(Boolean).join(' · ');
+    if (meta) main.append(el('div', 'item-meta', meta));
+    const tick = iconButton('tick', '', `Mark "${task.title}" done`, () => {
+      lifeLevelling.tickInLife(task.id).then(() => note(`Done in Life Levelling: ${task.title}`)).catch(err => note(err.message));
+      renderTasks();
+    });
+    tick.disabled = task.pending;
+    item.append(tick, main);
+    ul.append(item);
+  }
+  box.append(ul);
 }
 
 function renderGoals() {
@@ -1292,6 +1376,10 @@ function openSettings() {
   fields.buddyName.value = store.settings.get('buddy_name');
   fields.buddyContact.value = store.settings.get('buddy_contact');
   fields.autoLogSpends.checked = store.settings.get('auto_log_spends', 'on') !== 'off';
+  fields.sleepFrom.value = store.settings.get('sleep_from');
+  fields.sleepUntil.value = store.settings.get('sleep_until');
+  fields.urgentPeople.value = sleep.urgentPeople().join(', ');
+  fields.calendarAccount.value = store.settings.get('calendar_account');
   fields.lang.value = listenLang();
   fields.apiKey.value = '';
   fillAiFields(fields, store.aiConfig());
@@ -1989,6 +2077,7 @@ function listenAfterWake() {
     speaker.stop();
     listener.autoStarted = true;
     if (woke.call) return answerCall();
+    if (wakeFromSleep()) return; // asleep: woken, and catching them up
     listenWhenFree = 'follow-up'; // a beep the moment it's listening: words said before it would be lost
     refresh();
   });
@@ -2349,6 +2438,14 @@ function saveSettings(event) {
   synced('buddy_name', fields.buddyName.value.trim());
   synced('buddy_contact', fields.buddyContact.value.trim());
   synced('auto_log_spends', fields.autoLogSpends.checked ? 'on' : 'off', 'on');
+  if (Boolean(fields.sleepFrom.value) === Boolean(fields.sleepUntil.value)) {
+    synced('sleep_from', fields.sleepFrom.value);
+    synced('sleep_until', fields.sleepUntil.value);
+  } else note('Sleep mode needs both times (or neither).');
+  synced('urgent_people', fields.urgentPeople.value.split(',').map(n => n.trim()).filter(Boolean).slice(0, 30).join(', '));
+  const account = fields.calendarAccount.value.trim().toLowerCase();
+  if (!account || (/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(account) && !/sarasamerica|arogya360/.test(account))) synced('calendar_account', account);
+  else note('That account can’t be used for meetings.');
   store.saveProfile({ userName: fields.userName.value, address: fields.address.value, assistantName: fields.assistantName.value });
   tellPhoneAddress();
   store.saveAiConfig({
@@ -2874,6 +2971,7 @@ function startDesktop() {
         start({ auto: true });
       }
       speaker.stop();
+      if (started && wakeFromSleep()) return; // asleep: woken, and catching them up
       // "LightMoon, WhatsApp wife I'm on my way" in one breath: on with it, no second asking.
       if (said.split(/\s+/).filter(Boolean).length >= 2 && !busy) {
         send(said, { byVoice: true });

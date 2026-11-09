@@ -396,10 +396,11 @@ export const tasks = {
   // `announce` is what to say out loud when the reminder goes off. `checkIn` is the question to ask afterwards
   // until they answer (null: a plain one), or false for a heads-up that needs no answer.
   // `headsUp`: minutes before the reminder for a heads-up each, e.g. [30, 10].
-  add({ title, dueAt = null, remindAt = null, announce = null, checkIn = null, headsUp = [] }) {
+  add({ title, dueAt = null, remindAt = null, announce = null, checkIn = null, headsUp = [], urgent = false }) {
     const minutes = remindAt ? headsUpMinutes(headsUp) : [];
     data.tasks.push({
       id: newId(), title, due_at: dueAt, remind_at: remindAt, announce, check_in: checkIn, ...(minutes.length && { heads_up: minutes }),
+      ...(urgent && { urgent: true }),
       done: false, reminded: false, done_at: null, created_at: localStamp(), updated_at: Date.now(),
     });
     save();
@@ -434,6 +435,15 @@ export const tasks = {
     if (!task || (task.checked_in ?? 0) >= n) return;
     task.checked_in = n;
     save();
+  },
+  // Urgent reminders still speak in sleep mode (sleep.js). Synced.
+  setUrgent(id, on = true) {
+    const task = tasks.get(id);
+    if (!task) return false;
+    task.urgent = Boolean(on);
+    task.updated_at = Date.now();
+    save();
+    return true;
   },
   markHeadsUp(id, minutes) {
     const task = tasks.get(id);

@@ -187,6 +187,19 @@ export async function briefing({ onText, call = false } = {}) {
   }
 }
 
+// The catch-up after sleep mode (sleep.js): everything that came in while it slept, urgent first. `request` is
+// sleep.catchUpRequest's automatic message.
+export async function catchUp({ onText, request } = {}) {
+  await Promise.all([refreshLifeLevelling({ force: true }), refreshPhone({ force: true })]).catch(() => {});
+  const convo = [systemMessage('life levelling'), ...recentHistory().slice(-4), { role: 'user', content: request }];
+  try {
+    const reply = await complete(convo, null, onText);
+    return finish(reply.content, []);
+  } catch (err) {
+    return failure(err);
+  }
+}
+
 // The weekly letter, on Sunday evening: for reading on screen, so longer than a spoken reply. `facts` sums up the
 // week (store.weekFacts); with an accountability buddy set, it then offers to send them a short progress note.
 const letterRequest = (facts, buddy) =>

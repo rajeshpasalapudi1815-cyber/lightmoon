@@ -22,6 +22,8 @@ import { findLinks, checkLink } from './links.js';
 import { planCompose, rememberDraft, recentDraft, SEND_NOW, YES_ONLY, onDraft } from './compose.js';
 import { parseSend, splitNameAndText, teluguToLatin, hasTelugu } from './quicksend.js';
 import { voiceCommand } from './voicecontrol.js';
+import * as sleep from './sleep.js';
+import { meetingUrl } from './meetings.js';
 
 // A draft just opened in another app: the phone hears "send it" for 30 seconds without the wake phrase (app 1.19+).
 onDraft(draft => wakeWord?.expectSend?.({ apps: draft.apps, text: draft.text, chat: draft.chat ?? '', seconds: 30 }).catch(() => {}));
@@ -70,9 +72,31 @@ export const TOOLS = [
         type: 'array', items: { type: 'integer' },
         description: 'Minutes before remind_at to warn them, e.g. [30, 10] for anything they go to, attend or start at a set time (shopping at 7, a meeting, a call). Leave out for simple nudges (tablets).',
       },
+      urgent: { type: 'boolean', description: 'They called it urgent or an emergency: it still speaks in sleep mode.' },
     },
     ['title'],
   ),
+  tool('sleep_mode', 'Sleep mode: "good night" / "go to sleep" (sleep), "wake up" / "I am up" (wake: then catch them up from the result), '
+    + 'or the hours it sleeps every night (hours, with from and to; both empty switches them off). Asleep, you hold reminders and '
+    + 'greetings except urgent ones and people on their urgent list.', {
+    action: { type: 'string', enum: ['sleep', 'wake', 'hours'] },
+    minutes: { type: 'integer', minimum: 10, maximum: 1440, description: 'sleep: for this long. Leave out: until woken or the sleep hours end.' },
+    from: { type: 'string', description: 'hours: HH:MM, e.g. 23:00.' },
+    to: { type: 'string', description: 'hours: HH:MM, e.g. 06:30.' },
+  }, ['action']),
+  tool('mark_urgent', 'Mark a person (their calls and messages) or a reminder [#id] as urgent, so it still gets through in sleep mode; off: true unmarks it.', {
+    person: { type: 'string' },
+    id: ID,
+    off: { type: 'boolean' },
+  }),
+  tool('create_meeting', 'Set up a meeting in their Google Calendar: opens the filled-in event on this computer for them to check, add Google Meet if they want, and Save (Google then asks whether to email the guests). Never their work calendar.', {
+    title: { type: 'string' },
+    date: { type: 'string', description: 'YYYY-MM-DD.' },
+    time: { type: 'string', description: 'HH:MM, 24-hour.' },
+    minutes: { type: 'integer', minimum: 5, maximum: 600, description: 'Default 30.' },
+    guests: { type: 'string', description: 'Email addresses, comma-separated. Ask for an address if they only gave a name.' },
+    details: { type: 'string', description: 'Agenda, in their words.' },
+  }, ['title', 'date', 'time']),
   tool('complete_task', 'Mark a task done (also stops the check-ins on its reminder).', { id: ID }, ['id']),
   tool(
     'snooze_reminder',
@@ -303,6 +327,8 @@ const WORK_OFF = 'Work apps (Teams, Outlook) are switched off in LightMoon, so c
 
 // Notes come up as "make a note", "note it down", "my notes", "నోట్".
 export const NOTE_WORDS = /\b(notes?|noted|jot|write (it|this|that|these) down|keep (a )?(note|record))\b|నోట్|రాసి పెట్ట|नोट/i;
+// Sleep mode comes up as "good night", "go to sleep", "wake up", "I'm up", "sleep hours".
+export const SLEEP_WORDS = /\b(good ?night|go to sleep|sleep (mode|hours|for|now|until|till)|wake up|i'?m up|i am up|i'?m awake|go quiet|stay quiet|bed ?time)\b/i;
 // Core tools sent only when their words come up.
 const EXTRA_TOOLS = new Map([
   ['add_goal', /\bgoals?\b/i], ['log_goal_progress', /\b(goals?|progress)\b/i], ['set_goal_status', /\bgoals?\b/i],
@@ -311,6 +337,9 @@ const EXTRA_TOOLS = new Map([
   ['set_weather_place', /\b(i live|moved to|my city|weather (in|for)|weather place)\b/i],
   ['news_headlines', /\b(news|headlines?)\b/i],
   ['draft_email', /\b(e-?mails?|mails?)\b/i],
+  ['sleep_mode', SLEEP_WORDS],
+  ['mark_urgent', /\b(urgent|emergency|emergencies)\b/i],
+  ['create_meeting', /\b(meetings?|meet|invite|appointment|calendar|call with)\b/i],
   ...['add_note', 'update_note', 'delete_note'].map(name => [name, NOTE_WORDS]),
   ['set_language', /\b(telugu|hindi|tamil|english|language|speak in|talk in)\b|తెలుగు|हिंदी|हिन्दी|தமிழ்/i],
 ]);
@@ -345,6 +374,12 @@ function toTime(value, field, options) {
   return stamp;
 }
 
+// The Google account meetings go in (Settings → Meetings), else the browser's signed-in one.
+function personalAccount() {
+  const saved = String(settings.get('calendar_account') || nicknames.lookUp('my email') || '').trim().toLowerCase();
+  return EMAIL_ADDRESS.test(saved) && !WORK_APPS.test(saved) ? saved : '';
+}
+
 function findTask(id) {
   const task = tasks.get(toId(id));
   if (!task) throw new Error(`There is no task #${id}.`);
@@ -375,7 +410,7 @@ function clashWith(at, title) {
 // A yes counts only as the answer to LightMoon offering one in its reply just before ("Shall I add that?"): an "ok"
 // somewhere in "ok, what should I work on?" is not a yes to a task it thought of.
 const ASKS_FOR = {
-  task: /\bremind(?:er|ing)? me\b|\b(?:add|create|make|set|schedule|put|new)\b[^.?!]*\b(?:tasks?|to-?dos?|reminders?|alarms?)\b|don'?t let me forget|\bchase me\b|\bgurthu? ?che|\byaad dila|గుర్తు చే|గుర్తు చెయ్య|రిమైండ|టాస్క్|याद दिला/i,
+  task: /\bremind(?:er|ing)? me\b|\b(?:add|create|make|set|schedule|put|new)\b[^.?!]*\b(?:tasks?|to-?dos?|reminders?|alarms?)\b|don'?t let me forget|\bchase me\b|\bto-?do( list)?\b|\b(?:i (?:want|need|have|got) to|i'?ve got to|i must|i should)\b[^.?!]*\b(?:before|by|until|till)\s+(?:\d|noon|tonight|evening|lunch)|\bgurthu? ?che|\byaad dila|గుర్తు చే|గుర్తు చెయ్య|రిమైండ|టాస్క్|याद दिला/i,
   goal: /\b(?:goals?|targets?)\b|లక్ష్యం|गोल|लक्ष्य/i,
   note: NOTE_WORDS,
 };
@@ -411,7 +446,7 @@ const handlers = {
     return 'Forgot a saved fact';
   },
 
-  add_task({ title, due_at, remind_at, announcement, check_in, heads_up }) {
+  add_task({ title, due_at, remind_at, announcement, check_in, heads_up, urgent }) {
     const name = toText(title, 'title', 200);
     if (!askedForTask()) throw new Error(`${NOT_ASKED} a task or reminder. Ask them in one short question ("Shall I add that?") and end your reply; add it only after their yes.`);
     const dueAt = toTime(due_at, 'due_at');
@@ -424,12 +459,63 @@ const handlers = {
     const announce = remindAt && announcement ? String(announcement).trim().slice(0, 200) || null : null;
     const question = String(check_in ?? '').trim().slice(0, 160);
     const checkIn = !remindAt || !question ? null : /^(none|no|false)$/i.test(question) ? false : question;
-    tasks.add({ title: name, dueAt, remindAt, announce, checkIn, headsUp: heads_up });
+    tasks.add({ title: name, dueAt, remindAt, announce, checkIn, headsUp: heads_up, urgent: urgent === true });
     if (!remindAt) return `Task added: ${name}`;
     const early = Array.isArray(heads_up) && heads_up.length ? ` (heads-ups ${heads_up.join(' and ')} minutes before)` : '';
     const text = `Reminder set: ${name}, ${prettyTime(remindAt)}${early}`;
     const clash = clashWith(remindAt, name);
     return { text, ...(clash && { result: `${text}. CLASH: ${clash}. Tell them, and offer to move one.` }), calendar: { title: name, at: remindAt } };
+  },
+
+  sleep_mode({ action, minutes, from, to }) {
+    if (action === 'hours') {
+      const hours = sleep.setSleepHours(String(from ?? '').trim(), String(to ?? '').trim());
+      return hours ? `Sleep hours: ${hours.from} to ${hours.until}, every night` : 'Sleep hours off';
+    }
+    if (action === 'wake') {
+      const since = sleep.wakeUp();
+      if (since == null) return { text: 'Already awake', result: 'You were not asleep. Answer them normally.' };
+      return { text: 'Awake', result: sleep.catchUpRequest(since, sleep.takeHeld(since)).replace(/^\(Automatic message: /, '(').replace(' Do not use tools.', '') };
+    }
+    if (action !== 'sleep') throw new Error('action is sleep, wake or hours.');
+    const span = Number(minutes) > 0 ? Math.min(Math.max(Math.round(Number(minutes)), 10), 1440) : 0;
+    sleep.goToSleep(span ? Date.now() + span * 60_000 : 0);
+    const until = span ? ` until ${prettyTime(localStamp(new Date(Date.now() + span * 60_000)))}` : sleep.sleepHours() ? ` until ${sleep.sleepHours().until}` : ' until you wake me';
+    const through = sleep.urgentPeople();
+    return {
+      text: `Sleeping${until}`,
+      result: `Sleep mode on${until}. Only urgent reminders${through.length ? ` and ${through.join(', ')}` : ''} get through; the wake phrase wakes you and you catch them up. Say good night in one short sentence.`,
+    };
+  },
+
+  mark_urgent({ person, id, off }) {
+    const on = off !== true;
+    if (id) {
+      const task = findTask(id);
+      tasks.setUrgent(task.id, on);
+      return on ? `Urgent: ${task.title}` : `Not urgent: ${task.title}`;
+    }
+    const list = sleep.markUrgentPerson(person, on);
+    return { text: on ? `Urgent: ${String(person).trim()}` : `Not urgent: ${String(person).trim()}`, result: `Their urgent list: ${list.join(', ') || 'empty'}.` };
+  },
+
+  async create_meeting({ title, date, time, minutes = 30, guests = '', details = '' }) {
+    const name = toText(title, 'title', 120);
+    const at = toTime(`${String(date ?? '').trim()}T${String(time ?? '').trim()}`, 'date and time', { requireTime: true });
+    if (at < localStamp()) throw new Error(`${at} is in the past; it is now ${localStamp()}.`);
+    const people = String(guests ?? '').split(/[,;\s]+/).filter(Boolean).map(p => nicknames.lookUp(p) ?? p);
+    const wrong = people.filter(p => !EMAIL_ADDRESS.test(p));
+    if (wrong.length) throw new Error(`Not email addresses: ${wrong.join(', ')}. Ask them for the address (offer set_nickname to remember it).`);
+    if (people.some(p => WORK_APPS.test(p) || /arogya360/i.test(p))) throw new Error(WORK_OFF);
+    const length = Math.min(Math.max(Math.round(Number(minutes) || 30), 5), 600);
+    const url = meetingUrl({ title: name, at, minutes: length, guests: people, details: String(details ?? '').slice(0, 800), account: personalAccount() });
+    if (desktop.listenerConnected()) await desktop.openUrl(url);
+    else openMailApp(url);
+    return {
+      text: `Meeting ready to save: ${name}, ${prettyTime(at)}`,
+      result: `Google Calendar is open with "${name}" on ${prettyTime(at)} for ${length} minutes${people.length ? `, guests ${people.join(', ')}` : ''}. `
+        + 'Tell them to check it, tap "Add Google Meet video conferencing" if they want a link, and Save; Google then asks whether to email the guests. It is NOT saved yet. Offer a reminder with heads-ups.',
+    };
   },
 
   complete_task({ id }) {

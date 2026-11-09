@@ -86,6 +86,18 @@ function taskRefs(latest = summary()) {
 export const openTasksToday = () => taskRefs().filter(t => !t.doneToday && (!t.due || String(t.due).startsWith(localStamp().slice(0, 10))))
   .map(({ id, title }) => ({ id, title }));
 
+// Life Levelling's open tasks for the Tasks panel: { id, title, due, priority, pending } (pending: ticked here and not
+// yet confirmed by Life Levelling).
+const ticked = new Map(); // Life Levelling task id -> when it was ticked off here
+export const openTasks = () => taskRefs().filter(t => !t.doneToday && t.status !== 'done')
+  .map(({ id, title, due, priority }) => ({ id, title, due, priority, pending: ticked.has(id) }));
+export function tickInLife(lifeTaskId) {
+  ticked.set(lifeTaskId, Date.now());
+  return completeInLife(lifeTaskId);
+}
+// Whether Life Levelling has this task as urgent (priority 1): it still speaks in sleep mode.
+export const urgentInLife = lifeTaskId => Boolean(lifeTaskId) && taskRefs().some(t => t.id === lifeTaskId && Number(t.priority) === 1);
+
 // "(done)", "(3/8 cups)", "(not yet)" for a habit in the summary.
 function habitProgress(h) {
   if (h.status === 'done') return '(done)';

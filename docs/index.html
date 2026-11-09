@@ -120,6 +120,7 @@
         </div>
         <div class="tab-body" data-panel="tasks">
           <ul id="taskList" class="list"></ul>
+          <div id="lifeTasks"></div>
           <div id="doneList"></div>
         </div>
         <div class="tab-body" data-panel="goals" hidden><ul id="goalList" class="list"></ul></div>
@@ -702,6 +703,20 @@
               <summary>How it knows you're in the car</summary>
               <p>Sit in the car with the phone connected to its Bluetooth and tap "This is my car". From then on, driving mode is on whenever the phone is connected to it. Earbuds and other speakers don't count.</p>
             </details>
+          </div>
+
+          <div class="set-card">
+            <h3 class="card-title">Sleep mode</h3>
+            <label>Sleep every night from <input type="time" name="sleepFrom"></label>
+            <label>until <input type="time" name="sleepUntil"></label>
+            <label>Urgent people <input type="text" name="urgentPeople" placeholder="Mom, Asha" maxlength="400"></label>
+            <small class="hint">Asleep, LightMoon holds its reminders, check-ins and greetings. Only reminders marked urgent or emergency (and these people) still get through. Say "good night, Moon" to sleep now; the wake phrase wakes it and it catches you up on everything that came in. Leave both times empty for no fixed hours.</small>
+          </div>
+
+          <div class="set-card">
+            <h3 class="card-title">Meetings</h3>
+            <label>Google account for meetings <input type="email" name="calendarAccount" placeholder="you@gmail.com" maxlength="120"></label>
+            <small class="hint">"Set a meeting with Ravi tomorrow at 4" opens Google Calendar filled in, in this account, for you to check and Save. Personal or business accounts only, never your work one.</small>
           </div>
 
           <div class="set-card">
