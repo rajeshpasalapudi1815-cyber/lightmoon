@@ -1,7 +1,7 @@
 // LightMoon app: runs entirely on this device. Chat, voice, memory, tasks, goals and reminders are all
 // handled here; the only thing sent over the internet is the conversation, to the AI service.
 import { isNativeApp, nativeAlarms, wakeWord, fileSaver, phone, workAccount } from './js/native.js'; // first: sets up voice in the Android app
-import { refresh as refreshPhone, onSpendLogged } from './js/phone.js';
+import { refresh as refreshPhone, onSpendLogged, onTaskDone } from './js/phone.js';
 import * as store from './js/store.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
@@ -2948,6 +2948,12 @@ function boot() {
   updates.start({ isQuiet: quietForRestart, onReady: offerRestart });
   wireUp();
   // A bank spend went to Life Levelling by itself (phone.js): say so, in the conversation, or as a notification.
+  // A "call X" task ticked itself off because they've talked to X since (phone.js).
+  onTaskDone(({ title, who, at, life }) => {
+    const when = new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    note(`Done${life ? ' in Life Levelling' : ''}: ${title} (you talked to ${who} at ${when}).`);
+    applyState();
+  });
   onSpendLogged(({ amount, merchant, category }) => {
     const line = `Sent ₹${amount.toLocaleString('en-IN')}${merchant ? ` at ${merchant}` : ''} to Life Levelling as ${category}.`;
     note(line);

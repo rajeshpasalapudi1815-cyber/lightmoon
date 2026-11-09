@@ -178,23 +178,38 @@ final class Briefings {
             + (due.size() > MAX_NAMED ? ", and " + (due.size() - MAX_NAMED) + " more." : ".");
     }
 
+    // Missed calls since then that haven't been returned: a later call with that number (they called back, or
+    // answered when the person tried again) takes it off the list.
     private static String missedCalls(Context context, long since) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) return null;
-        Set<String> who = new LinkedHashSet<>();
-        int count = 0;
-        String[] columns = { CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NAME };
-        String where = CallLog.Calls.TYPE + " = " + CallLog.Calls.MISSED_TYPE + " AND " + CallLog.Calls.DATE + " >= ?";
-        try (Cursor cursor = context.getContentResolver().query(CallLog.Calls.CONTENT_URI, columns, where, new String[] { String.valueOf(since) }, null)) {
+        java.util.Map<String, String> waiting = new java.util.LinkedHashMap<>(); // last digits -> name
+        java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+        String[] columns = { CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NAME, CallLog.Calls.TYPE, CallLog.Calls.DURATION };
+        String where = CallLog.Calls.DATE + " >= ?";
+        try (Cursor cursor = context.getContentResolver().query(CallLog.Calls.CONTENT_URI, columns, where, new String[] { String.valueOf(since) },
+                CallLog.Calls.DATE + " ASC")) {
             while (cursor != null && cursor.moveToNext()) {
-                count++;
-                String name = cursor.isNull(1) || cursor.getString(1).isEmpty() ? Contacts.nameFor(context, cursor.getString(0)) : cursor.getString(1);
-                who.add(name == null ? "an unknown number" : name);
+                String number = cursor.isNull(0) ? "" : cursor.getString(0);
+                String key = number.replaceAll("\\D", "");
+                if (key.length() > 10) key = key.substring(key.length() - 10);
+                int type = cursor.getInt(2);
+                boolean talked = type == CallLog.Calls.OUTGOING_TYPE || (type == CallLog.Calls.INCOMING_TYPE && cursor.getLong(3) > 0);
+                if (type == CallLog.Calls.MISSED_TYPE) {
+                    String name = cursor.isNull(1) || cursor.getString(1).isEmpty() ? Contacts.nameFor(context, number) : cursor.getString(1);
+                    waiting.put(key, name == null ? "an unknown number" : name);
+                    counts.merge(key, 1, Integer::sum);
+                } else if (talked && !key.isEmpty()) {
+                    waiting.remove(key);
+                    counts.remove(key);
+                }
             }
         } catch (RuntimeException err) {
             return null;
         }
+        int count = 0;
+        for (int n : counts.values()) count += n;
         if (count == 0) return null;
-        return "You missed " + (count == 1 ? "a call" : count + " calls") + ", from " + names(who) + ".";
+        return "You missed " + (count == 1 ? "a call" : count + " calls") + " you haven't returned, from " + names(new LinkedHashSet<>(waiting.values())) + ".";
     }
 
     private static String newMessages(Context context, long since) {

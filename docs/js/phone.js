@@ -7,11 +7,11 @@
 // only reads back who and what, and the action runs when the AI calls again with that confirm_id after
 // the user has answered (a newer message from them). The stored action runs, not whatever the AI sends then.
 import { phone } from './native.js';
-import { messages as chat, nicknames, settings } from './store.js';
+import { messages as chat, nicknames, settings, tasks } from './store.js';
 import { choosePerson, lookAlikeNotes, conversationsFrom } from './people.js';
 import { linkNote } from './links.js';
 import { moneyNote, spendFrom, categoryFor } from './money.js';
-import { lifeHandlers, isConnected as lifeConnected } from './lifelevelling.js';
+import { lifeHandlers, isConnected as lifeConnected, openTasksToday, completeInLife } from './lifelevelling.js';
 import { rememberDraft, SEND_APPS } from './compose.js';
 import { saidYes } from './orders.js';
 import { localStamp } from './time.js';
@@ -55,7 +55,51 @@ async function load() {
   const sends = phone.scheduledSends ? await phone.scheduledSends().then(r => r.sends ?? [], () => []) : [];
   seen = { events, calls, messages, battery, steps, mail, sends, at: now };
   autoLogSpends(messages).catch(() => {});
+  finishCallTasks(calls);
 }
+
+// ---------- "Call Srinivas back" ticks itself off once they've talked ----------
+// A task (LightMoon's, or Life Levelling's for today) asking them to call someone is done once there's been a call
+// with that person since it was set: they called, or the person called and they answered. They're told (onTaskDone).
+const CALL_TASK = /\b(call|ring|phone|return|callback)\b/i;
+const NOT_NAMES = new Set(['call', 'calls', 'calling', 'back', 'ring', 'phone', 'return', 'returned', 'callback', 'missed', 'about', 'with',
+  'the', 'and', 'for', 'him', 'her', 'them', 'his', 'today', 'tomorrow', 'again', 'regarding', 'please', 'reply', 'urgent']);
+let doneListener = null;
+export const onTaskDone = listener => { doneListener = listener; };
+
+const nameWords = title => String(title).toLowerCase().replace(/['’]s\b/g, '').split(/[^a-zఀ-౿]+/).filter(w => w.length >= 3 && !NOT_NAMES.has(w));
+const talked = calls => calls.filter(c => c.type === 'outgoing' || (c.type === 'incoming' && c.seconds > 0));
+function talkedWith(title, since, calls) {
+  if (!CALL_TASK.test(title)) return null;
+  const words = nameWords(title);
+  const number = digits(title);
+  return talked(calls).find(c => c.at > since && (
+    (number.length >= 7 && digits(c.number) === number)
+    || (c.name && words.some(w => c.name.toLowerCase().split(/\s+/).some(part => part === w || (w.length >= 4 && part.startsWith(w)))))
+  )) ?? null;
+}
+
+function finishCallTasks(calls) {
+  if (!calls?.length) return;
+  for (const task of tasks.open()) {
+    const since = Date.parse(task.created_at ?? '') || 0;
+    const call = talkedWith(task.title, since, calls);
+    if (!call) continue;
+    tasks.complete(task.id);
+    completeInLife(task.ll_task_id).catch(() => {});
+    doneListener?.({ title: task.title, who: who(call), at: call.at });
+  }
+  if (!lifeConnected()) return;
+  const startOfToday = new Date().setHours(0, 0, 0, 0);
+  for (const task of openTasksToday()) {
+    const call = talkedWith(task.title, startOfToday, calls);
+    if (!call || finishedLife.has(task.id)) continue;
+    finishedLife.add(task.id);
+    completeInLife(task.id).catch(() => {});
+    doneListener?.({ title: task.title, who: who(call), at: call.at, life: true });
+  }
+}
+const finishedLife = new Set(); // sent this session (Life Levelling applies it the next time it's open)
 
 // ---------- Bank spends straight into Life Levelling (Settings → Phone, on unless switched off) ----------
 // A bank's "Rs 450 debited ... at SWIGGY" text is logged as an expense once, with a category from the merchant, and
@@ -150,7 +194,7 @@ const messageRefs = () => seen.messages.slice(-MAX_MESSAGES).map((m, i) => ({ ..
 
 // A missed call they have since returned, or that was followed by a call with that number: no need to mention it.
 const digits = number => String(number ?? '').replace(/\D/g, '').slice(-10);
-const calledSince = missed => Boolean(digits(missed.number)) && seen.calls.some(c => c.type !== 'missed' && c.at > missed.at && digits(c.number) === digits(missed.number));
+const calledSince = missed => Boolean(digits(missed.number)) && seen.calls.some(c => (c.type === 'outgoing' || c.type === 'incoming') && c.at > missed.at && digits(c.number) === digits(missed.number));
 
 // "WhatsApp, Asha in "Family"" or "email to me@work.com from Asha" (emails only from accounts switched on).
 const source = m => (m.kind === 'email'
@@ -167,10 +211,13 @@ export function promptSection() {
     lines.push(...upcoming.map(e => `  ${eventLine(e)}`));
   }
   if (allowed.calls) {
-    const missed = seen.calls.filter(c => c.type === 'missed').slice(0, MAX_MISSED);
+    const allMissed = seen.calls.filter(c => c.type === 'missed' || c.type === 'rejected');
+    const missed = allMissed.filter(c => !calledSince(c)).slice(0, MAX_MISSED);
+    const returned = [...new Set(allMissed.filter(calledSince).map(who))];
     lines.push(missed.length
-      ? `Missed calls (last 24 h): ${missed.map(c => `${who(c)} ${dayWord(c.at).toLowerCase()} ${clock(c.at)}${calledSince(c) ? ' (DEALT WITH: they have talked since)' : ''}`).join('; ')}`
-      : 'No missed calls in the last 24 hours.');
+      ? `Missed calls not returned yet (last 24 h): ${missed.map(c => `${who(c)} ${dayWord(c.at).toLowerCase()} ${clock(c.at)}`).join('; ')}`
+      : 'No missed calls waiting: none in the last 24 hours, or they have all been returned.');
+    if (returned.length) lines.push(`Already talked to since missing their call (never ask them to call these back): ${returned.join(', ')}.`);
     const talked = finishedCalls();
     if (talked.length) lines.push(`Calls they just had: ${talked.join('; ')}`);
   }

@@ -82,6 +82,10 @@ function taskRefs(latest = summary()) {
   return list.map((task, index) => ({ ...task, ref: `L${index + 1}` }));
 }
 
+// Life Levelling's open tasks due today ({ id, title }), for ticking off a "call X" task once they've talked (phone.js).
+export const openTasksToday = () => taskRefs().filter(t => !t.doneToday && (!t.due || String(t.due).startsWith(localStamp().slice(0, 10))))
+  .map(({ id, title }) => ({ id, title }));
+
 // "(done)", "(3/8 cups)", "(not yet)" for a habit in the summary.
 function habitProgress(h) {
   if (h.status === 'done') return '(done)';
