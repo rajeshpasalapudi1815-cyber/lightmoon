@@ -44,6 +44,12 @@ final class Voice {
     // With `done` (a receiver waiting): right away, within its time limit. Without: queued behind other lines.
     static void say(Context context, String text, Runnable done) {
         Context app = context.getApplicationContext();
+        // Never over a phone or WhatsApp call (a second caller's name, a message, a meeting).
+        if (PhonePrefs.inCall(app)) {
+            if (done != null) done.run();
+            return;
+        }
+        VolumeStop.watch(app);
         if (done != null) {
             main.post(() -> speak(app, text, QUICK_GIVE_UP_MS, done));
             return;
@@ -116,6 +122,10 @@ final class Voice {
         } catch (Exception err) {
             return text; // a broken list never stops a reminder being said
         }
+    }
+
+    static boolean active() {
+        return !stoppers.isEmpty();
     }
 
     static void stopAll() {

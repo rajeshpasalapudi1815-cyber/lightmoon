@@ -7,6 +7,9 @@
 // what it is doing (POST /state), and asks for its window when it needs the user (POST /show: its lock screen).
 // Browsers let a page speak only after a key press in it, so a page that hasn't had one (just opened, or reloaded
 // for an update) gets one F13 press, a key nothing uses, while it is shown for a moment.
+// The volume-down key stops LightMoon while it speaks (GET /events answers { stop }; the key is kept from Windows then,
+// so the volume stays as it was). GET /busy says whether another app (Teams, WhatsApp, a browser call) has the
+// microphone, so the page keeps scheduled things quiet during a call.
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -30,6 +33,11 @@ static class TrayMode
     static DateTime pageSeen = DateTime.MinValue;
     static readonly ManualResetEvent wakeWaiting = new ManualResetEvent(false);
     static volatile bool wakePending;
+    static volatile bool stopPending;
+    delegate IntPtr KeyHook(int code, IntPtr message, IntPtr data);
+    static KeyHook keyHook; // kept, so it isn't collected while Windows still calls it
+    static IntPtr keyHookHandle = IntPtr.Zero;
+    const int VolumeDown = 0xAE;
 
     // Where the window was before it was put out of sight, to show it there again.
     static readonly Dictionary<IntPtr, Rectangle> placeOf = new Dictionary<IntPtr, Rectangle>();
@@ -51,6 +59,83 @@ static class TrayMode
         var keeper = new System.Windows.Forms.Timer { Interval = 3000 };
         keeper.Tick += (s, e) => Keep();
         keeper.Start();
+        keyHook = KeyPressed;
+        keyHookHandle = SetWindowsHookEx(13, keyHook, GetModuleHandle(null), 0); // WH_KEYBOARD_LL
+        if (keyHookHandle == IntPtr.Zero) log("volume-down stop: couldn't watch the keyboard");
+    }
+
+    // Every key press goes through here (quickly: Windows gives up on a slow hook). Volume down while LightMoon is
+    // speaking: it stops, and the key goes no further.
+    static IntPtr KeyPressed(int code, IntPtr message, IntPtr data)
+    {
+        if (code >= 0 && Marshal.ReadInt32(data) == VolumeDown && pageState == "speaking" && DateTime.Now - pageSeen < TimeSpan.FromSeconds(90))
+        {
+            int kind = message.ToInt32();
+            if (kind == 0x100 || kind == 0x104) // key down
+            {
+                pageState = "idle"; // until the page says otherwise; the next press turns the volume down again
+                stopPending = true;
+                wakeWaiting.Set();
+                log("volume down: LightMoon told to stop speaking");
+                if (ui != null) ui.Post(_ => glow.Hide(), null);
+            }
+            return (IntPtr)1;
+        }
+        return CallNextHookEx(keyHookHandle, code, message, data);
+    }
+
+    // Who else has the microphone now (a call in Teams, WhatsApp, Zoom or a browser), or "" if nobody. Windows notes
+    // each app's microphone use in the registry: LastUsedTimeStop is 0 while it is still using it. LightMoon's own
+    // listening doesn't count (the Listener, or Edge while the page is listening).
+    public static string MicrophoneUser()
+    {
+        const string store = @"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
+        try
+        {
+            using (var root = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(store))
+            {
+                if (root == null) return "";
+                foreach (string name in root.GetSubKeyNames())
+                {
+                    if (name == "NonPackaged")
+                    {
+                        using (var desktop = root.OpenSubKey(name))
+                            if (desktop != null)
+                                foreach (string app in desktop.GetSubKeyNames())
+                                {
+                                    string found = InUse(desktop, app);
+                                    if (found != "") return found;
+                                }
+                        continue;
+                    }
+                    string user = InUse(root, name);
+                    if (user != "") return user;
+                }
+            }
+        }
+        catch (Exception) { }
+        return "";
+    }
+
+    static string InUse(Microsoft.Win32.RegistryKey parent, string name)
+    {
+        using (var key = parent.OpenSubKey(name))
+        {
+            if (key == null) return "";
+            object start = key.GetValue("LastUsedTimeStart"), stop = key.GetValue("LastUsedTimeStop");
+            if (start == null || stop == null || Convert.ToInt64(start) == 0 || Convert.ToInt64(stop) != 0) return "";
+        }
+        string app = name.Contains("#") ? name.Substring(name.LastIndexOf('#') + 1) : name.Split('_')[0];
+        if (app.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) app = app.Substring(0, app.Length - 4);
+        string lower = app.ToLowerInvariant();
+        if (lower.Contains("lightmoon")) return "";
+        if ((lower == "msedge" || lower.Contains("edge")) && pageState == "listening") return "";
+        if (lower.Contains("teams")) return "Teams";
+        if (lower.Contains("whatsapp")) return "WhatsApp";
+        if (lower.Contains("zoom")) return "Zoom";
+        if (lower == "msedge") return "Edge";
+        if (lower == "chrome") return "Chrome";
+        return app;
     }
 
     public static void SetOn(bool on)
@@ -127,6 +212,23 @@ static class TrayMode
         string said = saidWithWake;
         saidWithWake = "";
         return said;
+    }
+
+    // GET /events: "wake", "stop" (volume down while speaking), or null after 20 s of nothing.
+    public static string WaitForEvent()
+    {
+        pageSeen = DateTime.Now;
+        if (!wakePending && !stopPending) wakeWaiting.WaitOne(20000);
+        if (stopPending)
+        {
+            stopPending = false;
+            if (!wakePending) wakeWaiting.Reset();
+            return "stop";
+        }
+        if (!wakePending) return null;
+        wakePending = false;
+        wakeWaiting.Reset();
+        return "wake";
     }
 
     public static bool WaitForWake()
@@ -251,6 +353,9 @@ static class TrayMode
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+    [DllImport("user32.dll")] static extern IntPtr SetWindowsHookEx(int id, KeyHook hook, IntPtr module, uint thread);
+    [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
+    [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandle(string name);
     const int GWL_EXSTYLE = -20, WS_EX_TOOLWINDOW = 0x80, WS_EX_APPWINDOW = 0x40000, SW_SHOWNOACTIVATE = 4;
     const uint SWP_NOSIZE = 0x1, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, KEYEVENTF_KEYUP = 2;
     const byte VK_MENU = 0x12, VK_F13 = 0x7C;

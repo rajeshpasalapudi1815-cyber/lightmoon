@@ -144,6 +144,22 @@ public class PhonePlugin extends Plugin {
         return status;
     }
 
+    // Whether they're on a phone or WhatsApp call now: the app keeps scheduled things quiet until it ends.
+    @PluginMethod
+    public void busy(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("inCall", PhonePrefs.inCall(getContext()));
+        call.resolve(result);
+    }
+
+    // { on }: the app started or stopped speaking, so the volume-down button can stop it (VolumeStop).
+    @PluginMethod
+    public void speaking(PluginCall call) {
+        VolumeStop.pageSpeaking = Boolean.TRUE.equals(call.getBoolean("on", false));
+        VolumeStop.watch(getContext());
+        call.resolve();
+    }
+
     @PluginMethod
     public void status(PluginCall call) {
         try {

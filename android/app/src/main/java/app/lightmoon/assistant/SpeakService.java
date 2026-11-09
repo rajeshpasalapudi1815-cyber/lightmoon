@@ -27,12 +27,19 @@ import java.util.ArrayDeque;
 
 // Says reminders out loud with Android's text-to-speech when their time comes, even while LightMoon is
 // closed, on the alarm volume so it's heard like an alarm clock. Each reminder also gets a notification.
+// Never over a phone or WhatsApp call: it waits for the call to end (up to WAIT_FOR_CALL_MS; the notification stays
+// meanwhile), and a call that starts mid-sentence stops it. Volume down (VolumeStop) or Stop on its notification
+// silences it.
 public class SpeakService extends Service implements TextToSpeech.OnInitListener {
 
     private static final String CHANNEL_REMINDERS = "reminders";
     private static final String CHANNEL_SPEAKING = "speaking";
     private static final int SPEAKING_NOTIFICATION = 1;
     private static final long GIVE_UP_AFTER_MS = 60_000;
+    private static final long WAIT_FOR_CALL_MS = 90 * 60_000;
+    private static final long CALL_CHECK_MS = 15_000;
+    private static final String ACTION_STOP = "app.lightmoon.assistant.STOP_SPEAKING";
+    private static volatile SpeakService running;
 
     private final ArrayDeque<ReminderStore.Reminder> queue = new ArrayDeque<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -48,18 +55,44 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
     private int composing; // briefings still being put together
     private int lastStartId;
     private AudioFocusRequest focus;
+    private ReminderStore.Reminder saying; // the line being said now
+    private long waitingSince; // > 0 while waiting for a call to end
+    private final Runnable callCheck = this::checkCallOver;
+
+    static boolean speakingNow() {
+        SpeakService service = running;
+        return service != null && service.speaking;
+    }
+
+    // Volume down (VolumeStop) or Stop on the notification: quiet now, and what was still to come is dropped.
+    static void stopNow() {
+        SpeakService service = running;
+        if (service == null) return;
+        service.handler.post(() -> {
+            if (service.tts != null) service.tts.stop();
+            service.finish();
+        });
+    }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         lastStartId = startId;
-        finished = false;
+        running = this;
         createChannels(this);
+        VolumeStop.watch(this);
+        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            if (tts != null) tts.stop();
+            finish();
+            return START_NOT_STICKY;
+        }
+        finished = false;
         // Android requires the "speaking" notification at once; it goes away when the reminder has been said.
         Notification speaking = new NotificationCompat.Builder(this, CHANNEL_SPEAKING)
             .setSmallIcon(R.drawable.ic_stat_moon)
             .setContentTitle("LightMoon")
             .setContentText("Speaking a reminder")
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(0, "Stop", stopIntent(this))
             .build();
         int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ? ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK : 0;
         ServiceCompat.startForeground(this, SPEAKING_NOTIFICATION, speaking, type);
@@ -77,8 +110,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
         String briefing = intent == null ? null : intent.getStringExtra("briefing");
         if (reminder == null && briefing != null) {
             composing++;
-            handler.removeCallbacks(giveUp);
-            handler.postDelayed(giveUp, GIVE_UP_AFTER_MS);
+            restartGiveUp();
             Context app = getApplicationContext();
             new Thread(() -> {
                 String text = Briefings.compose(app, briefing);
@@ -102,8 +134,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
     private void enqueue(ReminderStore.Reminder reminder) {
         showReminder(this, reminder);
         queue.add(reminder);
-        handler.removeCallbacks(giveUp);
-        handler.postDelayed(giveUp, GIVE_UP_AFTER_MS);
+        restartGiveUp();
         if (tts == null) tts = new TextToSpeech(this, this);
         else if (ready && !speaking) speakNext();
     }
@@ -137,17 +168,71 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
 
     private void lineDone() {
         speaking = false;
+        saying = null;
+        speakNext();
+    }
+
+    private static PendingIntent stopIntent(Context context) {
+        Intent stop = new Intent(context, SpeakService.class).setAction(ACTION_STOP);
+        return PendingIntent.getService(context, 7, stop, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    // While waiting for a call to end, the 60-second give-up waits too.
+    private void restartGiveUp() {
+        handler.removeCallbacks(giveUp);
+        if (waitingSince == 0) handler.postDelayed(giveUp, GIVE_UP_AFTER_MS);
+    }
+
+    // On a call: nothing is said until it ends (checked every 15 s). The reminders are on their notifications meanwhile.
+    private void waitForCall() {
+        if (waitingSince == 0) {
+            waitingSince = System.currentTimeMillis();
+            handler.removeCallbacks(giveUp);
+            NotificationManagerCompat manager = NotificationManagerCompat.from(this);
+            try {
+                manager.notify(SPEAKING_NOTIFICATION, new NotificationCompat.Builder(this, CHANNEL_SPEAKING)
+                    .setSmallIcon(R.drawable.ic_stat_moon)
+                    .setContentTitle("LightMoon")
+                    .setContentText("You're on a call: I'll say it when you're free")
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
+                    .addAction(0, "Stop", stopIntent(this))
+                    .build());
+            } catch (SecurityException err) {
+                // No notification permission: it still waits.
+            }
+        }
+        handler.removeCallbacks(callCheck);
+        handler.postDelayed(callCheck, CALL_CHECK_MS);
+    }
+
+    private void checkCallOver() {
+        if (finished) return;
+        if (System.currentTimeMillis() - waitingSince > WAIT_FOR_CALL_MS) {
+            finish(); // a very long call: the notifications have it
+            return;
+        }
+        if (PhonePrefs.inCall(this)) {
+            waitForCall();
+            return;
+        }
+        waitingSince = 0;
+        restartGiveUp();
         speakNext();
     }
 
     private void speakNext() {
-        if (finished || tts == null) return;
+        if (finished || tts == null || waitingSince > 0) return;
+        if (PhonePrefs.inCall(this)) {
+            waitForCall();
+            return;
+        }
         ReminderStore.Reminder reminder = queue.poll();
         if (reminder == null) {
             if (composing == 0) finish(); // else a briefing is still being put together
             return;
         }
         speaking = true;
+        saying = reminder;
         requestAudioFocus();
         ReminderStore.markSpoken(this, reminder.id);
         tts.speak(Voice.sayTheirWay(this, reminder.say), TextToSpeech.QUEUE_ADD, null, "reminder-" + reminder.id);
@@ -192,7 +277,9 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
         AudioManager audio = getSystemService(AudioManager.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (focus == null) {
-                focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(alarmAudio).build();
+                focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(alarmAudio)
+                    .setOnAudioFocusChangeListener(change -> handler.post(() -> focusLost(change)), handler)
+                    .build();
             }
             audio.requestAudioFocus(focus);
         } else {
@@ -200,9 +287,24 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
         }
     }
 
+    // A call (or another app) took the sound away mid-sentence: stop, and say that line again when it's free.
+    private void focusLost(int change) {
+        if (change != AudioManager.AUDIOFOCUS_LOSS && change != AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) return;
+        if (finished || !speaking || tts == null) return;
+        ReminderStore.Reminder again = saying;
+        tts.stop();
+        speaking = false;
+        saying = null;
+        if (again != null) queue.addFirst(again);
+        handler.postDelayed(this::speakNext, 1500); // the call's audio mode comes a moment after it takes the sound
+    }
+
     private void finish() {
         finished = true;
+        waitingSince = 0;
+        saying = null;
         handler.removeCallbacks(giveUp);
+        handler.removeCallbacks(callCheck);
         AudioManager audio = getSystemService(AudioManager.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && focus != null) audio.abandonAudioFocusRequest(focus);
         if (tts != null) {
@@ -231,7 +333,9 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
 
     @Override
     public void onDestroy() {
+        if (running == this) running = null;
         handler.removeCallbacks(giveUp);
+        handler.removeCallbacks(callCheck);
         if (tts != null) tts.shutdown();
         super.onDestroy();
     }

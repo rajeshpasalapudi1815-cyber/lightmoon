@@ -377,6 +377,7 @@ function refresh() {
   else if (speaker.active) mode = 'speaking';
   else if (busy) mode = 'thinking';
   document.body.dataset.state = mode;
+  tellPhoneSpeaking(mode === 'speaking');
   keepTalking(mode !== 'idle' || Boolean(listenWhenFree) || review.waiting);
   desktop.noteState(mode); // the line at the top of the screen, while LightMoon is in the tray
   if (document.hidden && mode !== 'idle') hiddenAt = Date.now(); // used out of sight (in the tray): the relock time starts again
@@ -385,6 +386,53 @@ function refresh() {
     : prefs.handsFree ? `Say "${assistantName()}" to wake me` : 'Standing by';
   const listening = prefs.sendAfterMs ? 'Listening... tap to send now' : 'Listening... tap when done';
   statusEl.textContent = { idle, listening, thinking: 'Thinking...', speaking: 'Speaking...' }[mode];
+}
+
+// On the phone: whether the page is speaking, so the volume-down button can stop it (VolumeStop.java).
+let phoneHeardSpeaking = false;
+function tellPhoneSpeaking(on) {
+  if (!phone?.speaking || on === phoneHeardSpeaking) return;
+  phoneHeardSpeaking = on;
+  phone.speaking({ on }).catch(() => {});
+}
+
+// Volume down (phone or laptop), Escape, or Stop: quiet now, and no listening straight after.
+function silence() {
+  listenWhenFree = false;
+  speaker.stop();
+  refresh();
+}
+
+// ---------- Busy: on a call ----------
+// Scheduled things (reminders, check-ins, heads-ups, the briefing) wait while they are on a phone or WhatsApp call
+// (the phone) or another app has the microphone (Teams, WhatsApp, Zoom, a browser call on the laptop); they are said
+// when the call is over. Notifications still show meanwhile.
+async function busyWith() {
+  if (phone?.busy) {
+    const { inCall } = await phone.busy().catch(() => ({}));
+    if (inCall) return 'a call';
+  }
+  if (desktop.listenerConnected()) {
+    const { busy: inUse, by } = await desktop.busy();
+    if (inUse) return by ? `a call (${by} has the microphone)` : 'a call';
+  }
+  return '';
+}
+
+const BUSY_KEEP_MS = 3 * 3600_000; // held longer than this: too old to say
+let heldForCall = []; // [{ at, line }]
+let briefingAfterCall = 0; // when a briefing was put off for a call
+async function sayHeldAfterCall() {
+  if (!heldForCall.length && !briefingAfterCall) return;
+  if (listener.capturing || speaker.active || busy || await busyWith()) return;
+  const lines = heldForCall.filter(h => Date.now() - h.at < BUSY_KEEP_MS).map(h => h.line);
+  heldForCall = [];
+  if (lines.length) speaker.speak(`${addressWord()}, while you were on the call: ${lines.join(' ')}`, { force: true });
+  if (briefingAfterCall && Date.now() - briefingAfterCall < BUSY_KEEP_MS) {
+    briefingAfterCall = 0;
+    runBriefing();
+  }
+  briefingAfterCall = 0;
 }
 
 // On the phone: while a conversation goes on, Android keeps it going with the screen off (TalkService.java), and ends
@@ -913,6 +961,10 @@ function answerCall() {
 async function runBriefing(force = false, { call = false } = {}) {
   if (!state.ai.ready) return;
   if (!force && sleep.isAsleep()) return; // asleep: the catch-up on waking covers it
+  if (!force && await busyWith()) {
+    briefingAfterCall = Date.now(); // said when the call is over
+    return;
+  }
   if (!force && store.settings.get('last_briefing') === today()) {
     speaker.speak(prefs.listenOnOpen ? `Yes, ${addressWord()}?` : `Welcome back, ${addressWord()}.`);
     return;
@@ -940,7 +992,7 @@ async function maybeWeeklyLetter(force = false) {
   const week = store.weekKey();
   if (!force) {
     const now = new Date();
-    if (sleep.isAsleep()) return;
+    if (sleep.isAsleep() || await busyWith()) return;
     if (store.settings.get('weekly_letter', 'on') === 'off' || now.getDay() !== 0 || now.getHours() < LETTER_FROM_HOUR) return;
     if (store.settings.get('last_letter') === week || Date.now() - letterFailedAt < LETTER_RETRY_MS) return;
   }
@@ -969,6 +1021,7 @@ async function maybeWeeklyLetter(force = false) {
 async function pollReminders() {
   checkSleepEnded();
   await takeAnswers();
+  await sayHeldAfterCall();
   if (nativeAlarms) {
     // In the Android app, the phone's alarms say reminders (and check-ins) while LightMoon is in the
     // background or closed.
@@ -1000,6 +1053,7 @@ async function pollReminders() {
   const checkIns = store.tasks.takeDueCheckIns();
   if (!due.length && !checkIns.length && !headsUps.length) return;
   const notified = await cloud.notifiedReminders(); // already shown as a notification while closed
+  onCall = await busyWith();
   for (const reminder of due.filter(r => !notified[r.id])) {
     const minutesLate = (Date.now() - toDate(reminder.remind_at).getTime()) / 60_000;
     const line = sayReminder(reminder);
@@ -1019,15 +1073,23 @@ async function pollReminders() {
     addReminderMessage(check.task, check.say);
     sayAlert(check.task, check.say, `${assistantName()} is checking in`);
   }
+  onCall = '';
   applyState();
 }
 
 // Says a reminder, heads-up or check-in (and shows a notification when LightMoon is out of sight). Asleep (sleep.js),
 // it's kept back for the catch-up instead, unless it's urgent: then it speaks anyway.
+// On a call (busyWith), nothing is said: it shows as a notification and is said once the call is over.
+let onCall = '';
 function sayAlert(task, line, title) {
   const asleep = sleep.isAsleep();
   if (asleep && !sleep.isUrgentTask(task) && !lifeLevelling.urgentInLife(task?.ll_task_id)) {
     sleep.hold(line);
+    return;
+  }
+  if (onCall) {
+    heldForCall = [...heldForCall, { at: Date.now(), line }].slice(-20);
+    notify(title, line);
     return;
   }
   speaker.speak(asleep ? `Urgent. ${line}` : line, { force: true });
@@ -1988,9 +2050,11 @@ function tellPhoneAddress() {
 }
 
 // A meeting is starting soon, or a message came in, while LightMoon is on screen: say it here.
-function onPhoneSay({ say }) {
+async function onPhoneSay({ say }) {
   addMessage('reminder', say);
-  if (!listener.capturing) speaker.speak(say, { force: true }); // never talk over the user
+  if (listener.capturing) return; // never talk over the user
+  if (await busyWith()) heldForCall = [...heldForCall, { at: Date.now(), line: say }].slice(-20);
+  else speaker.speak(say, { force: true });
 }
 
 // The wake ({ wake, owner, panel }) when the app was opened (or brought back) because the phone heard its wake
@@ -2542,6 +2606,10 @@ function wireUp() {
     if (speaker.active) speaker.stop();
     if (listener.capturing) listener.cancelKeepingWords();
   });
+  // Escape (or the keyboard's volume-down key, where the browser sees it) stops LightMoon talking.
+  document.addEventListener('keydown', event => {
+    if (speaker.active && (event.key === 'Escape' || event.key === 'AudioVolumeDown')) silence();
+  });
   // Tapping anywhere on the stage (not a button or the box) stops LightMoon talking.
   $('.stage').addEventListener('click', event => {
     if (speaker.active && !event.target.closest('button, input, a, form, .msg')) speaker.stop();
@@ -2897,6 +2965,7 @@ function start({ auto = false } = {}) {
     // A wake or the morning call answered while LightMoon was already on screen (no visibility change to notice it).
     wakeWord?.addListener?.('wakeWaiting', () => { if (started && !locked) listenAfterWake(); });
     // Stop on the "Talking with you" notification: the conversation ends there.
+    phone.addListener('stopSpeaking', silence); // volume down (VolumeStop.java)
     wakeWord?.addListener?.('talkStopped', () => {
       listenWhenFree = false;
       speaker.stop();
@@ -2962,6 +3031,7 @@ function greet(auto) {
 function startDesktop() {
   desktop.start({
     onAnswer: (taskId, action, options) => { const reply = answerReminder(taskId, action, options); if (reply) note(reply); },
+    onStop: silence, // volume down on the laptop while LightMoon speaks (TrayMode.cs)
     onWake: (said = '') => {
       // Unused for the relock time (Settings): the PIN first, as when it comes back to the front.
       if (started && lockDue()) showLock();

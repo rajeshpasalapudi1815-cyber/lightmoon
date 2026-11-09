@@ -879,13 +879,21 @@ class OrbBridge
             return;
         }
         // LightMoon kept in the tray (TrayMode.cs): waiting for a wake, what it's doing, and asking for its window.
-        if (path == "/events" || path == "/state" || path == "/show" || path == "/hide" || path == "/listen")
+        if (path == "/events" || path == "/state" || path == "/show" || path == "/hide" || path == "/listen" || path == "/busy")
         {
             if (origin == null) { Send(stream, 403, null, null, false); return; }
             if (method == "GET" && path == "/events")
             {
-                bool woke = TrayMode.WaitForWake();
-                Send(stream, 200, origin, woke ? Json.Serialize(new Dictionary<string, object> { { "wake", true }, { "said", TrayMode.TakeSaid() } }) : "{}", false);
+                string happened = TrayMode.WaitForEvent();
+                string answer = happened == "wake" ? Json.Serialize(new Dictionary<string, object> { { "wake", true }, { "said", TrayMode.TakeSaid() } })
+                    : happened == "stop" ? Json.Serialize(new Dictionary<string, object> { { "stop", true } }) : "{}";
+                Send(stream, 200, origin, answer, false);
+                return;
+            }
+            if (method == "GET" && path == "/busy")
+            {
+                string by = TrayMode.MicrophoneUser();
+                Send(stream, 200, origin, Json.Serialize(new Dictionary<string, object> { { "busy", by != "" }, { "by", by } }), false);
                 return;
             }
             if (method == "POST" && path == "/state")

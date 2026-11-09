@@ -36,6 +36,7 @@ export function start(handlers) {
   begun = true;
   onAnswer = handlers.onAnswer;
   onWake = handlers.onWake ?? (() => {});
+  onStop = handlers.onStop ?? (() => {});
   waitForWakes();
   setInterval(() => { stateSent = ''; reportState(lastState); }, 30_000); // so the Listener knows it's still here
   store.onLocalChange(() => {
@@ -142,6 +143,7 @@ export async function notifications() {
 // doing goes back so a thin line can glow at the top of the screen.
 
 let onWake = () => {};
+let onStop = () => {}; // the volume-down key while LightMoon speaks
 let stateSent = '';
 
 // Waits on the Listener for a wake, again and again (a long request, answered when "LightMoon" is heard).
@@ -151,7 +153,8 @@ async function waitForWakes() {
       const res = await fetch(`${LISTENER_URL}/events`, { signal: AbortSignal.timeout(30000) });
       if (res.status === 404) return; // an older Listener: it wakes LightMoon by bringing it to the front
       const event = res.ok ? await res.json() : {};
-      if (event.wake) onWake(String(event.said ?? '')); // with what was said in the same breath, if anything
+      if (event.stop) onStop();
+      else if (event.wake) onWake(String(event.said ?? '')); // with what was said in the same breath, if anything
       else if (!res.ok) await new Promise(resolve => setTimeout(resolve, 15000));
     } catch {
       await new Promise(resolve => setTimeout(resolve, connected ? 2000 : 15000)); // the Listener isn't running
@@ -183,6 +186,20 @@ export const noteState = state => {
   lastState = state;
   reportState(state);
 };
+
+// Who else has this computer's microphone right now (a call in Teams, WhatsApp, Zoom or a browser): { busy, by }.
+// Not busy when the Listener isn't running or is too old to tell.
+export async function busy() {
+  if (!connected) return { busy: false, by: '' };
+  try {
+    const res = await fetch(`${LISTENER_URL}/busy`, { signal: AbortSignal.timeout(2500) });
+    if (!res.ok) return { busy: false, by: '' };
+    const { busy: inUse, by } = await res.json();
+    return { busy: Boolean(inUse), by: String(by ?? '') };
+  } catch {
+    return { busy: false, by: '' };
+  }
+}
 
 // Its window, for what needs the user (the lock screen).
 export function showWindow() {

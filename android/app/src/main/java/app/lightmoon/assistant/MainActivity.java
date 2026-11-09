@@ -5,6 +5,7 @@ import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.KeyEvent;
 import android.webkit.WebView;
 import androidx.activity.OnBackPressedCallback;
 import com.getcapacitor.BridgeActivity;
@@ -37,6 +38,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(OfflineBrainPlugin.class);
         registerPlugin(WorkAccountPlugin.class);
         super.onCreate(savedInstanceState);
+        VolumeStop.watch(this);
         WebView web = getBridge() == null ? null : getBridge().getWebView();
         if (web != null) web.setBackgroundColor(Color.TRANSPARENT); // the page paints its own background
         // The page keeps its full share of the phone while out of sight, so a conversation goes on with the screen
@@ -81,6 +83,16 @@ public class MainActivity extends BridgeActivity {
                 setEnabled(true);
             }
         });
+    }
+
+    // Volume down while LightMoon is speaking: it stops, and the volume stays as it was (VolumeStop).
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_DOWN && VolumeStop.anythingSpeaking()) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) VolumeStop.stopAll(this);
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     @Override
