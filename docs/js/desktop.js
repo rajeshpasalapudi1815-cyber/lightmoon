@@ -84,11 +84,16 @@ async function call(method, path, body) {
   return res.status === 204 ? null : res.json();
 }
 
-// Reminders and check-ins from half an hour ago on, when they've changed. With the app lock on, the orb says
-// "Reminder" instead of what it is, as notifications do.
+// Reminders and check-ins from half an hour ago up to an hour ahead, when they've changed: the orb stays a small
+// moon until something is near (a reminder further off would sit there all day as a long bar). This page keeps
+// sending, so each one reaches the orb as its hour comes. With the app lock on, the orb says "Reminder" instead
+// of what it is, as notifications do.
+const ORB_AHEAD_MS = 60 * 60 * 1000;
 async function sendAlerts() {
   const hide = lock.isEnabled();
+  const until = Date.now() + ORB_AHEAD_MS;
   const alerts = store.tasks.alertsSince(Date.now() - RECENT_MS)
+    .filter(({ at }) => at <= until)
     .map(({ id, title, at, say }) => (hide ? { id, title: 'Reminder', at, say: 'You have a reminder.' } : { id, title, at, say }));
   const json = JSON.stringify(alerts);
   if (json === sent && Date.now() - sentAt < RESEND_MS) return;
