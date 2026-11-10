@@ -76,6 +76,7 @@ static class LightMoonListener
             bridge.Start();
             ScreenReader.WatchNotifications(Log);
             TrayMode.Start(Folder, FindLightMoon, Log);
+            TrayMode.OnWakeKey = () => { Log("Ctrl+Alt+L pressed: waking LightMoon"); Wake(); };
             try { ownWake = Tidy(File.ReadAllText(OwnWakeFile)); } catch { }
             if (voice)
             {
@@ -308,6 +309,7 @@ static class LightMoonListener
         };
         menu.Items.Add(listenItem);
         menu.Items.Add("Show or hide LightMoon", null, (s, e) => TrayMode.Toggle(OpenLightMoon));
+        menu.Items.Add(new ToolStripMenuItem("Ctrl+Alt+L wakes LightMoon") { Enabled = false });
         var trayItem = new ToolStripMenuItem("Keep LightMoon in the tray") { CheckOnClick = true };
         trayItem.CheckedChanged += (s, e) => TrayMode.SetOn(trayItem.Checked);
         menu.Opening += (s, e) => trayItem.Checked = TrayMode.On;

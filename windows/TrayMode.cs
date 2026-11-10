@@ -10,6 +10,7 @@
 // The volume-down key stops LightMoon while it speaks (GET /events answers { stop }; the key is kept from Windows then,
 // so the volume stays as it was). GET /busy says whether another app (Teams, WhatsApp, a browser call) has the
 // microphone, so the page keeps scheduled things quiet during a call.
+// Ctrl+Alt+L wakes LightMoon from the keyboard, the same as saying its name (OnWakeKey), even with the wake word paused.
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -38,6 +39,10 @@ static class TrayMode
     static KeyHook keyHook; // kept, so it isn't collected while Windows still calls it
     static IntPtr keyHookHandle = IntPtr.Zero;
     const int VolumeDown = 0xAE;
+    const int KeyL = 0x4C;
+    public static Action OnWakeKey; // set by the Listener: wakes LightMoon as the wake word does
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+    static bool Down(int key) { return (GetAsyncKeyState(key) & 0x8000) != 0; }
 
     // Where the window was before it was put out of sight, to show it there again.
     static readonly Dictionary<IntPtr, Rectangle> placeOf = new Dictionary<IntPtr, Rectangle>();
@@ -68,6 +73,17 @@ static class TrayMode
     // speaking: it stops, and the key goes no further.
     static IntPtr KeyPressed(int code, IntPtr message, IntPtr data)
     {
+        // Ctrl+Alt+L (not with Shift or Windows): wake. Kept from the app in front, and acted on away from the hook.
+        if (code >= 0 && Marshal.ReadInt32(data) == KeyL && Down(0x11) && Down(0x12) && !Down(0x10) && !Down(0x5B) && !Down(0x5C))
+        {
+            int kind = message.ToInt32();
+            if ((kind == 0x100 || kind == 0x104) && OnWakeKey != null)
+            {
+                Action wake = OnWakeKey;
+                ThreadPool.QueueUserWorkItem(_ => { try { wake(); } catch (Exception) { } });
+            }
+            return (IntPtr)1;
+        }
         if (code >= 0 && Marshal.ReadInt32(data) == VolumeDown && pageState == "speaking" && DateTime.Now - pageSeen < TimeSpan.FromSeconds(90))
         {
             int kind = message.ToInt32();
