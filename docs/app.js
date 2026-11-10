@@ -2902,6 +2902,7 @@ function wireUp() {
   // On the laptop, LightMoon's own window (not a browser tab) is kept small, in the bottom-right corner, when it shows.
 function smallWindow() {
   if (window.Capacitor?.isNativePlatform?.() || window.locationbar?.visible !== false || screen.availWidth < 900) return;
+  document.documentElement.classList.add('laptop-small');
   const fit = () => {
     if (window.screenX < -5000 || window.outerWidth <= 480) return;
     const w = 440, h = Math.min(700, screen.availHeight - 40);

@@ -416,7 +416,7 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
 /* ---------- Voice view: the conversation is kept, but shown only when asked for ---------- */
 body:not(.show-chat) .transcript { display: none; }
 body:not(.show-chat) .core-wrap { flex: 1; justify-content: center; gap: 14px; }
-body:not(.show-chat) .reactor:not(.reactor-lg) { width: 320px; height: 160px; }
+body:not(.show-chat) .reactor:not(.reactor-lg) { width: 220px; height: 110px; }
 .caption { margin: 0; max-width: 32em; min-height: 1.4em; padding: 0 8px; text-align: center; font-size: 15px; color: var(--muted); }
 .caption.reminder { color: var(--amber); }
 .caption.error { color: var(--danger); }
@@ -429,6 +429,10 @@ body:not(.show-chat) .reactor:not(.reactor-lg) { width: 320px; height: 160px; }
 @media (max-width: 860px) {
   body:not(.show-chat) .reactor:not(.reactor-lg) { width: min(280px, 80vw); height: min(140px, 40vw); }
 }
+/* The laptop's small window (app.js smallWindow): small eyes, so the words have the room. */
+html.laptop-small body:not(.show-chat) .reactor:not(.reactor-lg) { width: 140px; height: 70px; }
+html.laptop-small .reactor:not(.reactor-lg) { width: 100px; height: 50px; }
+html.laptop-small body:not(.show-chat) .core-wrap { gap: 10px; }
 @media (max-width: 420px) {
   .topbar-right { gap: 5px; }
   .topbar .icon-btn { width: 34px; height: 34px; }
