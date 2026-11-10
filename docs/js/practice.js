@@ -95,3 +95,39 @@ export function practiceHistory(all, since) {
     .slice(-HISTORY_TURNS)
     .map(({ role, content }) => ({ role, content }));
 }
+
+// ---------- Is this English? ----------
+// While practising, listening is in the practice language, so English they speak to LightMoon ("how to say it's a
+// good product") arrives in that language's letters: "हाउ टू से दैट इट इज़ अ गुड प्रोडक्ट". Those are questions and
+// instructions for the tutor, never practice to correct. Hindi with a few English words in it ("प्रोडक्ट अच्छा है")
+// is practice. Typed English in English letters counts too; Hindi typed in English letters ("aap kaise ho") doesn't.
+const ENGLISH_IN_DEVANAGARI = new Set(`हाउ व्हाट वाट व्हॉट व्हेन वेन व्हेयर वेयर व्हाई वाय व्हिच हू टू टु द दी एन इज आर एम आई यू यु मी माय वी दे देयर दैट दिस इट इट्स
+  कैन कैन्ट कुड वुड शुड विल डू डोंट डज डिड नॉट नोट यस से सेइंग सेड सेज टेल एक्सप्लेन एक्सप्लेनेशन इंग्लिश लैंग्वेज प्लीज करेक्ट करेक्टिंग करेक्शन
+  मिस्टेक मिस्टेक्स रॉन्ग रोंग राइट मीन मीनिंग मीन्स वर्ड वर्ड्स सेंटेंस स्लो स्लोली स्लोअर ईजी इजी ईजियर अगेन रिपीट अंडरस्टैंड अंडरस्टूड गुड बैड
+  प्रोडक्ट लाइक वांट नीड नो थैंक थैंक्स थैंक्यू सो बट एंड ऑर विद फॉर ऑफ ऑन एट अबाउट ट्रांसलेट हेल्प स्पीक स्पीकिंग टॉक लर्न टीच लेसन
+  क्वेश्चन आंसर ओके ओकाय वेरी मच मोर लेस हाउस सिंपल सिंपलर इन्स्टेड यूज यूजिंग गिव गिव्स एग्जांपल एक्जांपल शो मेक इंस्टेड बिफोर आफ्टर`
+  .split(/\s+/).filter(Boolean));
+const ENGLISH_STARTS = /^(?:हाउ (?:टू|टु|डू|कैन|शुड|आई|डज|इज|आर)|व्हाट (?:इज|इज़|डज|डू|आर)|वाट (?:इज|डज)|कैन यू|प्लीज|एक्सप्लेन|टेल मी)/;
+const ENGLISH_WORDS_LATIN = /\b(?:the|is|are|to|how|what|why|when|where|which|i|you|me|my|it|this|that|do|does|can|please|explain|say|mean|meaning|word|in|of|and|correct|wrong|english)\b/gi;
+
+export function spokenEnglish(text) {
+  const said = String(text ?? '').normalize('NFC').replace(/\u093C/g, '').trim(); // nukta off: इज़ = इज
+  if (!said) return false;
+  const latin = (said.match(/[a-z]/gi) ?? []).length;
+  const indic = (said.match(/[\u0900-\u0DFF]/g) ?? []).length;
+  if (latin > indic * 2) {
+    const words = said.split(/\s+/).length;
+    return (said.match(ENGLISH_WORDS_LATIN) ?? []).length >= Math.max(1, Math.ceil(words * 0.3));
+  }
+  if (ENGLISH_STARTS.test(said)) return true;
+  const tokens = said.split(/[\s,.?!।]+/).filter(Boolean);
+  const english = tokens.filter(token => ENGLISH_IN_DEVANAGARI.has(token)).length;
+  return tokens.length > 0 && english >= 2 && english / tokens.length >= 0.5;
+}
+
+// The note added to a practice turn whose message was English.
+export const englishNote = (text, lang) => `Their last message ("${String(text).slice(0, 200)}") is English, `
+  + `${/[a-z]/i.test(text) ? '' : `written in ${PRACTICE_LANGUAGES[lang].name} letters by the speech recogniser, `}`
+  + `so it is a question or instruction for you, not ${PRACTICE_LANGUAGES[lang].name} practice. Do NOT correct it or start with "Correction". `
+  + `Work out what they asked by how it sounds, answer it in English (give any ${PRACTICE_LANGUAGES[lang].name} they asked for, with how to say it in ⟨ ⟩), `
+  + `ask them to say it back, and follow any instruction for the rest of the practice.`;

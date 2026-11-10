@@ -11,7 +11,7 @@ import { learnFrom, answerLocally } from './learning.js';
 import { answerOffline } from './offline.js';
 import { saidAgain } from './hearing.js';
 import { askClaude, CLAUDE_MODEL } from './claude.js';
-import { practice, practiceWanted, practiceEnds, startPractice, endPractice, practicePrompt, practiceHistory, PRACTICE_LANGUAGES } from './practice.js';
+import { practice, practiceWanted, practiceEnds, startPractice, endPractice, practicePrompt, practiceHistory, PRACTICE_LANGUAGES, spokenEnglish, englishNote } from './practice.js';
 
 const HISTORY_LIMIT = 8;
 const OLD_MESSAGE_CHARS = 400; // older messages are cut short: every request counts against the free tier's tokens per minute
@@ -93,7 +93,7 @@ export async function chat(text, { onText, heardAlso = [], shared = '' } = {}) {
     return finish(reply, []);
   }
   const wanted = practiceWanted(text);
-  if (wanted || practising) return practiseWith(wanted && wanted !== practising?.lang ? startPractice(wanted) : practising ?? startPractice(wanted), { onText, fresh: Boolean(wanted) });
+  if (wanted || practising) return practiseWith(wanted && wanted !== practising?.lang ? startPractice(wanted) : practising ?? startPractice(wanted), { onText, fresh: Boolean(wanted), said: wanted ? '' : text });
   const quick = await quickReply(text).catch(() => null); // "send it" after a draft: no AI needed
   if (quick) {
     onText?.(quick.reply);
@@ -234,11 +234,13 @@ export async function weeklyLetter({ facts, buddy = '', onText } = {}) {
 
 const systemMessage = focus => ({ role: 'system', content: buildSystemPrompt({ focus }) });
 // One turn of language practice: the tutor prompt and the practice so far, nothing else.
-async function practiseWith(going, { onText, fresh }) {
+async function practiseWith(going, { onText, fresh, said = '' }) {
   const convo = [
     { role: 'system', content: practicePrompt({ lang: going.lang, name: profile().userName, firstTurn: fresh }) },
     ...practiceHistory(messages.recent(40), going.since),
   ];
+  // English, maybe in Hindi letters ("how do I say..."): the tutor is told plainly to answer it, not correct it.
+  if (said && spokenEnglish(said)) convo.push({ role: 'system', content: englishNote(said, going.lang) });
   const written = [];
   try {
     const reply = await complete(convo, null, delta => { written.push(delta); onText?.(delta); });

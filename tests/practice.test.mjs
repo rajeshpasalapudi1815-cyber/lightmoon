@@ -63,4 +63,20 @@ test('how to say it is shown, not spoken', () => {
   assert.equal(forSpeech('आप कैसे हैं? ⟨aap kaise hain?⟩'), 'आप कैसे हैं?');
 });
 
+
+test('English to the tutor is noticed, even in Hindi letters', () => {
+  for (const said of ['हाउ टू से दैट इट इज़ अ गुड प्रोडक्ट', 'हाउ टू से इट इज अ गुड प्रोडक्ट', 'व्हेन यू आर करेक्टिंग मी एक्सप्लेन इन इंग्लिश',
+    'व्हाट इज द मीनिंग ऑफ अच्छा', 'प्लीज स्पीक स्लोली', 'आई डोंट अंडरस्टैंड', 'how to say that it is a good product',
+    'explain it in English please', 'what does kaise mean']) {
+    assert.ok(p.spokenEnglish(said), said);
+  }
+});
+
+test('Hindi practice, even with English words in it, is not', () => {
+  for (const said of ['मैं ठीक हूँ, आप कैसा है?', 'यह प्रोडक्ट बहुत अच्छा है', 'मेरा ऑफिस दूर है', 'मैंने आज मीटिंग में बात की',
+    'aap kaise ho', 'mera naam Rajesh hai', 'इस प्रोडक्ट का दाम क्या है']) {
+    assert.ok(!p.spokenEnglish(said), said);
+  }
+});
+
 if (failed) { console.log(`${failed} failed`); process.exit(1); }
