@@ -54,6 +54,7 @@ export function forSpeech(text, sayAs = {}) {
   const lines = sayTheirWay(String(text ?? ''), sayAs)
     // Emoji and the invisible characters that join or colour them.
     .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}‍︎️⃣]/gu, '')
+    .replace(/⟨[^⟩]*⟩/g, '') // how to say it, in English letters (language practice): shown, not said
     .replace(/```[\s\S]*?```/g, '\n')
     .replace(/`([^`]*)`/g, '$1')
     .replace(/!?\[([^\]]+)\]\([^)]+\)/g, '$1')

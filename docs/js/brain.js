@@ -1,6 +1,6 @@
 // The brain: sends the conversation straight from this device to an OpenAI-compatible chat API
 // (Groq by default), streams the reply back as it is written, and runs any tools the model asks for.
-import { aiConfig, messages, DEFAULT_AI, SPARE_MODEL } from './store.js';
+import { aiConfig, messages, DEFAULT_AI, SPARE_MODEL, profile } from './store.js';
 import { buildSystemPrompt } from './prompt.js';
 import { toolsFor, LOAD_TOOLS, runTool, quickReply, startTurn, NOT_ASKED } from './tools.js';
 import { report } from './problems.js';
@@ -11,6 +11,7 @@ import { learnFrom, answerLocally } from './learning.js';
 import { answerOffline } from './offline.js';
 import { saidAgain } from './hearing.js';
 import { askClaude, CLAUDE_MODEL } from './claude.js';
+import { practice, practiceWanted, practiceEnds, startPractice, endPractice, practicePrompt, practiceHistory, PRACTICE_LANGUAGES } from './practice.js';
 
 const HISTORY_LIMIT = 8;
 const OLD_MESSAGE_CHARS = 400; // older messages are cut short: every request counts against the free tier's tokens per minute
@@ -83,6 +84,16 @@ export async function chat(text, { onText, heardAlso = [], shared = '' } = {}) {
   const before = messages.recent(3).filter(m => m.role === 'user').at(-1);
   messages.add('user', shared ? `${text}\n(They shared something with this.)` : text);
   startTurn(shared);
+  // Language practice (practice.js): a conversation of its own, with no tools and a small prompt.
+  const practising = practice();
+  if (practising && practiceEnds(text)) {
+    endPractice();
+    const reply = `Good practice today. We'll stop the ${PRACTICE_LANGUAGES[practising.lang].name} here; say "practise ${PRACTICE_LANGUAGES[practising.lang].name}" any time to carry on.`;
+    onText?.(reply);
+    return finish(reply, []);
+  }
+  const wanted = practiceWanted(text);
+  if (wanted || practising) return practiseWith(wanted && wanted !== practising?.lang ? startPractice(wanted) : practising ?? startPractice(wanted), { onText, fresh: Boolean(wanted) });
   const quick = await quickReply(text).catch(() => null); // "send it" after a draft: no AI needed
   if (quick) {
     onText?.(quick.reply);
@@ -222,6 +233,21 @@ export async function weeklyLetter({ facts, buddy = '', onText } = {}) {
 }
 
 const systemMessage = focus => ({ role: 'system', content: buildSystemPrompt({ focus }) });
+// One turn of language practice: the tutor prompt and the practice so far, nothing else.
+async function practiseWith(going, { onText, fresh }) {
+  const convo = [
+    { role: 'system', content: practicePrompt({ lang: going.lang, name: profile().userName, firstTurn: fresh }) },
+    ...practiceHistory(messages.recent(40), going.since),
+  ];
+  const written = [];
+  try {
+    const reply = await complete(convo, null, delta => { written.push(delta); onText?.(delta); });
+    return finish(reply?.content || written.join(''), []);
+  } catch (err) {
+    return failure(err);
+  }
+}
+
 const recentHistory = () => messages.recent(HISTORY_LIMIT).map(({ role, content }, i, all) => ({
   role,
   content: i < all.length - 2 && content.length > OLD_MESSAGE_CHARS ? `${content.slice(0, OLD_MESSAGE_CHARS)}...` : content,

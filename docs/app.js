@@ -3,6 +3,7 @@
 import { isNativeApp, nativeAlarms, wakeWord, fileSaver, phone, workAccount } from './js/native.js'; // first: sets up voice in the Android app
 import { refresh as refreshPhone, onSpendLogged, onTaskDone } from './js/phone.js';
 import * as store from './js/store.js';
+import { practiceListening } from './js/practice.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
 import * as cloud from './js/cloud.js';
@@ -69,7 +70,8 @@ let audioCtx = null;
 // ---------- Small helpers ----------
 
 // What to listen in: Telugu when they asked LightMoon to talk Telugu (on any device), else this device's choice.
-const listenLang = () => listeningLanguage(store.settings.get('talk_language'), prefs.lang);
+// While practising a language (practice.js), listen in that language.
+const listenLang = () => practiceListening() ?? listeningLanguage(store.settings.get('talk_language'), prefs.lang);
 
 function loadPrefs() {
   const inIndia = /^Asia\/(Kolkata|Calcutta)$/.test(Intl.DateTimeFormat().resolvedOptions().timeZone);
