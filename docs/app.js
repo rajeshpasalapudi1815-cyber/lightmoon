@@ -1273,6 +1273,9 @@ function renderTasks() {
   const count = $('#taskCount');
   count.textContent = state.tasks.length;
   count.hidden = !state.tasks.length;
+  const badge = $('#tasksBadge');
+  badge.textContent = state.tasks.length > 99 ? '99+' : state.tasks.length;
+  badge.hidden = !state.tasks.length;
   if (!state.tasks.length) list.append(el('li', 'empty', 'No open tasks. Try: "Remind me to call Mom at 6 pm."'));
 
   for (const task of state.tasks) {
@@ -2631,7 +2634,17 @@ function wireUp() {
   $('#micBtn').addEventListener('click', () => listener.pushToTalk());
   $('#handsFreeBtn').addEventListener('click', toggleHandsFree);
   $('#settingsBtn').addEventListener('click', openSettings);
-  $('#panelsBtn').addEventListener('click', () => $('#panels').classList.toggle('open'));
+  const showPanels = on => {
+    $('#panels').classList.toggle('open', on);
+    $('#panelsBtn').setAttribute('aria-pressed', String(on));
+  };
+  $('#panelsBtn').addEventListener('click', () => showPanels(!$('#panels').classList.contains('open')));
+  // A click anywhere else, or Escape, puts the lists away again.
+  document.addEventListener('click', event => {
+    if ($('#panels').classList.contains('open') && !event.target.closest('#panels, #panelsBtn, dialog')) showPanels(false);
+  });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') showPanels(false); });
+  smallWindow();
   $('#settingsForm').addEventListener('submit', saveSettings);
   $('#cancelSettings').addEventListener('click', () => $('#settings').close());
   for (const item of $$('.menu-item')) item.addEventListener('click', () => openSettingsPage(item.dataset.page));
@@ -2880,7 +2893,29 @@ function wireUp() {
     }
   });
 
-  // Phones pause background apps, so catch up on reminders when LightMoon comes back to the front,
+  // On the laptop, LightMoon's own window (not a browser tab) is kept small, in the bottom-right corner, when it shows.
+function smallWindow() {
+  if (window.Capacitor?.isNativePlatform?.() || window.locationbar?.visible !== false || screen.availWidth < 900) return;
+  const fit = () => {
+    if (window.screenX < -5000 || window.outerWidth <= 480) return;
+    const w = 440, h = Math.min(700, screen.availHeight - 40);
+    try {
+      window.resizeTo(w, h);
+      window.moveTo((screen.availLeft ?? 0) + screen.availWidth - w - 16, (screen.availTop ?? 0) + screen.availHeight - h - 16);
+    } catch { /* the browser said no: leave it as it is */ }
+  };
+  fit();
+  // Brought back from the tray (the Listener parks the window far off-screen): small again. Resized bigger while
+  // showing, it stays as they made it.
+  let away = window.screenX < -5000;
+  setInterval(() => {
+    const now = window.screenX < -5000;
+    if (away && !now) fit();
+    away = now;
+  }, 1000);
+}
+
+// Phones pause background apps, so catch up on reminders when LightMoon comes back to the front,
   // and ask for the PIN or fingerprint again after a while away.
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && $('#settings').open) {

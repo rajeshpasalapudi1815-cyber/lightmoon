@@ -242,7 +242,12 @@ body.offline .brand-dot { background: var(--danger); box-shadow: 0 0 10px var(--
 .icon-btn svg { width: 18px; height: 18px; }
 .only-mobile { display: none; }
 
-.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; }
+/* Tasks, goals, notes and memory stay out of sight until the list button is pressed, on every screen. */
+.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+#panelsBtn { position: relative; }
+#panelsBtn[aria-pressed='true'] { color: var(--cyan); border-color: var(--cyan); }
+.badge { position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px;
+  font: 700 10px/17px var(--body); text-align: center; background: var(--cyan); color: #02050a; }
 
 .stage {
   display: flex;
@@ -287,7 +292,13 @@ body[data-state='thinking'] .status, body[data-state='speaking'] .status { color
 body[data-state='listening'] .mic { color: var(--amber); border-color: var(--amber); }
 
 /* ---------- Side panels ---------- */
-.panels { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--panel); }
+.panels {
+  display: flex; flex-direction: column; min-height: 0;
+  position: fixed; top: 59px; right: 0; bottom: 0; z-index: 20; width: min(380px, 100%);
+  background: var(--panel-solid); border-left: 1px solid var(--line);
+  transform: translateX(100%); visibility: hidden; transition: transform 0.25s ease, visibility 0.25s;
+}
+.panels.open { transform: none; visibility: visible; box-shadow: -20px 0 40px rgba(0, 0, 0, 0.5); }
 .tabs { display: flex; border-bottom: 1px solid var(--line); }
 .tabs button {
   flex: 1;
@@ -345,27 +356,12 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
 
 /* ---------- Phones and small windows ---------- */
 @media (max-width: 860px) {
-  .layout { grid-template-columns: 1fr; }
-  .only-mobile { display: inline-grid; }
   .clock { display: none; }
   .topbar { padding: 10px 16px; }
   .stage { padding: 10px 16px 16px; }
   .reactor { width: 150px; height: 75px; }
   .reactor-lg { width: 260px; height: 130px; }
   .msg { max-width: 92%; }
-  .panels {
-    position: fixed;
-    top: 59px;
-    right: 0;
-    bottom: 0;
-    z-index: 20;
-    width: min(380px, 100%);
-    background: var(--panel-solid);
-    border-left: 1px solid var(--line);
-    transform: translateX(100%);
-    transition: transform 0.25s ease;
-  }
-  .panels.open { transform: none; box-shadow: -20px 0 40px rgba(0, 0, 0, 0.5); }
 }
 
 @media (max-width: 420px) {
