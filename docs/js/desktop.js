@@ -181,11 +181,12 @@ export function reportState(state) {
 let lastState = 'idle';
 let problem = ''; // the page's latest trouble (a voice error), for the Listener's log
 
+// Sent once, then cleared, so each line in the Listener's log is a new failure rather than the same one repeated.
 export function notePageProblem(text) {
-  if (text === problem) return;
-  problem = text;
+  problem = `${new Date().toLocaleTimeString()} ${text}`;
   stateSent = '';
   reportState(lastState);
+  problem = '';
 }
 export const noteState = state => {
   lastState = state;

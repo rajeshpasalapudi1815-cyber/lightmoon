@@ -2651,6 +2651,7 @@ function wireUp() {
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') showPanels(false); });
   smallWindow();
+  oneLightMoon();
   $('#settingsForm').addEventListener('submit', saveSettings);
   $('#cancelSettings').addEventListener('click', () => $('#settings').close());
   for (const item of $$('.menu-item')) item.addEventListener('click', () => openSettingsPage(item.dataset.page));
@@ -2899,7 +2900,23 @@ function wireUp() {
     }
   });
 
-  // On the laptop, LightMoon's own window (not a browser tab) is kept small, in the bottom-right corner, when it shows.
+  // Only one LightMoon on this computer at a time: two would both listen, answer and speak over each other. The one
+// opened last carries on; any older one stops talking and closes (or goes blank if the browser won't close it).
+function oneLightMoon() {
+  if (isNativeApp || !('BroadcastChannel' in window)) return;
+  const me = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const channel = new BroadcastChannel('lightmoon-one');
+  channel.onmessage = ({ data }) => {
+    if (data?.type !== 'here' || data.id === me) return;
+    channel.close();
+    try { speaker.stop(); } catch { /* not started yet */ }
+    window.close();
+    setTimeout(() => location.replace('about:blank'), 300);
+  };
+  channel.postMessage({ type: 'here', id: me });
+}
+
+// On the laptop, LightMoon's own window (not a browser tab) is kept small, in the bottom-right corner, when it shows.
 function smallWindow() {
   if (window.Capacitor?.isNativePlatform?.() || window.locationbar?.visible !== false || screen.availWidth < 900) return;
   document.documentElement.classList.add('laptop-small');
