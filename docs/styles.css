@@ -364,9 +364,11 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
   .msg { max-width: 92%; }
 }
 
-@media (max-width: 420px) {
-  .brand { font-size: 17px; letter-spacing: 0.22em; }
+@media (max-width: 520px) {
+  .brand { font-size: 16px; letter-spacing: 0.18em; }
   .chip-btn { padding: 6px 9px; font-size: 12px; }
+  .topbar-right { gap: 6px; }
+  .topbar .icon-btn { width: 36px; height: 36px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -394,7 +396,7 @@ dialog h2 { margin: 0; font: 700 20px var(--hud); letter-spacing: 0.2em; text-tr
   .panels { top: calc(59px + env(safe-area-inset-top)); }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 520px) {
   .wide-only { display: none; }
 }
 
@@ -418,6 +420,9 @@ body:not(.show-chat) .reactor:not(.reactor-lg) { width: 320px; height: 160px; }
 .caption { margin: 0; max-width: 32em; min-height: 1.4em; padding: 0 8px; text-align: center; font-size: 15px; color: var(--muted); }
 .caption.reminder { color: var(--amber); }
 .caption.error { color: var(--danger); }
+.caption.said { color: var(--text); }
+.caption.heard { color: var(--muted); font-style: italic; }
+.caption { max-height: 9.5em; overflow-y: auto; }
 #chatBtn { position: relative; }
 #chatBtn[aria-pressed='true'] { color: var(--cyan); border-color: var(--cyan); }
 .unread { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }

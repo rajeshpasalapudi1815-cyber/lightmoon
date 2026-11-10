@@ -235,8 +235,11 @@ function showCaption(text, kind = '') {
   const caption = $('#caption');
   caption.textContent = text;
   caption.className = `caption ${kind}`;
+  caption.scrollTop = 0;
   clearTimeout(captionTimer);
-  captionTimer = setTimeout(() => { caption.textContent = ''; }, CAPTION_MS);
+  // Long enough to read along while it is spoken (about 2.5 words a second).
+  const words = String(text).split(/\s+/).length;
+  captionTimer = setTimeout(() => { caption.textContent = ''; }, Math.max(CAPTION_MS, words * 420 + 4000));
 }
 
 // `fromHistory`: shown again on start-up, not something new.
@@ -259,6 +262,9 @@ function addMessage(kind, text, actions = [], { fromHistory = false, spoken = fa
   if (!fromHistory && !chatOpen()) {
     $('#chatUnread').hidden = false;
     if (kind === 'system' || kind === 'reminder') showCaption(text, kind);
+    // With the conversation closed, the words still show: what it heard, then what it says.
+    if (kind === 'user') showCaption(`You: ${text}`, 'heard');
+    if (kind === 'assistant') showCaption(text, 'said');
     if (kind.includes('error')) showCaption(text, 'error');
   }
   return node;
