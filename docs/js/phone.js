@@ -56,6 +56,40 @@ async function load() {
   seen = { events, calls, messages, battery, steps, mail, sends, at: now };
   autoLogSpends(messages).catch(() => {});
   finishCallTasks(calls);
+  shareInbox();
+}
+
+// ---------- The phone's messages, for the laptop ----------
+// "Read my phone notifications" asked of LightMoon on the laptop: the phone keeps a short list of its latest messages
+// and missed calls in the synced settings (encrypted with the sync code, like everything else), each time it looks.
+// Work apps and one-time codes are left out, as they are here.
+const WORK = /\b(teams|outlook|sarasamerica|arogya360)\b/i;
+const INBOX_KEY = 'phone_inbox';
+function shareInbox() {
+  const messages = seen.messages
+    .filter(m => !WORK.test(`${m.app ?? ''} ${m.account ?? ''} ${m.from ?? ''}`))
+    .slice(-25)
+    .map(m => `${clock(m.at)} ${source(m)}: "${shareable(m.text)}"`);
+  const missed = seen.calls
+    .filter(c => c.type === 'missed' && !calledSince(c))
+    .slice(-10)
+    .map(c => `${clock(c.at)} missed call from ${who(c)}`);
+  const lines = [...messages, ...missed];
+  const before = settings.get(INBOX_KEY);
+  let old = [];
+  try { old = JSON.parse(before || '{}').lines ?? []; } catch { /* first time */ }
+  if (JSON.stringify(old) === JSON.stringify(lines)) return;
+  settings.set(INBOX_KEY, JSON.stringify({ at: Date.now(), lines }));
+}
+
+// On the laptop: what the phone last shared. -> { at, lines } or null.
+export function phoneInbox() {
+  try {
+    const inbox = JSON.parse(settings.get(INBOX_KEY) || 'null');
+    return inbox && Array.isArray(inbox.lines) ? inbox : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------- "Call Srinivas back" ticks itself off once they've talked ----------

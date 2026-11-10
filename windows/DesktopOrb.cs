@@ -850,6 +850,32 @@ class OrbBridge
             Send(stream, 200, origin, Json.Serialize(new Dictionary<string, object> { { "result", outcome } }), false);
             return;
         }
+        // Apps on this computer (DesktopApps.cs): open one by name (POST /launch {name}), and the box they were typing
+        // in at the wake word: what's in it (GET /typed) and a better version put back (POST /typed {text}).
+        if (path == "/launch" || path == "/typed")
+        {
+            if (origin == null) { Send(stream, 403, null, null, false); return; }
+            if (method == "GET" && path == "/typed") { Send(stream, 200, origin, Json.Serialize(DesktopApps.Typed()), false); return; }
+            Dictionary<string, object> asked = null;
+            try { asked = Json.DeserializeObject(Encoding.UTF8.GetString(body)) as Dictionary<string, object>; }
+            catch (Exception) { }
+            if (method != "POST" || asked == null) { Send(stream, 400, origin, null, false); return; }
+            if (path == "/launch")
+            {
+                string name = asked.ContainsKey("name") ? Convert.ToString(asked["name"]) : "";
+                var opened = DesktopApps.Launch(name);
+                log("open app \"" + name + "\": " + (opened.ContainsKey("opened") ? Convert.ToString(opened["opened"]) : ""));
+                Send(stream, 200, origin, Json.Serialize(opened), false);
+                return;
+            }
+            string words = asked.ContainsKey("text") ? Convert.ToString(asked["text"]) : "";
+            if (words.Trim().Length == 0 || words.Length > 8000) { Send(stream, 400, origin, null, false); return; }
+            string outcome = "gone";
+            ui.Send(_ => outcome = DesktopApps.Replace(words), null);
+            log("improved typing: " + outcome);
+            Send(stream, 200, origin, Json.Serialize(new Dictionary<string, object> { { "result", outcome } }), false);
+            return;
+        }
         if (method == "POST" && (path == "/open" || path == "/media"))
         {
             if (origin == null) { Send(stream, 403, null, null, false); return; }

@@ -201,6 +201,25 @@ export async function busy() {
   }
 }
 
+// ---------- Apps and typing (windows/DesktopApps.cs) ----------
+
+async function ask(method, path, body, ms = 12000) {
+  if (!connected) throw new Error('The LightMoon Listener is not running on this computer. Ask them to start it.');
+  const res = await fetch(`${LISTENER_URL}${path}`, {
+    method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(ms),
+  });
+  if (res.status === 404) throw new Error('The LightMoon Listener on this computer is too old for that: it needs updating.');
+  if (!res.ok) throw new Error(`LightMoon Listener: ${res.status}`);
+  return res.json();
+}
+
+// Opens an app from the Start menu by name: { opened } or { opened: '', like: [names] }.
+export const launchApp = name => ask('POST', '/launch', { name });
+// What's written in the box they were typing in when they said the wake word: { found, app, text, why }.
+export const typedText = () => ask('GET', '/typed');
+// Puts a new version in that box: { result: 'replaced' | 'gone' | 'not in front' | 'work' }.
+export const replaceTyped = text => ask('POST', '/typed', { text });
+
 // Its window, for what needs the user (the lock screen).
 export function showWindow() {
   fetch(`${LISTENER_URL}/show`, { method: 'POST', signal: AbortSignal.timeout(3000) }).catch(() => {});

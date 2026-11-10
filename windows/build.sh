@@ -19,5 +19,5 @@ wpf="$WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF" # UI Automation, for read
   -win32icon:"$(cygpath -w "$here/lightmoon.ico")" \
   -r:"$(cygpath -w "$speech")" -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll \
   -r:"$(cygpath -w "$wpf/UIAutomationClient.dll")" -r:"$(cygpath -w "$wpf/UIAutomationTypes.dll")" -r:"$(cygpath -w "$wpf/WindowsBase.dll")" \
-  "$(cygpath -w "$here/LightMoonListener.cs")" "$(cygpath -w "$here/DesktopOrb.cs")" "$(cygpath -w "$here/ScreenReader.cs")" "$(cygpath -w "$here/NotificationStore.cs")" "$(cygpath -w "$here/TrayMode.cs")"
+  "$(cygpath -w "$here/LightMoonListener.cs")" "$(cygpath -w "$here/DesktopOrb.cs")" "$(cygpath -w "$here/ScreenReader.cs")" "$(cygpath -w "$here/NotificationStore.cs")" "$(cygpath -w "$here/TrayMode.cs")" "$(cygpath -w "$here/DesktopApps.cs")"
 echo "built: $out/LightMoon Listener.exe"

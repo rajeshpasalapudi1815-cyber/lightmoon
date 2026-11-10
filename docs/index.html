@@ -35,7 +35,9 @@
           <option value="ma'am">Ma'am</option>
           <option value="boss">Boss</option>
           <option value="name">By my name</option>
+          <option value="other">Something else…</option>
         </select>
+        <input name="addressOther" maxlength="30" placeholder="e.g. Chief, Rajesh garu, Anna" hidden>
       </label>
       <label id="keyField">Groq API key
         <input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_...">
@@ -226,7 +228,10 @@
                 <option value="ma'am">Ma'am</option>
                 <option value="boss">Boss</option>
                 <option value="name">By my name</option>
+                <option value="other">Something else…</option>
               </select>
+              <input name="addressOther" maxlength="30" placeholder="e.g. Chief, Rajesh garu, Anna" hidden>
+              <small>Or just tell LightMoon: "call me Chief".</small>
             </label>
             <label>Assistant name <input name="assistantName" maxlength="30"><small>What it calls itself. The wake phrases always say "LightMoon".</small></label>
             <label>Look

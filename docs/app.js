@@ -142,6 +142,20 @@ function el(tag, className, text) {
 
 const assistantName = () => state?.profile.assistantName || 'LightMoon';
 
+// The "Address me as" choice: Sir, Ma'am, Boss, by name, or any word they type ("Something else…").
+const ADDRESS_CHOICES = ['sir', "ma'am", 'boss', 'name'];
+function showAddress(fields, address) {
+  const own = !ADDRESS_CHOICES.includes(address);
+  fields.address.value = own ? 'other' : address;
+  fields.addressOther.value = own ? address : '';
+  fields.addressOther.hidden = !own;
+  fields.address.onchange = () => {
+    fields.addressOther.hidden = fields.address.value !== 'other';
+    if (!fields.addressOther.hidden) fields.addressOther.focus();
+  };
+}
+const chosenAddress = fields => (fields.address.value === 'other' ? fields.addressOther.value.trim() || 'sir' : fields.address.value);
+
 function addressWord() {
   const p = state?.profile;
   if (!p) return 'sir';
@@ -1423,7 +1437,7 @@ function fillAiFields(fields, ai) {
 function openSettings() {
   const fields = $('#settingsForm').elements;
   fields.userName.value = state.profile.userName;
-  fields.address.value = state.profile.address;
+  showAddress(fields, state.profile.address);
   fields.look.value = prefs.look;
   fields.assistantName.value = state.profile.assistantName;
   fields.rate.value = prefs.rate;
@@ -2510,7 +2524,7 @@ function saveSettings(event) {
   const account = fields.calendarAccount.value.trim().toLowerCase();
   if (!account || (/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(account) && !/sarasamerica|arogya360/.test(account))) synced('calendar_account', account);
   else note('That account can’t be used for meetings.');
-  store.saveProfile({ userName: fields.userName.value, address: fields.address.value, assistantName: fields.assistantName.value });
+  store.saveProfile({ userName: fields.userName.value, address: chosenAddress(fields), assistantName: fields.assistantName.value });
   tellPhoneAddress();
   store.saveAiConfig({
     baseUrl,
@@ -2918,7 +2932,7 @@ function completeSetup(event) {
   const error = $('#setupError');
   if (!state.ai.ready && !apiKey) return void (error.textContent = 'Please paste your API key.');
   if (/\s/.test(apiKey)) return void (error.textContent = "That API key doesn't look right. Copy it again.");
-  store.saveProfile({ userName: fields.userName.value, address: fields.address.value });
+  store.saveProfile({ userName: fields.userName.value, address: chosenAddress(fields) });
   if (apiKey) store.saveAiConfig({ apiKey });
   applyState();
   event.target.hidden = true;
@@ -3135,7 +3149,7 @@ function boot() {
     const form = $('#setupForm');
     form.hidden = false;
     form.elements.userName.value = state.profile.userName;
-    form.elements.address.value = state.profile.address;
+    showAddress(form.elements, state.profile.address);
     $('#keyField').hidden = state.ai.ready;
     form.elements.userName.focus();
   } else if (lock.isEnabled()) {

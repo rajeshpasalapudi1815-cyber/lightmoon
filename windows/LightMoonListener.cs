@@ -235,6 +235,7 @@ static class LightMoonListener
     {
         if ((DateTime.Now - lastWake).TotalSeconds < 4) return; // one wake per call
         lastWake = DateTime.Now;
+        DesktopApps.Remember(); // the box they were typing in, for "improve this" (before LightMoon comes to the front)
         // Kept in the tray: it listens where it is, with the dot at the top of the screen (TrayMode.cs).
         if (TrayMode.On && TrayMode.Wake(OpenLightMoon, said)) return;
         IntPtr window = FindLightMoon();

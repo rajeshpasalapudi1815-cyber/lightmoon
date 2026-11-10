@@ -273,7 +273,7 @@ export function saveProfile({ userName, address, assistantName }) {
     data.settingsAt[key] = Date.now();
   };
   if (typeof userName === 'string') update('user_name', clean(userName, 60));
-  if (typeof address === 'string' && address.trim()) update('address', clean(address, 30));
+  if (typeof address === 'string' && address.trim()) update('address', clean(address, 30).replace(/[^\p{L}\p{N}' .-]/gu, '') || 'sir');
   if (typeof assistantName === 'string' && assistantName.trim()) update('assistant_name', clean(assistantName, 30));
   save();
 }
