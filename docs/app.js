@@ -3016,7 +3016,8 @@ function greet(auto) {
   listener.autoStarted = auto;
   // Out of sight (kept in the tray on the computer, or reloaded there for an update): no briefing and no listening
   // until "LightMoon" is said. The microphone is used only after the wake word.
-  if (outOfSight() && launch.action !== 'talk') {
+  // ?action=tray: opened at sign-in to wait in the tray (a Startup shortcut), so it stays quiet too.
+  if ((outOfSight() || launch.action === 'tray') && launch.action !== 'talk') {
     refresh();
     return;
   }
