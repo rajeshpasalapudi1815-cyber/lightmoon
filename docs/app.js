@@ -4,6 +4,7 @@ import { isNativeApp, nativeAlarms, wakeWord, fileSaver, phone, workAccount } fr
 import { refresh as refreshPhone, onSpendLogged, onTaskDone } from './js/phone.js';
 import * as store from './js/store.js';
 import { practiceListening } from './js/practice.js';
+import { interpreterWanted, interpreting, startInterpreter, stopInterpreter } from './js/interpreter.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
 import * as cloud from './js/cloud.js';
@@ -395,7 +396,7 @@ function refresh() {
     listener.start('command');
   }
   let mode = 'idle';
-  if (listener.capturing) mode = 'listening';
+  if (listener.capturing || (interpreting() && !speaker.active)) mode = 'listening';
   else if (speaker.active) mode = 'speaking';
   else if (busy) mode = 'thinking';
   document.body.dataset.state = mode;
@@ -407,7 +408,9 @@ function refresh() {
     ? 'Offline: add an API key in settings'
     : prefs.handsFree ? `Say "${assistantName()}" to wake me` : 'Standing by';
   const listening = prefs.sendAfterMs ? 'Listening... tap to send now' : 'Listening... tap when done';
-  statusEl.textContent = { idle, listening, thinking: 'Thinking...', speaking: 'Speaking...' }[mode];
+  statusEl.textContent = interpreting() && mode !== 'speaking'
+    ? 'Interpreting... tap to stop'
+    : { idle, listening, thinking: 'Thinking...', speaking: 'Speaking...' }[mode];
 }
 
 // On the phone: whether the page is speaking, so the volume-down button can stop it (VolumeStop.java).
@@ -811,6 +814,7 @@ const listener = {
 
   // Tap the eyes or the mic: start listening; tap again to send straight away.
   pushToTalk() {
+    if (interpreting()) return stopInterpreter('asked'); // a tap ends the interpreter
     if (!this.supported) return note('Voice input needs Chrome or Edge. You can still type.');
     if (speaker.active) speaker.stop(); // a tap always silences, even while a reply is still arriving
     if (busy) return;
@@ -924,7 +928,7 @@ const listener = {
 
   sync() {
     if (!started || !this.supported || this.mode === 'command') return;
-    const wanted = prefs.handsFree && !busy && !speaker.active && !document.hidden && !locked;
+    const wanted = prefs.handsFree && !busy && !speaker.active && !document.hidden && !locked && !interpreting(); // the interpreter has the mic
     if (wanted && !this.rec) this.start('wake');
     if (!wanted && this.mode === 'wake') {
       this.stopRec();
@@ -954,6 +958,7 @@ async function send(text, { context = null, byVoice = false, heardAlso = [] } = 
   input.placeholder = 'Type a message, or tap the eyes to talk';
   if (speaker.active) speaker.stop();
   addMessage('user', text, [], { spoken: byVoice });
+  if (interpreterWanted(text)) return beginInterpreting();
   busy = true;
   refresh();
   try {
@@ -971,6 +976,41 @@ async function send(text, { context = null, byVoice = false, heardAlso = [] } = 
     busy = false;
     refresh();
   }
+}
+
+// The interpreter (interpreter.js): what the people around them say, in any language, said and shown in English.
+async function beginInterpreting() {
+  if (interpreting()) return;
+  listener.stopRec();
+  listener.capturing = false;
+  listenWhenFree = false;
+  try {
+    await startInterpreter({
+      apiKey: store.aiConfig().apiKey,
+      isSpeaking: () => speaker.active,
+      onHeard: english => {
+        addMessage('assistant', `They said: ${english}`);
+        speaker.speak(english);
+      },
+      onState: (now, why) => {
+        if (now === 'stopped') {
+          const line = why === 'quiet' ? 'Nobody has spoken for a while, so I stopped interpreting.' : 'Interpreter off.';
+          addMessage('system', line);
+          if (why !== 'error') speaker.speak(line);
+        }
+        refresh();
+      },
+      onError: message => addMessage('system', message),
+    });
+    const line = "I'm listening. Whatever they say, in any language, I'll tell you in English. Tap the eyes, or say stop translating, to end.";
+    addMessage('assistant', line);
+    speaker.speak(line);
+  } catch (err) {
+    const why = err?.name === 'NotAllowedError' ? 'I need the microphone for that: allow it, then ask again.' : err.message;
+    addMessage('assistant error', why);
+    speaker.speak(why);
+  }
+  refresh();
 }
 
 // The morning call was answered (MorningCall.java): the day and its plan, said like a call, then listening for the reply.
