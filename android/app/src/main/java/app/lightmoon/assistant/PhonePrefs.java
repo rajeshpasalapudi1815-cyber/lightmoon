@@ -43,9 +43,23 @@ final class PhonePrefs {
         return audio.getMode() != AudioManager.MODE_IN_CALL && audio.getMode() != AudioManager.MODE_IN_COMMUNICATION;
     }
 
+    // On a phone call (ringing, or talking) or a WhatsApp / Teams call. The sound mode alone isn't always set on every
+    // phone for a SIM call, so the phone's own call state counts too (when LightMoon may read it).
     static boolean inCall(Context context) {
         AudioManager audio = context.getSystemService(AudioManager.class);
-        return audio != null && (audio.getMode() == AudioManager.MODE_IN_CALL || audio.getMode() == AudioManager.MODE_IN_COMMUNICATION);
+        if (audio != null && (audio.getMode() == AudioManager.MODE_IN_CALL || audio.getMode() == AudioManager.MODE_IN_COMMUNICATION
+            || audio.getMode() == AudioManager.MODE_RINGTONE)) return true;
+        try {
+            TelephonyManager telephony = context.getSystemService(TelephonyManager.class);
+            return telephony != null && telephony.getCallState() != TelephonyManager.CALL_STATE_IDLE;
+        } catch (SecurityException err) {
+            return false; // not allowed to read the call state: the sound mode has to do
+        }
+    }
+
+    // Ask "are you free now?" before saying a reminder (Settings → Voice; docs/js/askfirst.js). On unless switched off.
+    static boolean askFirst(Context context) {
+        return get(context).getBoolean("askFirst", true);
     }
 
     static boolean hasTelephony(Context context) {

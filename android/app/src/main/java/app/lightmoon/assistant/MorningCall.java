@@ -49,6 +49,9 @@ public class MorningCall extends BroadcastReceiver {
     static final String ACTION_DECLINE = "app.lightmoon.assistant.CALL_DECLINE";
     private static final String ACTION_MISSED = "app.lightmoon.assistant.CALL_MISSED";
     private static final String ACTION_RING = "app.lightmoon.assistant.CALL_RING";
+    private static final String ACTION_RING_AFTER_CALL = "app.lightmoon.assistant.CALL_RING_AFTER_CALL";
+    private static final long AFTER_CALL_CHECK_MS = 60_000;
+    private static final long AFTER_CALL_GIVE_UP_MS = 90 * 60_000;
     private static final String CALLS = "calls";
     private static final int MAX_CALLS = 12;
 
@@ -61,6 +64,17 @@ public class MorningCall extends BroadcastReceiver {
     // Whether Android lets the call cover the screen (Android 14 asks the user for apps that aren't phone apps).
     static boolean canCoverScreen(Context context) {
         return Build.VERSION.SDK_INT < 34 || context.getSystemService(NotificationManager.class).canUseFullScreenIntent();
+    }
+
+    // On a call: no ring now. It checks again every minute and rings once the call is over (for up to an hour and a half).
+    private static boolean waitForCall(Context context, long since) {
+        if (!PhonePrefs.inCall(context)) return false;
+        if (System.currentTimeMillis() - since > AFTER_CALL_GIVE_UP_MS) return true; // a very long call: let it go
+        Intent again = new Intent(context, MorningCall.class).setAction(ACTION_RING_AFTER_CALL).putExtra("since", since);
+        PendingIntent operation = PendingIntent.getBroadcast(context, 25, again, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        context.getSystemService(AlarmManager.class).setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            SystemClock.elapsedRealtime() + AFTER_CALL_CHECK_MS, operation);
+        return true;
     }
 
     static void ring(Context context) {
@@ -195,7 +209,9 @@ public class MorningCall extends BroadcastReceiver {
             }
             saveCalls(context, kept);
             scheduleCalls(context);
-            if (found) ring(context);
+            if (found && !waitForCall(context, System.currentTimeMillis())) ring(context);
+        } else if (ACTION_RING_AFTER_CALL.equals(action)) {
+            if (!waitForCall(context, intent.getLongExtra("since", System.currentTimeMillis()))) ring(context);
         } else if (ACTION_DECLINE.equals(action)) {
             stop(context);
         } else if (ACTION_MISSED.equals(action) && ringing) {

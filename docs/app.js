@@ -3,7 +3,8 @@
 import { isNativeApp, nativeAlarms, wakeWord, fileSaver, phone, workAccount } from './js/native.js'; // first: sets up voice in the Android app
 import { refresh as refreshPhone, onSpendLogged, onTaskDone } from './js/phone.js';
 import * as store from './js/store.js';
-import { practiceListening } from './js/practice.js';
+import { practiceListening, practice, endPractice, PRACTICE_LANGUAGES } from './js/practice.js';
+import { askLine, consentAnswer, NO_ANSWER_RETRY_MS, MAX_UNANSWERED, ANSWER_WINDOW_MS } from './js/askfirst.js';
 import { interpreterWanted, interpreting, startInterpreter, stopInterpreter } from './js/interpreter.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
@@ -406,6 +407,7 @@ function refresh() {
   if (document.hidden && mode !== 'idle') hiddenAt = Date.now(); // used out of sight (in the tray): the relock time starts again
   const idle = !state?.ai.ready
     ? 'Offline: add an API key in settings'
+    : practice() ? `${PRACTICE_LANGUAGES[practice().lang].name} practice: say "stop practice" to end`
     : prefs.handsFree ? `Say "${assistantName()}" to wake me` : 'Standing by';
   const listening = prefs.sendAfterMs ? 'Listening... tap to send now' : 'Listening... tap when done';
   statusEl.textContent = interpreting() && mode !== 'speaking'
@@ -953,6 +955,7 @@ function shouldFollowUp(reply) {
 async function send(text, { context = null, byVoice = false, heardAlso = [] } = {}) {
   text = text.trim();
   if (!text || busy) return;
+  if (answerAsk(text, byVoice)) return; // "yes" / "not now" to "are you free now?"
   context ??= pendingShare;
   pendingShare = null;
   input.placeholder = 'Type a message, or tap the eyes to talk';
@@ -1120,20 +1123,17 @@ async function pollReminders() {
     const minutesLate = (Date.now() - toDate(reminder.remind_at).getTime()) / 60_000;
     const line = sayReminder(reminder);
     if (minutesLate > LATE_REMINDER_MINUTES) {
-      addReminderMessage(reminder, `Missed reminder (${formatWhen(reminder.remind_at)}): ${reminder.title}`);
-      sayAlert(reminder, `${addressWord()}, you missed a reminder from ${formatWhen(reminder.remind_at)}. ${line}`, `${assistantName()} reminder`);
+      sayAlert(reminder, `${addressWord()}, you missed a reminder from ${formatWhen(reminder.remind_at)}. ${line}`, `${assistantName()} reminder`,
+        () => addReminderMessage(reminder, `Missed reminder (${formatWhen(reminder.remind_at)}): ${reminder.title}`));
     } else {
-      addReminderMessage(reminder, line);
-      sayAlert(reminder, line, `${assistantName()} reminder`);
+      sayAlert(reminder, line, `${assistantName()} reminder`, () => addReminderMessage(reminder, line));
     }
   }
   for (const early of headsUps.filter(h => !notified[h.id])) {
-    addMessage('reminder', early.say);
-    sayAlert(early.task, early.say, `${assistantName()} heads-up`);
+    sayAlert(early.task, early.say, `${assistantName()} heads-up`, () => addMessage('reminder', early.say), 'heads-up');
   }
   for (const check of checkIns.filter(c => !notified[c.id])) {
-    addReminderMessage(check.task, check.say);
-    sayAlert(check.task, check.say, `${assistantName()} is checking in`);
+    sayAlert(check.task, check.say, `${assistantName()} is checking in`, () => addReminderMessage(check.task, check.say), 'check-in');
   }
   onCall = '';
   applyState();
@@ -1143,12 +1143,16 @@ async function pollReminders() {
 // it's kept back for the catch-up instead, unless it's urgent: then it speaks anyway.
 // On a call (busyWith), nothing is said: it shows as a notification and is said once the call is over.
 let onCall = '';
-function sayAlert(task, line, title) {
+function sayAlert(task, line, title, show = () => {}, kind = 'reminder') {
   const asleep = sleep.isAsleep();
-  if (asleep && !sleep.isUrgentTask(task) && !lifeLevelling.urgentInLife(task?.ll_task_id)) {
+  const urgent = sleep.isUrgentTask(task) || lifeLevelling.urgentInLife(task?.ll_task_id);
+  if (asleep && !urgent) {
+    show();
     sleep.hold(line);
     return;
   }
+  if (askFirst()) return offer({ kind, task, line, title, show, urgent: asleep && urgent });
+  show();
   if (onCall) {
     heldForCall = [...heldForCall, { at: Date.now(), line }].slice(-20);
     notify(title, line);
@@ -1156,6 +1160,105 @@ function sayAlert(task, line, title) {
   }
   speaker.speak(asleep ? `Urgent. ${line}` : line, { force: true });
   if (document.hidden) notify(title, line);
+}
+
+// ---------- Ask first (js/askfirst.js) ----------
+// Nothing scheduled is just said: LightMoon asks "Boss, are you free now? I have a reminder for you." and waits for
+// "yes" (it says it), "not now" / "in 20 minutes" (it asks again then) or nothing (it asks again in a few minutes;
+// after MAX_UNANSWERED tries it is left in the conversation and a notification, quietly). Not during a call, not
+// while asleep (urgent ones aside), never over their own talking. What it is about stays off the screen until then.
+function askFirst() {
+  return store.settings.get('ask_first', 'on') !== 'off';
+}
+let waiting = []; // [{ at, kind, task, line, title, show, urgent }]
+let askedAt = 0; // when "are you free?" was last said
+let unanswered = 0;
+let askTimer = null;
+let afterCallAsk = false;
+const capitalizeWord = word => word.charAt(0).toUpperCase() + word.slice(1);
+
+function offer(item) {
+  waiting = [...waiting, { at: Date.now(), ...item }].slice(-20);
+  if (document.hidden) notify(assistantName(), `${capitalizeWord(addressWord())}, I have something for you when you're free.`);
+  askSoon(1500);
+}
+
+function askSoon(ms) {
+  clearTimeout(askTimer);
+  askTimer = setTimeout(askNow, ms);
+}
+
+function stillWaiting() {
+  waiting = waiting.filter(w => Date.now() - w.at < BUSY_KEEP_MS && !(w.task && (store.tasks.get(w.task.id)?.done ?? false)));
+  return waiting;
+}
+
+async function askNow() {
+  if (!stillWaiting().length) return;
+  if (unanswered >= MAX_UNANSWERED) return leaveWritten();
+  // Never over their talking or its own, nor while thinking or locked: a little later.
+  if (!started || locked || listener.capturing || speaker.active || busy || interpreting()) return askSoon(10_000);
+  if (await busyWith()) {
+    afterCallAsk = true;
+    return askSoon(30_000); // on a call: asked once it is over
+  }
+  if (sleep.isAsleep() && !waiting.some(w => w.urgent)) {
+    for (const w of waiting) { w.show(); sleep.hold(w.line); } // the catch-up on waking has them
+    waiting = [];
+    return;
+  }
+  const ask = askLine(waiting, { address: addressWord(), afterCall: afterCallAsk });
+  afterCallAsk = false;
+  askedAt = Date.now();
+  unanswered += 1;
+  showCaption(ask, 'said');
+  speaker.speak(ask, { force: true });
+  listenWhenFree = 'follow-up';
+  refresh();
+  askSoon(NO_ANSWER_RETRY_MS); // replaced by the answer; else asked again
+}
+
+// Asked a few times and never answered: written in the conversation, and a notification, without a word.
+function leaveWritten() {
+  clearTimeout(askTimer);
+  for (const w of waiting) w.show();
+  if (document.hidden) notify(assistantName(), waiting.length === 1 ? waiting[0].line : `${waiting.length} reminders are waiting for you.`);
+  waiting = [];
+  unanswered = 0;
+  askedAt = 0;
+}
+
+// Their words, just after "are you free?": handled here (true), or a request of their own (false: answered as usual,
+// and the question comes again a little later).
+function answerAsk(text, byVoice) {
+  if (!askedAt || !waiting.length || Date.now() - askedAt > ANSWER_WINDOW_MS) return false;
+  const answer = consentAnswer(text);
+  if (!answer) {
+    askedAt = 0;
+    unanswered = 0;
+    askSoon(2 * 60_000);
+    return false;
+  }
+  addMessage('user', text, [], { spoken: byVoice });
+  askedAt = 0;
+  unanswered = 0;
+  clearTimeout(askTimer);
+  if (answer === 'yes') {
+    const items = stillWaiting();
+    waiting = [];
+    for (const w of items) w.show();
+    speaker.speak(items.map(w => w.line).join(' '), { force: true });
+    if (byVoice) listenWhenFree = 'follow-up'; // "done", "snooze it"
+  } else {
+    const minutes = answer.later;
+    const when = minutes === 60 ? 'an hour' : minutes > 60 && minutes % 60 === 0 ? `${minutes / 60} hours` : `${minutes} minutes`;
+    const line = `Okay, ${addressWord()}. I'll ask you again in ${when}.`;
+    addMessage('assistant', line);
+    speaker.speak(line);
+    askSoon(minutes * 60_000);
+  }
+  refresh();
+  return true;
 }
 
 // ---------- Sleep mode (js/sleep.js) ----------
@@ -1496,6 +1599,7 @@ function openSettings() {
   fields.sendAfter.value = String(prefs.sendAfterMs);
   fields.reviewWait.value = String(prefs.reviewMs);
   fields.listenOnOpen.checked = prefs.listenOnOpen;
+  fields.askFirst.checked = askFirst();
   fields.followUp.value = prefs.followUp;
   fields.reminderChecks.value = store.settings.get('reminder_checks', 'on');
   fields.coachStyle.value = store.settings.get('coach_style', 'firm');
@@ -2110,12 +2214,17 @@ function tellPhoneAddress() {
   const place = weather.savedPlace();
   phone.configure({
     address: `${word.charAt(0).toUpperCase()}${word.slice(1)}`,
+    askFirst: askFirst(),
     ...(place && { place: { name: place.name, latitude: place.latitude, longitude: place.longitude } }),
   }).catch(() => {});
 }
 
 // A meeting is starting soon, or a message came in, while LightMoon is on screen: say it here.
 async function onPhoneSay({ say }) {
+  if (askFirst()) {
+    const kind = /meeting/i.test(say) ? 'meeting' : /message/i.test(say) ? 'message' : 'reminder';
+    return offer({ kind, line: say, title: assistantName(), show: () => addMessage('reminder', say) });
+  }
   addMessage('reminder', say);
   if (listener.capturing) return; // never talk over the user
   if (await busyWith()) heldForCall = [...heldForCall, { at: Date.now(), line: say }].slice(-20);
@@ -2539,6 +2648,8 @@ function saveSettings(event) {
   }
 
   const langChanged = fields.lang.value !== listenLang();
+  if (langChanged && practice()) endPractice(); // a language chosen here ends a practice that was holding the listening
+  if (fields.askFirst.checked !== askFirst()) store.settings.set('ask_first', fields.askFirst.checked ? 'on' : 'off');
   // Telugu, Hindi or Tamil here is the language LightMoon talks in, on every device; an English one is this device's.
   if (langChanged) {
     const code = languageCode(fields.lang.value);

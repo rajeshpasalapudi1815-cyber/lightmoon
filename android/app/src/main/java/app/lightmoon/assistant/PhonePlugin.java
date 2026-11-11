@@ -257,6 +257,8 @@ public class PhonePlugin extends Plugin {
         if (streak != null && (streak.isEmpty() || streak.matches("\\d{2}:\\d{2}"))) edit.putString("streakGuard", streak);
         String address = call.getString("address");
         if (address != null && !address.trim().isEmpty()) edit.putString("address", address.trim());
+        Boolean askFirst = call.getBoolean("askFirst");
+        if (askFirst != null) edit.putBoolean("askFirst", askFirst);
         for (String kind : new String[] { Briefings.MORNING, Briefings.EVENING }) {
             String time = call.getString(kind.equals(Briefings.MORNING) ? "briefingMorning" : "briefingEvening");
             if (time != null && (time.isEmpty() || time.matches("\\d{2}:\\d{2}"))) edit.putString("briefing_" + kind, time);

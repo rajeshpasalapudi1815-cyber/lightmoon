@@ -30,6 +30,9 @@ import java.util.ArrayDeque;
 // Never over a phone or WhatsApp call: it waits for the call to end (up to WAIT_FOR_CALL_MS; the notification stays
 // meanwhile), and a call that starts mid-sentence stops it. Volume down (VolumeStop) or Stop on its notification
 // silences it.
+// Ask first (on unless switched off, PhonePrefs.askFirst): it never just says what a reminder is. It says "Boss, are
+// you free now? I have a reminder for you." and keeps it waiting (KEY_WAITING), with a notification: "Tell me" says
+// it, "Later" asks again in LATER_MS. Opened, LightMoon asks the same and listens for the answer (docs/js/askfirst.js).
 public class SpeakService extends Service implements TextToSpeech.OnInitListener {
 
     private static final String CHANNEL_REMINDERS = "reminders";
@@ -39,6 +42,13 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
     private static final long WAIT_FOR_CALL_MS = 90 * 60_000;
     private static final long CALL_CHECK_MS = 15_000;
     private static final String ACTION_STOP = "app.lightmoon.assistant.STOP_SPEAKING";
+    private static final String ACTION_TELL = "app.lightmoon.assistant.TELL_ME";
+    private static final String ACTION_LATER = "app.lightmoon.assistant.ASK_LATER";
+    static final String ACTION_ASK_AGAIN = "app.lightmoon.assistant.ASK_AGAIN";
+    private static final String KEY_WAITING = "waiting_to_say";
+    private static final int ASK_NOTIFICATION = 13;
+    private static final long LATER_MS = 10 * 60_000;
+    private static final long WAITING_KEEP_MS = 3 * 3600_000; // waited longer than this: the notifications have it
     private static volatile SpeakService running;
 
     private final ArrayDeque<ReminderStore.Reminder> queue = new ArrayDeque<>();
@@ -57,6 +67,8 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
     private AudioFocusRequest focus;
     private ReminderStore.Reminder saying; // the line being said now
     private long waitingSince; // > 0 while waiting for a call to end
+    private boolean telling; // this run says the waiting reminders ("Tell me"): no asking
+    private boolean askedThisRun;
     private final Runnable callCheck = this::checkCallOver;
 
     static boolean speakingNow() {
@@ -85,6 +97,11 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
             finish();
             return START_NOT_STICKY;
         }
+        if (intent != null && ACTION_LATER.equals(intent.getAction())) {
+            askLater(this);
+            if (queue.isEmpty() && tts == null && composing == 0) stopSelfResult(startId);
+            return START_NOT_STICKY;
+        }
         finished = false;
         // Android requires the "speaking" notification at once; it goes away when the reminder has been said.
         Notification speaking = new NotificationCompat.Builder(this, CHANNEL_SPEAKING)
@@ -97,6 +114,22 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
         int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ? ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK : 0;
         ServiceCompat.startForeground(this, SPEAKING_NOTIFICATION, speaking, type);
 
+        if (intent != null && (ACTION_TELL.equals(intent.getAction()) || ACTION_ASK_AGAIN.equals(intent.getAction()))) {
+            boolean tell = ACTION_TELL.equals(intent.getAction());
+            NotificationManagerCompat.from(this).cancel(ASK_NOTIFICATION);
+            java.util.List<ReminderStore.Reminder> waiting = takeWaiting(this);
+            if (waiting.isEmpty()) {
+                if (queue.isEmpty() && tts == null && composing == 0) finish();
+                return START_NOT_STICKY;
+            }
+            if (tell) telling = true;
+            else askedThisRun = false;
+            for (ReminderStore.Reminder kept : waiting) queue.add(kept);
+            restartGiveUp();
+            if (tts == null) tts = new TextToSpeech(this, this);
+            else if (ready && !this.speaking) speakNext();
+            return START_NOT_STICKY;
+        }
         String id = intent == null ? null : intent.getStringExtra("id");
         ReminderStore.Reminder reminder = id == null ? null : ReminderStore.get(this, id);
         // Or a line to say that isn't a stored reminder (a meeting about to start, from MeetingReceiver).
@@ -226,6 +259,10 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
             waitForCall();
             return;
         }
+        if (!telling && PhonePrefs.askFirst(this) && !queue.isEmpty()) {
+            askInstead();
+            return;
+        }
         ReminderStore.Reminder reminder = queue.poll();
         if (reminder == null) {
             if (composing == 0) finish(); // else a briefing is still being put together
@@ -238,14 +275,134 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
         tts.speak(Voice.sayTheirWay(this, reminder.say), TextToSpeech.QUEUE_ADD, null, "reminder-" + reminder.id);
     }
 
+    // ---------- Ask first ----------
+
+    // What is queued waits; only the question is said (once a run: later ones join the same question).
+    private void askInstead() {
+        int count = keepWaiting(this, queue);
+        queue.clear();
+        showAsk(this, count);
+        if (askedThisRun) {
+            if (composing == 0) finish();
+            return;
+        }
+        askedThisRun = true;
+        speaking = true;
+        saying = null;
+        requestAudioFocus();
+        tts.speak(Voice.sayTheirWay(this, askLine(this, count)), TextToSpeech.QUEUE_ADD, null, "ask-" + System.currentTimeMillis());
+    }
+
+    static String askLine(Context context, int count) {
+        String who = PhonePrefs.address(context);
+        String what = count <= 1 ? "I have a reminder for you." : "I have " + count + " things for you.";
+        return who + ", are you free now? " + what + " Tap Tell me when you are, or wake me.";
+    }
+
+    private static int keepWaiting(Context context, java.util.Collection<ReminderStore.Reminder> more) {
+        org.json.JSONArray kept = new org.json.JSONArray();
+        long now = System.currentTimeMillis();
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (ReminderStore.Reminder old : readWaiting(context)) {
+            if (now - old.at > WAITING_KEEP_MS || !ids.add(old.id)) continue;
+            kept.put(toJson(old));
+        }
+        for (ReminderStore.Reminder add : more) {
+            if (!ids.add(add.id)) continue;
+            kept.put(toJson(add));
+        }
+        PhonePrefs.get(context).edit().putString(KEY_WAITING, kept.toString()).apply();
+        return kept.length();
+    }
+
+    private static org.json.JSONObject toJson(ReminderStore.Reminder reminder) {
+        org.json.JSONObject entry = new org.json.JSONObject();
+        try {
+            entry.put("id", reminder.id).put("title", reminder.title == null ? "" : reminder.title).put("say", reminder.say)
+                .put("at", Math.max(reminder.at, 1)).put("kept", System.currentTimeMillis());
+        } catch (org.json.JSONException ignored) {
+            // Plain strings and numbers: can't fail.
+        }
+        return entry;
+    }
+
+    private static java.util.List<ReminderStore.Reminder> readWaiting(Context context) {
+        java.util.List<ReminderStore.Reminder> out = new java.util.ArrayList<>();
+        try {
+            org.json.JSONArray all = new org.json.JSONArray(PhonePrefs.get(context).getString(KEY_WAITING, "[]"));
+            for (int i = 0; i < all.length(); i++) {
+                org.json.JSONObject entry = all.optJSONObject(i);
+                if (entry == null) continue;
+                // "at" for how long it has waited: when it was kept.
+                out.add(new ReminderStore.Reminder(entry.optString("id"), entry.optString("title"), entry.optString("say"), entry.optLong("kept"), 0));
+            }
+        } catch (org.json.JSONException ignored) {
+            // Spoilt list: nothing waits.
+        }
+        return out;
+    }
+
+    private static java.util.List<ReminderStore.Reminder> takeWaiting(Context context) {
+        java.util.List<ReminderStore.Reminder> all = readWaiting(context);
+        PhonePrefs.get(context).edit().remove(KEY_WAITING).apply();
+        java.util.List<ReminderStore.Reminder> fresh = new java.util.ArrayList<>();
+        long now = System.currentTimeMillis();
+        for (ReminderStore.Reminder reminder : all) if (now - reminder.at <= WAITING_KEEP_MS) fresh.add(reminder);
+        return fresh;
+    }
+
+    // Opened LightMoon itself asks and says them (the page has the same reminders): nothing waits here any more.
+    static void forgetWaiting(Context context) {
+        PhonePrefs.get(context).edit().remove(KEY_WAITING).apply();
+        NotificationManagerCompat.from(context).cancel(ASK_NOTIFICATION);
+    }
+
+    private static void showAsk(Context context, int count) {
+        createChannels(context);
+        Intent tell = new Intent(context, SpeakService.class).setAction(ACTION_TELL);
+        Intent later = new Intent(context, SpeakService.class).setAction(ACTION_LATER);
+        Intent open = new Intent(context, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_REMINDERS)
+            .setSmallIcon(R.drawable.ic_stat_moon)
+            .setContentTitle("LightMoon")
+            .setContentText(PhonePrefs.address(context) + ", " + (count <= 1 ? "I have a reminder for you" : "I have " + count + " things for you") + " when you're free.")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setSilent(true)
+            .setAutoCancel(true)
+            .setContentIntent(PendingIntent.getActivity(context, 31, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+            .addAction(0, "Tell me", PendingIntent.getService(context, 32, tell, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+            .addAction(0, "Later", PendingIntent.getService(context, 33, later, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
+        try {
+            NotificationManagerCompat.from(context).notify(ASK_NOTIFICATION, builder.build());
+        } catch (SecurityException err) {
+            // Notifications off: the question was still said.
+        }
+    }
+
+    // "Later": asked again in LATER_MS (an alarm, so it happens with the phone asleep too).
+    private static void askLater(Context context) {
+        NotificationManagerCompat.from(context).cancel(ASK_NOTIFICATION);
+        android.app.AlarmManager alarms = context.getSystemService(android.app.AlarmManager.class);
+        Intent again = new Intent(context, AlarmReceiver.class).setAction(ACTION_ASK_AGAIN);
+        PendingIntent operation = PendingIntent.getBroadcast(context, 34, again, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        long at = System.currentTimeMillis() + LATER_MS;
+        if (ReminderStore.canUseExactAlarms(context)) {
+            PendingIntent show = PendingIntent.getActivity(context, 0, new Intent(context, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
+            alarms.setAlarmClock(new android.app.AlarmManager.AlarmClockInfo(at, show), operation);
+        } else {
+            alarms.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, operation);
+        }
+    }
+
     static void showReminder(Context context, ReminderStore.Reminder reminder) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
             && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             return;
         }
         createChannels(context);
-        // With the app lock on, keep the words off the lock screen.
-        String text = ReminderStore.hideText(context) ? "You have a reminder." : reminder.say;
+        // With the app lock on, keep the words off the lock screen. Asking first: only that there is one, until they're free.
+        String text = ReminderStore.hideText(context) || PhonePrefs.askFirst(context) ? "You have a reminder." : reminder.say;
         boolean task = ReminderStore.isTaskAlert(reminder.id);
         boolean headsUp = ReminderStore.isHeadsUp(reminder.id);
         boolean checkIn = task && !headsUp && !ReminderStore.taskIdOf(reminder.id).equals(reminder.id);
@@ -301,6 +458,8 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
 
     private void finish() {
         finished = true;
+        telling = false;
+        askedThisRun = false;
         waitingSince = 0;
         saying = null;
         handler.removeCallbacks(giveUp);

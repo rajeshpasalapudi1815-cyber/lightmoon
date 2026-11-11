@@ -11,7 +11,7 @@ import { learnFrom, answerLocally } from './learning.js';
 import { answerOffline } from './offline.js';
 import { saidAgain } from './hearing.js';
 import { askClaude, CLAUDE_MODEL } from './claude.js';
-import { practice, practiceWanted, practiceEnds, startPractice, endPractice, practicePrompt, practiceHistory, PRACTICE_LANGUAGES, spokenEnglish, englishNote } from './practice.js';
+import { practice, practiceWanted, practiceEnds, startPractice, endPractice, practised, practicePrompt, practiceHistory, PRACTICE_LANGUAGES, spokenEnglish, englishNote } from './practice.js';
 
 const HISTORY_LIMIT = 8;
 const OLD_MESSAGE_CHARS = 400; // older messages are cut short: every request counts against the free tier's tokens per minute
@@ -235,6 +235,7 @@ export async function weeklyLetter({ facts, buddy = '', onText } = {}) {
 const systemMessage = focus => ({ role: 'system', content: buildSystemPrompt({ focus }) });
 // One turn of language practice: the tutor prompt and the practice so far, nothing else.
 async function practiseWith(going, { onText, fresh, said = '' }) {
+  going = practised(going); // still practising: it stays on
   const convo = [
     { role: 'system', content: practicePrompt({ lang: going.lang, name: profile().userName, firstTurn: fresh }) },
     ...practiceHistory(messages.recent(40), going.since),

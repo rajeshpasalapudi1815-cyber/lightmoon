@@ -79,4 +79,22 @@ test('Hindi practice, even with English words in it, is not', () => {
   }
 });
 
+test('spoken stop words in Hindi letters, and "speak English", end it', () => {
+  for (const said of ['स्टॉप प्रैक्टिस', 'स्टॉप द प्रैक्टिस', 'बैक टू इंग्लिश', 'इंग्लिश में बात करो', 'बंद करो', 'speak in English', 'switch to English', 'stop Hindi', 'दैट्स ऑल']) {
+    assert.ok(p.practiceEnds(said), said);
+  }
+  assert.ok(!p.practiceEnds('मैं ऑफिस जा रहा हूँ'));
+});
+
+test('a practice nobody uses ends by itself', () => {
+  const going = p.startPractice('hi');
+  assert.equal(p.practice()?.lang, 'hi');
+  assert.equal(p.practice(going.last + p.PRACTICE_IDLE_MS + 1000), null);
+  assert.equal(p.practice(), null, 'and stays ended');
+  const again = p.startPractice('hi');
+  p.practised(again);
+  assert.equal(p.practice()?.lang, 'hi');
+  p.endPractice();
+});
+
 if (failed) { console.log(`${failed} failed`); process.exit(1); }

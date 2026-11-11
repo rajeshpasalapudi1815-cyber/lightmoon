@@ -30,7 +30,17 @@ const START = new RegExp(
   + `|\\b(${LANGUAGE_WORDS})\\b[^.?!]{0,25}?\\b(?:lessons?|class(?:es)?|practi[cs]e|tutor(?:ing)?|conversation practice)\\b`
   + `|\\b(?:talk|speak|chat|converse)\\b[^.?!]{0,25}?\\b(${LANGUAGE_WORDS})\\b[^.?!]{0,40}?\\b(?:learn|practi[cs]e|improve|correct)`,
   'i');
-const STOP = /\b(?:stop|end|finish|quit|pause|exit)\b[^.?!]{0,25}\b(?:practi[cs]e|practi[cs]ing|lesson|class|training|tutor)|\b(?:that'?s|thats) (?:all|enough)(?: for (?:today|now))?\b|\bback to english\b|\bno more (?:practi[cs]e|hindi|lesson)|बस (?:करो|करते हैं)|अब बस/i;
+// Listening is in the practice language, so a spoken "stop practice" arrives as "स्टॉप प्रैक्टिस": both count.
+const STOP = new RegExp([
+  String.raw`\b(?:stop|end|finish|quit|pause|exit|cancel)\b[^.?!]{0,25}\b(?:practi[cs]e|practi[cs]ing|lesson|class|training|tutor|${LANGUAGE_WORDS})`,
+  String.raw`\b(?:that'?s|thats) (?:all|enough)(?: for (?:today|now))?\b`,
+  String.raw`\b(?:back to|switch to|change to|speak in|talk in|talk to me in|reply in) english\b`,
+  String.raw`\bno more (?:practi[cs]e|lessons?|${LANGUAGE_WORDS})`,
+  'बस (?:करो|करते हैं)', 'अब बस', 'बंद करो', 'ख़?त्म करो',
+  '(?:स्टॉप|स्टाप|एंड|फिनिश|क्विट|एग्जिट|बंद)[^.?!]{0,25}(?:प्रैक्टिस|प्रेक्टिस|प्रैक्टिसिंग|लेसन|क्लास|हिंदी|ट्रेनिंग)',
+  '(?:बैक टू|स्विच टू|स्पीक इन|टॉक इन) इंग्लिश', 'इंग्लिश में (?:बात|बोलो|बोलिए)',
+  'दैट्स (?:ऑल|इनफ)',
+].join('|'), 'i');
 
 // The language a message asks to practise ('hi'), or null.
 export function practiceWanted(text) {
@@ -41,19 +51,33 @@ export function practiceWanted(text) {
 }
 export const practiceEnds = text => STOP.test(String(text ?? ''));
 
-// { lang, since }, kept as a (synced) setting, so a practice started on the phone carries on at the laptop.
-export function practice() {
+// { lang, since, last }, kept as a (synced) setting, so a practice started on the phone carries on at the laptop.
+// Nobody practised for PRACTICE_IDLE_MS: it is over by itself, so LightMoon is back to their own language (a
+// practice left on used to keep it listening in Hindi for days).
+export const PRACTICE_IDLE_MS = 20 * 60_000;
+export function practice(now = Date.now()) {
   try {
-    const now = JSON.parse(settings.get('practice') || 'null');
-    return now && PRACTICE_LANGUAGES[now.lang] ? now : null;
+    const going = JSON.parse(settings.get('practice') || 'null');
+    if (!going || !PRACTICE_LANGUAGES[going.lang]) return null;
+    if (now - (going.last ?? going.since ?? 0) > PRACTICE_IDLE_MS) {
+      settings.set('practice', '');
+      return null;
+    }
+    return going;
   } catch {
     return null;
   }
 }
 export function startPractice(lang) {
-  const going = { lang, since: Date.now() };
+  const going = { lang, since: Date.now(), last: Date.now() };
   settings.set('practice', JSON.stringify(going));
   return going;
+}
+// A practice turn: it stays on for another PRACTICE_IDLE_MS.
+export function practised(going) {
+  const kept = { ...going, last: Date.now() };
+  settings.set('practice', JSON.stringify(kept));
+  return kept;
 }
 export function endPractice() {
   settings.set('practice', '');
