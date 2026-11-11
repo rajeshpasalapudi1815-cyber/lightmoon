@@ -4,7 +4,7 @@
 import { pathToFileURL, fileURLToPath } from 'node:url';
 const repo = fileURLToPath(new URL('..', import.meta.url)).replace(/[\/]$/, '');
 import assert from 'node:assert/strict';
-const { languageCode, listeningLanguage, languageRule, NATIVE_YES, either, NATIVE_YES_ONLY, NATIVE_SEND_NOW } = await import(pathToFileURL(`${repo}/docs/js/language.js`));
+const { languageCode, listeningLanguage, languageRule, NATIVE_YES, either, NATIVE_YES_ONLY, NATIVE_SEND_NOW, languageSwitch } = await import(pathToFileURL(`${repo}/docs/js/language.js`));
 const { scriptOf, voiceForLanguage } = await import(pathToFileURL(`${repo}/docs/js/voices.js`));
 const { YES_ONLY, SEND_NOW } = await import(pathToFileURL(`${repo}/docs/js/compose.js`));
 const { saidYes } = await import(pathToFileURL(`${repo}/docs/js/orders.js`));
@@ -43,6 +43,18 @@ check('"ok" with Telugu after it isn\'t only a yes', () => assert.ok(!YES_ONLY.t
 check('send it, in Telugu', () => assert.ok(SEND_NOW.test('పంపు') && SEND_NOW.test('సరే పంపించు') && NATIVE_SEND_NOW.test('పంపండి')));
 check('English still works', () => assert.ok(YES_ONLY.test('ok send it') && SEND_NOW.test('send it') && !SEND_NOW.test('send it to Ravi tomorrow')));
 check('either joins patterns', () => assert.ok(either(/a/, /b/).test('b') && !either(/a/).test('c') && NATIVE_YES_ONLY.test('ఓకే')));
+
+check('switching language by words, in any letters', () => {
+  for (const said of ['change back to English', 'speak in English', 'English please', 'चेंज बैक टू इंग्लिश', 'इंग्लिश में बात करो', 'अंग्रेजी में बोलो', 'स्पीक इन इंग्लिश', 'ఇంగ్లీష్ లో మాట్లాడు']) {
+    assert.equal(languageSwitch(said), 'en', said);
+  }
+  assert.equal(languageSwitch('change the language to Hindi'), 'hi');
+  assert.equal(languageSwitch('speak in Telugu'), 'te');
+  assert.equal(languageSwitch('हिंदी में बात करो'), 'hi');
+  for (const said of ['how do you say water in Hindi', 'send a Hindi joke to Ravi', 'teach me Hindi', 'what is the meaning in English', 'remind me to study English at 6 pm tomorrow evening please ok']) {
+    assert.equal(languageSwitch(said), null, said);
+  }
+});
 
 if (failed) {
   console.log(`${failed} failed`);

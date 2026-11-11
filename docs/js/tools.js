@@ -367,7 +367,7 @@ const EXTRA_TOOLS = new Map([
   ...['add_note', 'update_note', 'delete_note'].map(name => [name, NOTE_WORDS]),
   ['web_search', /\b(reviews?|ratings?|feedback|experiences?|legit|genuine|scam|fake|trust(worthy)?|what (do )?people say|search (the )?(web|online|internet)|look (it )?up online|website|site|looking at)\b/i],
   ['call_me', /\b(call me|address me|calling me|call him|my title)\b/i],
-  ['set_language', /\b(telugu|hindi|tamil|english|language|speak in|talk in)\b|తెలుగు|हिंदी|हिन्दी|தமிழ்/i],
+  ['set_language', /\b(telugu|hindi|tamil|english|language|speak in|talk in)\b|తెలుగు|हिंदी|हिन्दी|தமிழ்|इंग्लिश|अंग्रेज|लैंग्वेज|ఇంగ్లీష్|ஆங்கில/i],
 ]);
 
 function toId(value) {

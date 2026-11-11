@@ -20,6 +20,31 @@ export function languageCode(said) {
   return null;
 }
 
+// "Change back to English", "speak in Telugu", "Hindi please": the language they asked LightMoon to switch to, or null.
+// Done without the AI: while LightMoon talks Hindi it also listens in Hindi, so "change back to English" arrives as
+// "चेंज बैक टू इंग्लिश", and the AI never saw the word it needed to switch back.
+const LANGUAGE_NAMES = {
+  en: 'english|इंग्लिश|इंग्लीश|अंग्रेजी|अंग्रेज़ी|ఇంగ్లీష్|ఇంగ్లిష్|ఆంగ్లం|ஆங்கிலம்|இங்கிலீஷ்|இங்கிலிஷ்',
+  te: 'telugu|तेलुगु|తెలుగు|தெலுங்கு',
+  hi: 'hindi|हिंदी|हिन्दी|హిందీ|இந்தி|ஹிந்தி',
+  ta: 'tamil|तमिल|తమిళం|తమిళ|தமிழ்',
+};
+const SWITCH_WORDS = 'change|switch|speak|talk|reply|answer|respond|back|use|in|से|में|मे|టు|లో'
+  + '|चेंज|स्विच|स्पीक|टॉक|बैक|बोलो|बोलिए|बात|जवाब|మార్చు|మాట్లాడు|మాట్లాడండి|పేసు|பேசு|மாற்று';
+const NOT_A_SWITCH = /\b(?:how|what|which|translate|meaning|mean|word|joke|message|send|write|teach|learn|practi[cs]\w*|lesson)\b|हाउ|व्हाट|ट्रांसलेट|मीनिंग|सेंड|भेज|मैसेज|जोक|सिखा|टीच|प्रैक्टिस|నేర్పు/i;
+const notLetter = '(?:^|[^\\p{L}\\p{M}])';
+const endLetter = '(?![\\p{L}\\p{M}])';
+export function languageSwitch(text) {
+  const said = String(text ?? '').normalize('NFC').trim();
+  if (!said || said.split(/\s+/).length > 9 || NOT_A_SWITCH.test(said)) return null;
+  for (const [code, names] of Object.entries(LANGUAGE_NAMES)) {
+    if (!new RegExp(`${notLetter}(?:${names})${endLetter}`, 'iu').test(said)) continue;
+    const asked = new RegExp(`${notLetter}(?:${SWITCH_WORDS})${endLetter}|^[\\s\\p{P}]*(?:${names})[\\s\\p{P}]*(?:please|only|प्लीज)?[\\s\\p{P}]*$`, 'iu');
+    if (asked.test(said)) return code;
+  }
+  return null;
+}
+
 // What to listen in: the language they talk in, else the device's own choice (Settings → Voice).
 export const listeningLanguage = (talk, deviceLang) => (talk && talk !== 'en' ? `${talk}-IN` : deviceLang);
 

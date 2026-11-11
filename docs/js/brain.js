@@ -1,6 +1,7 @@
 // The brain: sends the conversation straight from this device to an OpenAI-compatible chat API
 // (Groq by default), streams the reply back as it is written, and runs any tools the model asks for.
-import { aiConfig, messages, DEFAULT_AI, SPARE_MODEL, profile } from './store.js';
+import { aiConfig, messages, DEFAULT_AI, SPARE_MODEL, profile, settings } from './store.js';
+import { languageSwitch, TALK_LANGUAGES } from './language.js';
 import { buildSystemPrompt } from './prompt.js';
 import { toolsFor, LOAD_TOOLS, runTool, quickReply, startTurn, NOT_ASKED } from './tools.js';
 import { report } from './problems.js';
@@ -94,6 +95,15 @@ export async function chat(text, { onText, heardAlso = [], shared = '' } = {}) {
   }
   const wanted = practiceWanted(text);
   if (wanted || practising) return practiseWith(wanted && wanted !== practising?.lang ? startPractice(wanted) : practising ?? startPractice(wanted), { onText, fresh: Boolean(wanted), said: wanted ? '' : text });
+  // "Change back to English" (heard in Hindi letters too): switched here and now, without the AI.
+  const switchTo = languageSwitch(text);
+  if (switchTo && switchTo !== (settings.get('talk_language') || 'en')) {
+    settings.set('talk_language', switchTo);
+    const reply = { en: 'Okay, talking in English now.', hi: 'ठीक है, अब मैं हिंदी में बात करूँगी।', te: 'సరే, ఇప్పటి నుండి తెలుగులో మాట్లాడతాను.', ta: 'சரி, இனி தமிழில் பேசுகிறேன்.' }[switchTo]
+      ?? `Talking in ${TALK_LANGUAGES[switchTo].name} now.`;
+    onText?.(reply);
+    return finish(reply, []);
+  }
   const quick = await quickReply(text).catch(() => null); // "send it" after a draft: no AI needed
   if (quick) {
     onText?.(quick.reply);
