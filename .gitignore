@@ -5,3 +5,15 @@ node_modules/
 .wrangler/
 cloud/.dev.vars
 dist/
+# Never in the repository: signing keys and their passwords, local settings, logs, exports of personal data.
+*.jks
+*.keystore
+*.p12
+*.pem
+keystore-password.txt
+.env.*
+.dev.vars*
+*.log
+*.jsonl
+lightmoon-backup*.json
+AUDIT*.md

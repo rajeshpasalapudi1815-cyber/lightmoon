@@ -124,7 +124,7 @@ async function takeAnswers() {
 
 // ---------- Reading this computer's open apps and notifications (windows/ScreenReader.cs) ----------
 
-// What's showing in an open app ("teams", "outlook", "whatsapp", "browser", or a window title):
+// What's showing in an open personal app ("whatsapp", "browser", or a window title):
 // { found, window, text } or { found: false, windows: [titles] }.
 export async function readScreen(app) {
   if (!connected) throw new Error('The LightMoon Listener is not running on this computer.');
@@ -252,18 +252,6 @@ export async function mediaKey(action) {
   });
   if (res.status === 404) throw new Error('The LightMoon Listener on this computer is too old for media keys: it needs updating.');
   if (!res.ok) throw new Error("The media key didn't go.");
-}
-
-// "Send it" for a draft LightMoon opened in Teams or Outlook on this computer: the Listener presses that app's own Send
-// button, only if the draft is in its window. -> 'sent', 'no window', 'no draft' or 'no send button'.
-export async function pressSend(app, text) {
-  if (!connected) throw new Error('The LightMoon Listener is not running on this computer.');
-  const res = await fetch(`${LISTENER_URL}/send`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app, text }), signal: AbortSignal.timeout(15000),
-  });
-  if (res.status === 404) throw new Error('The LightMoon Listener on this computer is too old to press Send: it needs updating.');
-  if (!res.ok) throw new Error("Couldn't press Send.");
-  return (await res.json()).result;
 }
 
 // "Hide yourself": the Listener puts LightMoon's window out of sight (until the wake word or "show yourself").

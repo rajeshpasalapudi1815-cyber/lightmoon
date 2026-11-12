@@ -8,7 +8,7 @@ import { NATIVE_YES } from './language.js';
 // Tools that only look things up, and the two that already ask first every time (phone.js).
 const LEAVE_ALONE = new Set([
   'get_weather', 'look_up', 'check_link', 'news_headlines', 'phone_calendar', 'phone_recent_calls', 'phone_messages',
-  'phone_number_info', 'phone_search', 'phone_navigate', 'phone_open_app', 'phone_media', 'phone_call', 'phone_message', 'phone_driving', 'compose_message', 'tap_send', 'teams_send', 'work_email_send',
+  'phone_number_info', 'phone_search', 'phone_navigate', 'phone_open_app', 'phone_media', 'phone_call', 'phone_message', 'phone_driving', 'compose_message', 'tap_send',
   'desktop_read', 'desktop_notifications', 'desktop_open', 'desktop_media',
 ]);
 // Tools that take something away, and those that answer a reminder.
@@ -46,7 +46,12 @@ export function holdBack(name, args, { chat = [], heard = [], about = '' } = {})
   const asked = String(chat.slice(0, Math.max(userAt, 0)).findLast(m => m.role !== 'user')?.content ?? '');
 
   if (TAKE_AWAY.has(name)) {
-    return TAKE_AWAY_WORDS.test(said) || (YES.test(said) && asked.includes('?')) ? null : "they didn't ask to remove anything";
+    if (!TAKE_AWAY_WORDS.test(said) && !(YES.test(said) && asked.includes('?'))) return "they didn't ask to remove anything";
+    // "Cancel my 5 pm reminder" is about that reminder: what goes must be what they named, or what LightMoon's own
+    // question just before was about, unless they said all of them. A yes to some other question removes nothing.
+    const named = new Set(meaningful(about));
+    if (!named.size || /\b(all|every|everything|each|both)\b/i.test(said)) return null;
+    return meaningful(`${said} ${asked}`).some(w => named.has(w)) ? null : "they didn't ask to remove that one";
   }
   if (ANSWER.has(name)) {
     const named = new Set(meaningful(about));
@@ -67,6 +72,31 @@ export function holdBack(name, args, { chat = [], heard = [], about = '' } = {})
     }
   }
   return null;
+}
+
+// ---------- Their own words ----------
+// Tools that reach outside the conversation on the computer (read a window, open a site or an app, type into their
+// box) or leave a standing instruction (a routine, a nickname, how a word is said): only when their own latest message
+// asks for that kind of thing. Otherwise LightMoon asks them a question built by code (tools.js), and a yes does it.
+// So an AI talked into it by a web page, a notification or a message can't read, open, type or save by itself.
+const IMPROVE = /\b(improve|fix|grammar|polite|politer|enhance|rewrite|re-?phrase|correct|shorten|shorter|longer|formal|professional|friendl\w*|better|polish|proof ?read|typed|wrote|written|writing|draft|this (?:text|message|mail|email|reply|post|paragraph))\b/i;
+const OWN_WORDS = {
+  desktop_read: /\b(read|screen|page|window|tab|article|document|summari[sz]e|look at|see (?:this|my|the)|check (?:this|the|my)|explain (?:this|the)|what(?:'s| is| does| do)\b.*\b(?:say|says|show|shows|open|about))\b/i,
+  desktop_notifications: /\b(notifications?|alerts?|what (?:came|did i (?:get|miss))|anything new|any (?:new )?messages?|pings?)\b/i,
+  desktop_typed: IMPROVE,
+  desktop_replace_typed: IMPROVE,
+  desktop_open: /\b(open|search|google|find|look ?up|show|play|go to|pull up|bring up|youtube|maps?|website|site|browse|watch|directions?|navigate|visit|check out)\b/i,
+  desktop_open_app: /\b(open|launch|start|bring up|pull up|run|show|go to|switch to)\b/i,
+  save_routine: /\b(routines?|protocols?|when(?:ever)? i say|every time i say|from now on)\b/i,
+  set_nickname: /\b(nick ?name|call (?:him|her|them|it|this|that|my)|is my|are my|as my|means?|stands for|refer to|known as|save\b.*\bas)\b/i,
+  set_pronunciation: /\b(pronounc\w*|say (?:it|that|my|the|this)|said as|sounds? like|it'?s said)\b/i,
+};
+// Why this call needs their yes first, or null when their own latest message asked for that kind of thing.
+export function needsOwnWords(name, { chat = [] } = {}) {
+  const rule = OWN_WORDS[name];
+  if (!rule) return null;
+  const said = String(chat.findLast(m => m.role === 'user')?.content ?? '');
+  return rule.test(said) && !said.startsWith('(Automatic message') ? null : 'they did not ask for that';
 }
 
 // Whether the user's message is a yes ("yes", "sure, go ahead", "haan"), the only answer that lets a held-back call

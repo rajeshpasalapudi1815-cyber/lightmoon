@@ -134,6 +134,13 @@ final class VoicePrint {
         return score >= needed;
     }
 
+    // A near miss: not sure enough to count as the owner, close enough to be them on a bad day (a cold, a noisy room).
+    // Used to decide which voices heard during a ring may be learnt after they answered with the phone unlocked.
+    private static final double NEAR_MISS = 0.15;
+    static boolean plausiblyOwner(Context context, double[] print) {
+        return on(context) && likeness(context, print) >= THRESHOLDS[strictness(context)] - NEAR_MISS;
+    }
+
     // The last wake's likeness (for Settings, to see how close it was), or -1.
     static double lastScore(Context context) {
         return prefs(context).getFloat("last", -1f);

@@ -10,7 +10,7 @@ let failed = 0;
 const check = async (name, fn) => {
   try { await fn(); console.log('ok  ', name); } catch (err) { failed++; console.log('FAIL', name, '\n     ', err.message); }
 };
-const known = new Set(['wife', 'mr venkat yt', 'ravi', 'mom']);
+const known = new Set(['wife', 'mr sharma tv', 'ravi', 'mom']);
 const isPerson = async name => known.has(name.toLowerCase());
 
 console.log('-- an order to message someone');
@@ -22,7 +22,7 @@ await check('in Telugu letters', () => assert.equal(parseSend('వాట్స�
 
 console.log('-- who and what');
 await check('the name, then their words as said', async () => assert.deepEqual(await splitNameAndText('wife akkada unnav bangaram', isPerson), { to: 'wife', text: 'akkada unnav bangaram' }));
-await check('a longer name first', async () => assert.deepEqual(await splitNameAndText('Mr Venkat YT call me', isPerson), { to: 'Mr Venkat YT', text: 'call me' }));
+await check('a longer name first', async () => assert.deepEqual(await splitNameAndText('Mr Sharma TV call me', isPerson), { to: 'Mr Sharma TV', text: 'call me' }));
 await check('no words yet', async () => assert.deepEqual(await splitNameAndText('wife', isPerson), { to: 'wife', text: '' }));
 await check('"that" is dropped', async () => assert.equal((await splitNameAndText('Ravi that I am late', isPerson)).text, 'I am late'));
 await check('nobody by that name', async () => assert.equal(await splitNameAndText('Suresh hello', isPerson), null));

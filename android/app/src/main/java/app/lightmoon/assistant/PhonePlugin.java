@@ -122,6 +122,11 @@ public class PhonePlugin extends Plugin {
 
     private JSObject currentStatus() {
         JSObject status = new JSObject();
+        try {
+            status.put("version", getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0).versionName);
+        } catch (android.content.pm.PackageManager.NameNotFoundException | RuntimeException err) {
+            // Unknown: the page then takes it for an old app.
+        }
         status.put("calendar", granted("calendar"));
         status.put("calls", granted("calls"));
         status.put("texts", granted("texts"));
@@ -507,6 +512,15 @@ public class PhonePlugin extends Plugin {
             call.reject("That isn't a phone number.");
             return;
         }
+        if (Guard.isServiceCode(number)) {
+            call.reject("That is a service code, not a person's number: I don't dial those.");
+            return;
+        }
+        String refused = Guard.refusal(getContext());
+        if (refused != null) {
+            call.reject(refused);
+            return;
+        }
         try {
             getActivity().startActivity(new Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number))));
             call.resolve();
@@ -530,6 +544,11 @@ public class PhonePlugin extends Plugin {
         }
         if (number.replaceAll("[^0-9]", "").length() < 3 || text.isEmpty()) {
             call.reject("A text needs a number and something to say.");
+            return;
+        }
+        String refused = Guard.refusal(getContext());
+        if (refused != null) {
+            call.reject(refused);
             return;
         }
         Context context = getContext();
@@ -631,6 +650,11 @@ public class PhonePlugin extends Plugin {
             call.reject("Say what to reply.");
             return;
         }
+        String refused = Guard.refusal(getContext());
+        if (refused != null) {
+            call.reject(refused);
+            return;
+        }
         try {
             if (MessageListener.reply(getContext(), conversation, text)) call.resolve();
             else call.reject("That chat's notification is gone, so it can't be answered from here. Open the app to reply.");
@@ -705,8 +729,8 @@ public class PhonePlugin extends Plugin {
         }
         Uri link = Uri.parse(url);
         String scheme = link.getScheme() == null ? "" : link.getScheme().toLowerCase(Locale.ROOT);
-        if (!Arrays.asList("https", "mailto", "msteams").contains(scheme)) {
-            call.reject("LightMoon only opens web, email and Teams links.");
+        if (!Arrays.asList("https", "mailto").contains(scheme)) {
+            call.reject("LightMoon only opens web and email links.");
             return;
         }
         String[] app = findApp(call.getString("app", ""));
@@ -780,6 +804,11 @@ public class PhonePlugin extends Plugin {
             call.reject("A scheduled message needs a time ahead, a number and the words.");
             return;
         }
+        String refused = Guard.refusal(getContext());
+        if (refused != null) {
+            call.reject(refused);
+            return;
+        }
         if ("sms".equals(via) && !has(Manifest.permission.SEND_SMS)) {
             call.reject("Texting is off. Turn it on in LightMoon's Settings → Phone, or send it on WhatsApp.");
             return;
@@ -847,6 +876,10 @@ public class PhonePlugin extends Plugin {
     // the app it's in, where the helper taps Send if the words are on screen. -> { armed }.
     @PluginMethod
     public void tapSend(PluginCall call) {
+        if (Guard.locked(getContext())) {
+            call.reject("The phone is locked. Unlock it first.");
+            return;
+        }
         if (!SendHelper.isEnabled(getContext())) {
             call.reject("The Send helper is off. Switch it on in LightMoon's Settings → Phone → Send helper.");
             return;
@@ -879,29 +912,6 @@ public class PhonePlugin extends Plugin {
             JSObject result = new JSObject();
             result.put("armed", true);
             call.resolve(result);
-        });
-    }
-
-    // { chat, text, send? }: the Send helper opens that Teams chat by name and types the text (and sends, if asked).
-    @PluginMethod
-    public void openTeamsChat(PluginCall call) {
-        if (!SendHelper.isEnabled(getContext())) {
-            call.reject("The Send helper is off. Switch it on in LightMoon's Settings → Phone → Send helper.");
-            return;
-        }
-        String chat = call.getString("chat", "").trim();
-        if (chat.isEmpty()) {
-            call.reject("Which chat?");
-            return;
-        }
-        boolean started = SendHelper.openChat(getContext(), chat, call.getString("text", ""), Boolean.TRUE.equals(call.getBoolean("send", false)));
-        if (!started) {
-            call.reject("Teams isn't installed, or the Send helper isn't running yet.");
-            return;
-        }
-        getActivity().runOnUiThread(() -> {
-            if (getActivity() instanceof MainActivity && MainActivity.panel) ((MainActivity) getActivity()).leavePanel();
-            call.resolve();
         });
     }
 

@@ -42,4 +42,16 @@ test('anything else is their own request, not an answer', () => {
   }
 });
 
+test('a reminder that was just said is answered by voice, like its buttons', () => {
+  for (const said of ['done', 'Done.', 'did it', 'I did it', 'yes, done', 'already done', 'हो गया', 'ayipoindi']) assert.deepEqual(a.reminderAnswer(said), { action: 'done' }, said);
+  for (const said of ['stop asking', "don't ask me again", 'skip it']) assert.deepEqual(a.reminderAnswer(said), { action: 'stop' }, said);
+  assert.deepEqual(a.reminderAnswer('snooze it'), { action: 'snooze', minutes: 10 });
+  assert.deepEqual(a.reminderAnswer('snooze for 20 minutes'), { action: 'snooze', minutes: 20 });
+  assert.deepEqual(a.reminderAnswer('in half an hour'), { action: 'snooze', minutes: 30 });
+  assert.deepEqual(a.reminderAnswer('remind me in 2 hours'), { action: 'snooze', minutes: 120 });
+  for (const said of ['done with the report but the slides are pending, move those to tomorrow morning please', 'what was that again', 'call Ravi instead', 'tomorrow morning']) {
+    assert.equal(a.reminderAnswer(said), null, said);
+  }
+});
+
 if (failed) { console.log(`${failed} failed`); process.exit(1); }

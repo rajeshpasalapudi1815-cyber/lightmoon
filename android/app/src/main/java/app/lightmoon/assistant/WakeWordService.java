@@ -337,7 +337,9 @@ public class WakeWordService extends Service implements RecognitionListener {
             if (phrase == null) phrase = WakePhrases.matched(text, phrases);
             if (phrase == null) return false;
             if (phraseConfidence(result.optJSONArray("result"), phrase) < MIN_WORD_CONFIDENCE - 0.1) return false;
-            boolean owner = !VoicePrint.on(this) || VoicePrint.isOwner(this, VoicePrint.from(result));
+            // Over the lock screen only for a voice it knows: without "only my voice" taught and on, the call is
+            // answered by touch (which the phone's own lock guards), never by whoever is in the room.
+            boolean owner = VoicePrint.on(this) && VoicePrint.isOwner(this, VoicePrint.from(result));
             android.util.Log.i("LightMoonWake", "call answer \"" + phrase + "\": " + (owner ? "owner" : "voice not matched"));
             if (!owner) {
                 lowTone();
@@ -390,6 +392,9 @@ public class WakeWordService extends Service implements RecognitionListener {
                 if (spk == null) continue;
                 double[] print = new double[spk.length()];
                 for (int j = 0; j < print.length; j++) print[j] = spk.optDouble(j);
+                // Only a voice that already sounded nearly like theirs: someone else in the room who said "tell me"
+                // while it rang is never learnt as the owner.
+                if (!VoicePrint.plausiblyOwner(context, print)) continue;
                 VoicePrint.addAnswer(context, print);
                 learnt++;
             }

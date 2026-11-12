@@ -1,10 +1,10 @@
 // LightMoon app: runs entirely on this device. Chat, voice, memory, tasks, goals and reminders are all
 // handled here; the only thing sent over the internet is the conversation, to the AI service.
-import { isNativeApp, nativeAlarms, wakeWord, fileSaver, phone, workAccount } from './js/native.js'; // first: sets up voice in the Android app
-import { refresh as refreshPhone, onSpendLogged, onTaskDone } from './js/phone.js';
+import { isNativeApp, nativeAlarms, wakeWord, fileSaver, phone } from './js/native.js'; // first: sets up voice in the Android app
+import { refresh as refreshPhone, onSpendLogged, onTaskDone, forgetConfirms } from './js/phone.js';
 import * as store from './js/store.js';
 import { practiceListening, practice, endPractice, PRACTICE_LANGUAGES } from './js/practice.js';
-import { askLine, consentAnswer, NO_ANSWER_RETRY_MS, MAX_UNANSWERED, ANSWER_WINDOW_MS } from './js/askfirst.js';
+import { askLine, consentAnswer, reminderAnswer, NO_ANSWER_RETRY_MS, MAX_UNANSWERED, ANSWER_WINDOW_MS } from './js/askfirst.js';
 import { interpreterWanted, interpreting, startInterpreter, stopInterpreter } from './js/interpreter.js';
 import * as lock from './js/lock.js';
 import * as weather from './js/weather.js';
@@ -14,13 +14,16 @@ import * as desktop from './js/desktop.js';
 import { reminderLine, checkInLine, parseAlertId, headsUpLine } from './js/announce.js';
 import { drawQr, pairingText, canScan, scanQr, codeFromScan } from './js/qr.js';
 import { offlineAvailable, offlineStatus, downloadOffline, removeOffline } from './js/offline.js';
-import { chat, briefing, weeklyLetter, catchUp } from './js/brain.js';
+import { chat, briefing, weeklyLetter, catchUp, aiHealth } from './js/brain.js';
+import { systemChecks, newTroubles, useFacts } from './js/status.js';
+import { WORK_WORDS } from './js/codes.js';
+import { PHONE_APP } from './js/version.js';
 import * as sleep from './js/sleep.js';
 import { wireLearning } from './js/learning.js';
 import { localStamp, today, isPast, toDate } from './js/time.js';
 import { speechChunks, lastSentenceEnd } from './js/speech.js';
 import { genderOf, wantedGender, bestVoice, scriptOf, voiceForLanguage } from './js/voices.js';
-import { refreshWorkAccount, awaitingYes } from './js/tools.js';
+import { awaitingYes } from './js/tools.js';
 import { learnedFix, applyFixes, withFix } from './js/hearing.js';
 import { listeningLanguage, languageCode } from './js/language.js';
 import { mountEyes } from './js/eyes.js';
@@ -404,7 +407,10 @@ function refresh() {
   tellPhoneSpeaking(mode === 'speaking');
   keepTalking(mode !== 'idle' || Boolean(listenWhenFree) || review.waiting);
   desktop.noteState(mode); // the line at the top of the screen, while LightMoon is in the tray
-  if (document.hidden && mode !== 'idle') hiddenAt = Date.now(); // used out of sight (in the tray): the relock time starts again
+  // Out of sight (in the background, or parked off the screen in the tray, which browsers don't call hidden): the
+  // relock time runs from the last use there.
+  const away = document.hidden || (!isNativeApp && (window.screenX < -10000 || window.screenY < -10000));
+  if (away && (mode !== 'idle' || !hiddenAt)) hiddenAt = Date.now();
   const idle = !state?.ai.ready
     ? 'Offline: add an API key in settings'
     : practice() ? `${PRACTICE_LANGUAGES[practice().lang].name} practice: say "stop practice" to end`
@@ -538,6 +544,9 @@ const speaker = {
   },
 
   speak(text, { voice = prefs.voice, rate = prefs.rate, force = false } = {}) {
+    // Said unasked (a reminder, an alert, "are you free?"): a read-back from before ("WhatsApp Asha: ...?") is no
+    // longer the last thing said, so the next "yes" must not send it.
+    if (force) forgetConfirms();
     // Parked off the screen by the Listener's tray mode, and the Listener is gone (quit or crashed): stay silent,
     // never talking from a window nobody can see or close.
     if (offScreen() && !desktop.listenerConnected()) return;
@@ -816,6 +825,8 @@ const listener = {
 
   // Tap the eyes or the mic: start listening; tap again to send straight away.
   pushToTalk() {
+    if (locked) return; // the PIN first
+    theyAreHere();
     if (interpreting()) return stopInterpreter('asked'); // a tap ends the interpreter
     if (!this.supported) return note('Voice input needs Chrome or Edge. You can still type.');
     if (speaker.active) speaker.stop(); // a tap always silences, even while a reply is still arriving
@@ -954,8 +965,10 @@ function shouldFollowUp(reply) {
 // `context` is shared content the message is about (from "Share to LightMoon"); `byVoice`: it was spoken.
 async function send(text, { context = null, byVoice = false, heardAlso = [] } = {}) {
   text = text.trim();
-  if (!text || busy) return;
+  if (!text || busy || locked) return;
+  theyAreHere();
   if (answerAsk(text, byVoice)) return; // "yes" / "not now" to "are you free now?"
+  if (answerSaidReminder(text, byVoice)) return; // "done" / "snooze 10 minutes" right after a reminder was said
   context ??= pendingShare;
   pendingShare = null;
   input.placeholder = 'Type a message, or tap the eyes to talk';
@@ -1151,7 +1164,8 @@ function sayAlert(task, line, title, show = () => {}, kind = 'reminder') {
     sleep.hold(line);
     return;
   }
-  if (askFirst()) return offer({ kind, task, line, title, show, urgent: asleep && urgent });
+  // Locked: nothing of theirs is said aloud; it waits like the rest and is asked about once the PIN is in.
+  if (askFirst() || locked) return offer({ kind, task, line, title, show, urgent: asleep && urgent });
   show();
   if (onCall) {
     heldForCall = [...heldForCall, { at: Date.now(), line }].slice(-20);
@@ -1177,10 +1191,21 @@ let askTimer = null;
 let afterCallAsk = false;
 const capitalizeWord = word => word.charAt(0).toUpperCase() + word.slice(1);
 
+// Asked MAX_UNANSWERED times and nobody answered: they aren't there. Nothing more is asked aloud (a reminder with
+// eight check-ins would otherwise ask two dozen times to an empty room); it all waits, with one notification, until
+// they are back: their next word, tap or wake word. Then LightMoon asks once, for everything.
+let nobodyHere = false;
+function theyAreHere() {
+  if (!nobodyHere) return;
+  nobodyHere = false;
+  unanswered = 0;
+  if (waiting.length) askSoon(6000); // after what they came to say
+}
+
 function offer(item) {
   waiting = [...waiting, { at: Date.now(), ...item }].slice(-20);
-  if (document.hidden) notify(assistantName(), `${capitalizeWord(addressWord())}, I have something for you when you're free.`);
-  askSoon(1500);
+  if (document.hidden || nobodyHere) notify(assistantName(), `${capitalizeWord(addressWord())}, I have something for you when you're free.`);
+  if (!nobodyHere) askSoon(1500);
 }
 
 function askSoon(ms) {
@@ -1189,13 +1214,18 @@ function askSoon(ms) {
 }
 
 function stillWaiting() {
-  waiting = waiting.filter(w => Date.now() - w.at < BUSY_KEEP_MS && !(w.task && (store.tasks.get(w.task.id)?.done ?? false)));
+  const done = w => Boolean(w.task) && (store.tasks.get(w.task.id)?.done ?? false);
+  // Waited too long to be worth saying: written into the conversation instead, so nothing is ever lost.
+  for (const w of waiting) if (Date.now() - w.at >= BUSY_KEEP_MS && !done(w)) w.show();
+  waiting = waiting.filter(w => Date.now() - w.at < BUSY_KEEP_MS && !done(w));
   return waiting;
 }
 
 async function askNow() {
   if (!stillWaiting().length) return;
-  if (unanswered >= MAX_UNANSWERED) return leaveWritten();
+  if (nobodyHere) return;
+  if (unanswered >= MAX_UNANSWERED) return standBy();
+  if (awaitingYes()) return askSoon(20_000); // a read-back is waiting for their yes: that first
   // Never over their talking or its own, nor while thinking or locked: a little later.
   if (!started || locked || listener.capturing || speaker.active || busy || interpreting()) return askSoon(10_000);
   if (await busyWith()) {
@@ -1218,14 +1248,13 @@ async function askNow() {
   askSoon(NO_ANSWER_RETRY_MS); // replaced by the answer; else asked again
 }
 
-// Asked a few times and never answered: written in the conversation, and a notification, without a word.
-function leaveWritten() {
+// Asked a few times and never answered: nobody is there. It all waits, quietly, with one notification.
+function standBy() {
   clearTimeout(askTimer);
-  for (const w of waiting) w.show();
-  if (document.hidden) notify(assistantName(), waiting.length === 1 ? waiting[0].line : `${waiting.length} reminders are waiting for you.`);
-  waiting = [];
-  unanswered = 0;
+  nobodyHere = true;
   askedAt = 0;
+  notify(assistantName(), `${capitalizeWord(addressWord())}, ${waiting.length === 1 ? 'one thing is' : `${waiting.length} things are`} waiting for you. Say my name when you're back.`);
+  askSoon(BUSY_KEEP_MS + 60_000); // what never gets asked is written down in the end (stillWaiting)
 }
 
 // Their words, just after "are you free?": handled here (true), or a request of their own (false: answered as usual,
@@ -1248,6 +1277,8 @@ function answerAsk(text, byVoice) {
     waiting = [];
     for (const w of items) w.show();
     speaker.speak(items.map(w => w.line).join(' '), { force: true });
+    saidReminders = { ids: items.filter(w => w.task && w.kind !== 'heads-up').map(w => w.task.id), at: Date.now() };
+    nativeAlarms?.forgetWaiting?.().catch(() => {}); // said here: the phone's own "Tell me" has nothing left to tell
     if (byVoice) listenWhenFree = 'follow-up'; // "done", "snooze it"
   } else {
     const minutes = answer.later;
@@ -1258,6 +1289,25 @@ function answerAsk(text, byVoice) {
     askSoon(minutes * 60_000);
   }
   refresh();
+  return true;
+}
+
+// A reminder was just said, and they answer it by voice: "done", "snooze it", "in 20 minutes", "stop asking". Done
+// here at once (the same as its buttons), with no AI call. Only when one reminder was said: with several, "done"
+// could mean any of them, and the AI asks which.
+let saidReminders = { ids: [], at: 0 };
+function answerSaidReminder(text, byVoice) {
+  if (saidReminders.ids.length !== 1 || Date.now() - saidReminders.at > ANSWER_WINDOW_MS) return false;
+  const answer = reminderAnswer(text);
+  if (!answer) return false;
+  const [taskId] = saidReminders.ids;
+  const reply = answerReminder(taskId, answer.action, answer.action === 'snooze' ? { until: Date.now() + answer.minutes * 60_000 } : {});
+  saidReminders = { ids: [], at: 0 };
+  if (!reply) return false; // gone or done already: the AI can say so
+  addMessage('user', text, [], { spoken: byVoice });
+  const line = `${reply}.`;
+  addMessage('assistant', line);
+  speaker.speak(line);
   return true;
 }
 
@@ -1589,6 +1639,7 @@ function fillAiFields(fields, ai) {
 }
 
 function openSettings() {
+  if (locked) return; // the PIN first
   const fields = $('#settingsForm').elements;
   fields.userName.value = state.profile.userName;
   showAddress(fields, state.profile.address);
@@ -1722,82 +1773,112 @@ function paintSyncStatus(status = cloud.syncStatus()) {
 
 const DAY_MS = 86_400_000;
 
+// What LightMoon needs to do its job, as it is right now: the facts for the systems check (js/status.js). The same
+// facts feed this page, the spoken "status report" and the watch below.
+async function batteryNow() {
+  try {
+    const battery = await navigator.getBattery?.();
+    return battery ? { level: battery.level, charging: battery.charging } : null;
+  } catch {
+    return null;
+  }
+}
+
+const LISTENER_SEEN_KEY = 'assistant.listenerSeen'; // the wake-word helper has run on this computer before
+function listenerWanted() {
+  try {
+    if (desktop.listenerConnected()) localStorage.setItem(LISTENER_SEEN_KEY, '1');
+    return localStorage.getItem(LISTENER_SEEN_KEY) === '1';
+  } catch {
+    return desktop.listenerConnected();
+  }
+}
+
+// How it is set just now, in a line each: said in the status report, so "why is it talking Hindi?" has an answer.
+function modeLines() {
+  const lines = [];
+  if (sleep.isAsleep()) lines.push('Sleep mode is on: I am holding everything except what is urgent.');
+  const practising = practice();
+  if (practising) lines.push(`${PRACTICE_LANGUAGES[practising.lang].name} practice is on; say "stop practice" to end it.`);
+  const talk = store.settings.get('talk_language');
+  if (!practising && talk && talk !== 'en') lines.push(`I am talking in ${{ te: 'Telugu', hi: 'Hindi', ta: 'Tamil' }[talk] ?? talk}; say "change back to English" to switch.`);
+  if (interpreting()) lines.push('The interpreter is on.');
+  if (!askFirst()) lines.push('Asking first is switched off: reminders are said at once.');
+  return lines;
+}
+
+function dayFacts() {
+  const open = store.tasks.open();
+  const overdue = open.filter(t => (t.due_at && isPast(t.due_at)) || (t.remind_at && isPast(t.remind_at))).length;
+  const next = open.filter(t => t.remind_at && !isPast(t.remind_at)).sort((a, b) => (a.remind_at < b.remind_at ? -1 : 1))[0];
+  return { open: open.length, overdue, next: next ? `${next.title}, ${formatWhen(next.remind_at)}` : '' };
+}
+
+async function gatherFacts() {
+  const alarms = nativeAlarms ? await nativeAlarms.status().catch(() => null) : null;
+  const phoneState = phone ? await phone.status().catch(() => null) : null;
+  const wake = isNativeApp && wakeWord ? await wakeWord.status().catch(() => null) : null;
+  const helper = phone?.sendHelper ? await phone.sendHelper().catch(() => null) : null;
+  const voice = speaker.pickVoice();
+  const sync = cloud.syncStatus();
+  const brain = isNativeApp && offlineAvailable() ? await offlineStatus().catch(() => null) : null;
+  return {
+    device: isNativeApp ? 'phone' : 'computer',
+    name: assistantName(),
+    ai: { ready: state.ai.ready, model: state.ai.model, ...aiHealth() },
+    online: navigator.onLine !== false,
+    voices: speaker.voices.length,
+    voice: voice ? voiceLabel(voice) : '',
+    mic: await microphoneState(),
+    ...(isNativeApp ? {
+      ...(alarms && { alarms }),
+      ...(wake && { wake }),
+      ...(phoneState && { phone: phoneState }),
+      ...(helper && { sendHelper: { enabled: Boolean(helper.enabled) } }),
+      // The page and the phone app are updated apart: an old app silently lacks what the page expects of it.
+      ...(phoneState && { app: { installed: phoneState.version || `older than ${PHONE_APP}`, latest: PHONE_APP } }),
+      ...(brain && { offlineBrain: brain.state ?? 'none' }),
+    } : {
+      notifications: 'Notification' in window ? Notification.permission : 'unsupported',
+      storage: Boolean(await navigator.storage?.persisted?.().catch(() => false)),
+      listener: { wanted: listenerWanted(), connected: desktop.listenerConnected() },
+    }),
+    sync: { on: Boolean(cloud.syncCode()), error: sync.error || '', lastSync: sync.lastSync || 0 },
+    battery: await batteryNow(),
+    problems: problems.since(Date.now() - DAY_MS),
+    version: { current: updates.current, waiting: updates.waitingVersion() },
+    modes: modeLines(),
+    day: dayFacts(),
+  };
+}
+useFacts(gatherFacts);
+
+// A button beside a row of the check, where a tap can put it right.
+const HEALTH_FIXES = {
+  ai: row => row.kind === 'bad' && ['AI settings', () => openSettingsPage('ai')],
+  voice: () => ['Test', () => sayInChosenVoice(`This is ${assistantName()}.`)],
+  notifications: row => row.kind !== 'ok' && (isNativeApp ? ['Allow', allowPhoneNotifications]
+    : Notification.permission === 'default' && ['Allow', () => Notification.requestPermission().then(paintHealth)]),
+  background: row => row.kind !== 'ok' && ['Fix', () => nativeAlarms.openBatterySettings().catch(() => {})],
+  wake: row => row.kind === 'bad' && ['Turn on', () => wakeWord.start().then(paintHealth).catch(() => openSettingsPage('voice'))],
+  messages: row => row.kind === 'bad' && ['Fix', () => phone.openMessageAccess().catch(() => {})],
+  calls: row => row.kind === 'warn' && ['Allow', () => phone.requestCalls().then(paintHealth).catch(() => {})],
+  'send-helper': row => row.kind !== 'ok' && phone?.openSendHelperSettings && ['Turn on', () => phone.openSendHelperSettings().catch(() => {})],
+  storage: row => row.kind !== 'ok' && ['Protect', () => navigator.storage.persist().then(paintHealth)],
+  sync: row => row.kind === 'bad' && ['Sync now', () => cloudAction(() => cloud.syncNow({ required: true })).then(paintHealth)],
+  version: () => updates.waitingVersion() && ['Restart', () => updates.restart()],
+};
+
 // One list of what LightMoon needs to do its job, each checked now: green, amber (works, with a catch) or red
 // (broken), with a button where a tap can put it right.
 async function paintHealth() {
   const list = $('#healthList');
   list.replaceChildren(el('li', 'health-row checking', 'Checking…'));
-  const rows = [];
-  const row = (kind, title, detail, fix = null) => rows.push({ kind, title, detail, fix });
-  const alarms = nativeAlarms ? await nativeAlarms.status().catch(() => null) : null;
-  const phoneState = phone ? await phone.status().catch(() => null) : null;
-
-  row(state.ai.ready ? 'ok' : 'bad', 'AI', state.ai.ready ? `Ready (${state.ai.model})` : 'No API key yet',
-    state.ai.ready ? null : ['Add key', () => openSettingsPage('ai')]);
-  row(navigator.onLine === false ? 'warn' : 'ok', 'Internet',
-    navigator.onLine === false ? 'Offline: reminders still ring, and the offline brain answers if downloaded' : 'Connected');
-
-  const voice = speaker.pickVoice();
-  row(speaker.voices.length ? 'ok' : 'warn', 'Voice', speaker.voices.length ? (voice ? voiceLabel(voice) : 'The device\'s own voice') : 'No voices found yet',
-    ['Test', () => sayInChosenVoice(`This is ${assistantName()}.`)]);
-  const mic = await microphoneState();
-  row(mic === 'denied' ? 'bad' : mic === 'granted' ? 'ok' : 'warn', 'Microphone',
-    { granted: 'Allowed', denied: 'Blocked: allow it in the phone or browser settings for LightMoon', prompt: 'Asked for the first time you tap the eyes', unknown: 'Unknown' }[mic]);
-
-  if (isNativeApp) {
-    if (alarms) {
-      row(alarms.notifications ? 'ok' : 'bad', 'Notifications', alarms.notifications ? 'Allowed' : 'Blocked: reminders are only spoken',
-        alarms.notifications ? null : ['Allow', allowPhoneNotifications]);
-      row(alarms.exactAlarms ? 'ok' : 'warn', 'Reminder alarms',
-        alarms.exactAlarms ? `On time, ${alarms.upcoming} coming up` : 'May ring a few minutes late (exact alarms are off)');
-      row(alarms.batteryUnrestricted ? 'ok' : 'bad', 'Battery',
-        alarms.batteryUnrestricted ? 'Unrestricted' : 'The phone may stop LightMoon in the background',
-        alarms.batteryUnrestricted ? null : ['Fix', () => nativeAlarms.openBatterySettings().catch(() => {})]);
-      row(alarms.backgroundSync ? 'ok' : 'warn', 'Background sync', alarms.backgroundSync ? 'Every 15 minutes' : 'Off until sync is set up');
-    }
-    const wake = wakeWord ? await wakeWord.status().catch(() => null) : null;
-    if (wake?.modelReady) {
-      row(wake.enabled && wake.listening ? 'ok' : wake.enabled ? 'warn' : 'bad', `Saying "${assistantName()}"`,
-        wake.enabled ? (wake.listening ? 'Listening for its name' : 'On, starts listening when the app is in the background') : 'Off: saying its name won\'t open the app',
-        wake.enabled ? null : ['Turn on', () => wakeWord.start().then(paintHealth).catch(() => openSettingsPage('voice'))]);
-    }
-    if (phoneState) {
-      const wantsMessages = phoneState.readMessages !== 'off';
-      row(!wantsMessages || phoneState.messages ? 'ok' : 'bad', 'Message reading',
-        !wantsMessages ? 'Off' : phoneState.messages ? 'Connected' : 'Notification access is off',
-        wantsMessages && !phoneState.messages ? ['Fix', () => phone.openMessageAccess().catch(() => {})] : null);
-      row(phoneState.announceCalls && !phoneState.calls ? 'warn' : 'ok', 'Calls',
-        !phoneState.announceCalls ? 'Not announced' : phoneState.calls ? 'Announced' : 'Announcing is on, but calls aren\'t allowed',
-        phoneState.announceCalls && !phoneState.calls ? ['Allow', () => phone.requestCalls().then(paintHealth).catch(() => {})] : null);
-    }
-  } else {
-    const permission = 'Notification' in window ? Notification.permission : 'unsupported';
-    row(permission === 'granted' ? 'ok' : permission === 'denied' ? 'bad' : 'warn', 'Notifications',
-      { granted: 'Allowed', denied: 'Blocked in the browser', default: 'Not asked yet', unsupported: 'Not available in this browser' }[permission],
-      permission === 'default' ? ['Allow', () => Notification.requestPermission().then(paintHealth)] : null);
-    const persisted = await navigator.storage?.persisted?.().catch(() => false);
-    row(persisted ? 'ok' : 'warn', 'Storage', persisted ? 'Protected from browser clean-ups' : 'The browser may clear it when space runs low',
-      persisted ? null : ['Protect', () => navigator.storage.persist().then(paintHealth)]);
-  }
-
-  const sync = cloud.syncStatus();
-  if (!cloud.syncCode()) row('ok', 'Sync', 'Off (this device only)');
-  else if (sync.error) row('bad', 'Sync', sync.error, ['Sync now', () => cloudAction(() => cloud.syncNow({ required: true })).then(paintHealth)]);
-  else row(sync.lastSync && Date.now() - sync.lastSync > DAY_MS ? 'warn' : 'ok', 'Sync', sync.lastSync ? `Last synced ${describeAgo(sync.lastSync)}` : 'On');
-
-  if (isNativeApp && offlineAvailable()) {
-    const brain = await offlineStatus().catch(() => null);
-    if (brain) row('ok', 'Offline brain', { ready: 'Downloaded and ready', downloading: 'Downloading…' }[brain.state] ?? 'Not downloaded (optional)');
-  }
-
-  const recent = problems.since(Date.now() - DAY_MS);
-  row(recent ? 'warn' : 'ok', 'Problems in the last 24 hours', recent ? `${recent}, listed below` : 'None');
-  const newer = updates.waitingVersion();
-  row('ok', 'Version', newer ? `${updates.current}; ${newer} is ready` : updates.current, newer ? ['Restart', () => updates.restart()] : null);
-
-  list.replaceChildren(...rows.map(({ kind, title, detail, fix }) => {
-    const item = el('li', `health-row ${kind}`);
-    item.append(el('span', 'health-dot'), el('span', 'health-title', title), el('span', 'health-detail', detail));
+  const rows = systemChecks(await gatherFacts());
+  list.replaceChildren(...rows.map(row => {
+    const item = el('li', `health-row ${row.kind}`);
+    item.append(el('span', 'health-dot'), el('span', 'health-title', row.title), el('span', 'health-detail', row.detail));
+    const fix = HEALTH_FIXES[row.id]?.(row);
     if (fix) {
       const button = el('button', 'btn-ghost', fix[0]);
       button.type = 'button';
@@ -1807,6 +1888,29 @@ async function paintHealth() {
     return item;
   }));
   paintProblems();
+}
+
+// The watch: every few minutes the same check runs quietly, and a trouble that matters (the AI key refused, the
+// wake-word helper gone, sync broken, the Send helper off, an old phone app, the battery nearly flat) is told once,
+// the polite way ("are you free now? Something needs your attention."), instead of failing in silence for days.
+const TOLD_KEY = 'assistant.statusTold';
+const WATCH_EVERY_MS = 5 * 60_000;
+async function watchSystems() {
+  if (!started || locked || busy) return;
+  const rows = systemChecks(await gatherFacts());
+  let told = {};
+  try {
+    told = JSON.parse(localStorage.getItem(TOLD_KEY) || '{}') ?? {};
+  } catch {
+    // Start afresh.
+  }
+  const { tell, told: next } = newTroubles(rows, told);
+  try {
+    localStorage.setItem(TOLD_KEY, JSON.stringify(next));
+  } catch {
+    // Storage is full or off: it may be told again next time.
+  }
+  for (const row of tell) sayAlert(null, row.say, assistantName(), () => addMessage('system', row.say), 'system');
 }
 
 async function microphoneState() {
@@ -2026,7 +2130,6 @@ async function paintPhonePowers(message) {
   if (typeof status.streakGuard === 'string') $('#streakGuard').value = status.streakGuard;
   paintDriving();
   paintSendHelper();
-  paintWork();
   $('#allowCalls').closest('.perm-row').hidden = !status.telephony;
   $('#allowTexts').closest('.perm-row').hidden = !status.telephony;
   $('#allowSilence').closest('.perm-row').hidden = status.silence === undefined; // app versions before 1.4 can't silence
@@ -2147,33 +2250,6 @@ async function allowPhone(request, what) {
   refreshPhone({ force: true });
 }
 
-// The Microsoft work account (1.15 and later): sending Teams messages and work email straight from LightMoon.
-async function paintWork(message) {
-  // The Microsoft work account was removed (company data stays out of LightMoon): never offered again.
-  const state = null;
-  $('#workBox').hidden = true;
-  if (!state) return;
-  $('#workStatus').textContent = message ?? (state.signedIn ? `Signed in${state.account ? ` as ${state.account}` : ''}` : state.configured ? 'Not signed in' : 'Not set up');
-  if (!$('#workClient').value) $('#workClient').value = state.clientId ?? '';
-  if (!$('#workTenant').value && state.tenant !== 'organizations') $('#workTenant').value = state.tenant ?? '';
-  $('#workSignOut').hidden = !state.signedIn;
-}
-
-async function signInToWork() {
-  $('#settingsError').textContent = '';
-  try {
-    await workAccount.configure({ clientId: $('#workClient').value.trim(), tenant: $('#workTenant').value.trim() });
-    paintWork('Opening Microsoft sign-in...');
-    await workAccount.signIn();
-    await refreshWorkAccount();
-    note('Signed in to your work account. Try: "Tell NOC Team I\'m running late, tag Akash".');
-  } catch (err) {
-    $('#settingsError').textContent = err.message;
-  } finally {
-    paintWork();
-  }
-}
-
 // The Send helper (1.14 and later): switched on in Android's accessibility settings.
 async function paintSendHelper() {
   const state = await phone.sendHelper?.().catch(() => null);
@@ -2221,7 +2297,7 @@ function tellPhoneAddress() {
 
 // A meeting is starting soon, or a message came in, while LightMoon is on screen: say it here.
 async function onPhoneSay({ say }) {
-  if (askFirst()) {
+  if (askFirst() || locked) {
     const kind = /meeting/i.test(say) ? 'meeting' : /message/i.test(say) ? 'message' : 'reminder';
     return offer({ kind, line: say, title: assistantName(), show: () => addMessage('reminder', say) });
   }
@@ -2568,6 +2644,10 @@ function turnLockOff() {
 
 function showLock() {
   locked = true;
+  // Nothing behind the lock stays within reach: open windows (Settings, the panels) close, and the app can't be
+  // tabbed into, clicked or typed at until the PIN is in.
+  for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
+  $('#app').inert = true;
   speaker.stop();
   listener.stopRec();
   listener.capturing = false;
@@ -2585,6 +2665,7 @@ function showLock() {
 
 function unlocked() {
   locked = false;
+  $('#app').inert = false;
   $('#lockForm').hidden = true;
   if (!started) return start();
   $('#boot').classList.add('leaving');
@@ -2684,7 +2765,7 @@ function saveSettings(event) {
   } else note('Sleep mode needs both times (or neither).');
   synced('urgent_people', fields.urgentPeople.value.split(',').map(n => n.trim()).filter(Boolean).slice(0, 30).join(', '));
   const account = fields.calendarAccount.value.trim().toLowerCase();
-  if (!account || (/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(account) && !/sarasamerica|arogya360/.test(account))) synced('calendar_account', account);
+  if (!account || (/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(account) && !WORK_WORDS.test(account))) synced('calendar_account', account);
   else note('That account can’t be used for meetings.');
   store.saveProfile({ userName: fields.userName.value, address: chosenAddress(fields), assistantName: fields.assistantName.value });
   tellPhoneAddress();
@@ -2990,8 +3071,6 @@ function wireUp() {
     $('#allowCalls').addEventListener('click', () => allowPhone(() => phone.requestCalls(), 'calls'));
     $('#allowTexts').addEventListener('click', () => allowPhone(() => phone.requestTexts(), 'texts'));
     $('#allowSteps').addEventListener('click', () => allowPhone(() => phone.requestSteps(), 'steps'));
-    $('#workSignIn').addEventListener('click', signInToWork);
-    $('#workSignOut').addEventListener('click', () => workAccount.signOut().then(refreshWorkAccount).finally(() => paintWork()));
     $('#sendHelperOn').addEventListener('click', () => phone.openSendHelperSettings().catch(err => { $('#settingsError').textContent = err.message; }));
     $('#drivingCar').addEventListener('click', () => phone.driving({ rememberCar: true })
       .then(s => paintDriving(`Your car: ${s.car}`), err => paintDriving(err.message)));
@@ -3174,6 +3253,8 @@ function start({ auto = false } = {}) {
   refresh();
   pollReminders();
   setInterval(pollReminders, REMINDER_POLL_MS);
+  setTimeout(watchSystems, 90_000); // once things have settled (the Listener connects, the first sync runs)
+  setInterval(watchSystems, WATCH_EVERY_MS);
   setInterval(() => maybeWeeklyLetter(), 60_000);
   setInterval(renderTasks, 60_000); // keeps overdue highlighting current
   cloud.init({

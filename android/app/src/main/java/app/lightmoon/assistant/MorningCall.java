@@ -170,6 +170,7 @@ public class MorningCall extends BroadcastReceiver {
     static void answerByVoice(Context context) {
         answered(context);
         WakeWordPlugin.pendingOwner = true;
+        MainActivity.allowOverLock();
         Intent open = new Intent(context, MainActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             .putExtra(MainActivity.EXTRA_OVER_LOCK, true)
@@ -188,6 +189,7 @@ public class MorningCall extends BroadcastReceiver {
         NotificationManagerCompat.from(context).cancel(MISSED_NOTIFICATION);
         WakeWordPlugin.pendingWake = true;
         WakeWordPlugin.pendingCall = true;
+        WakeWordPlugin.pendingOwner = false; // answered by touch until answerByVoice says otherwise
     }
 
     @Override

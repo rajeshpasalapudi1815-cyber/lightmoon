@@ -90,6 +90,13 @@ public class ReminderAlarmsPlugin extends Plugin {
         call.resolve();
     }
 
+    // The app has said (or is now asking about) what the phone was keeping for "Tell me": nothing waits there any more.
+    @PluginMethod
+    public void forgetWaiting(PluginCall call) {
+        SpeakService.forgetWaiting(getContext());
+        call.resolve();
+    }
+
     // Reminders the phone has spoken since the app last asked, so the app doesn't announce them again,
     // and whether LightMoon is on screen (when it isn't, the phone's alarms do the announcing).
     @PluginMethod

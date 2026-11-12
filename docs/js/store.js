@@ -700,6 +700,14 @@ export function eraseEverything() {
   for (const key of Object.keys(localStorage)) {
     if (key.startsWith('assistant.')) localStorage.removeItem(key);
   }
+  // What is kept outside localStorage goes too (full conversations saved as lessons, the notification store).
+  for (const name of ['lightmoon-learning', 'lightmoon']) {
+    try {
+      globalThis.indexedDB?.deleteDatabase(name);
+    } catch {
+      // No IndexedDB here: nothing to remove.
+    }
+  }
   data = blank();
 }
 

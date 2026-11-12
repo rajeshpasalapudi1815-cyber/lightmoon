@@ -82,7 +82,8 @@ final class WakePhrases {
     }
 
     // Said just after LightMoon opened a draft in another app: send it (WakeWordService.expectSend).
-    static final List<String> SEND = Arrays.asList("send it", "send", "send it now", "okay send it", "ok send it", "yes send it", "yes send");
+    // Not a bare "send": one stray word from the room must not send a draft.
+    static final List<String> SEND = Arrays.asList("send it", "send it now", "okay send it", "ok send it", "yes send it", "yes send");
     // Answering LightMoon's call by voice while it rings (MorningCall): "Speak out", "What is it, Moon".
     static final List<String> ANSWER = Arrays.asList("speak out", "what is it moon", "what is it", "go ahead", "tell me", "yes moon");
 

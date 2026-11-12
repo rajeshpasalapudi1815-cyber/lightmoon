@@ -371,7 +371,9 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
             .setSilent(true)
             .setAutoCancel(true)
             .setContentIntent(PendingIntent.getActivity(context, 31, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
-            .addAction(0, "Tell me", PendingIntent.getService(context, 32, tell, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+            // Saying it aloud needs the phone unlocked: a reminder isn't read to whoever picks the phone up.
+            .addAction(new NotificationCompat.Action.Builder(0, "Tell me", PendingIntent.getService(context, 32, tell, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+                .setAuthenticationRequired(true).build())
             .addAction(0, "Later", PendingIntent.getService(context, 33, later, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
         try {
             NotificationManagerCompat.from(context).notify(ASK_NOTIFICATION, builder.build());

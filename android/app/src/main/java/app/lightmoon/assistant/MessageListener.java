@@ -50,8 +50,12 @@ public class MessageListener extends NotificationListenerService {
     // One-time codes and security messages are never read out loud (only who sent them): a security word and
     // a code-like number. Same rule as docs/js/phone.js; "pin code" alone is a postal code in India.
     private static final Pattern SECURITY_WORDS = Pattern.compile(
-        "\\b(otp|one[- ]?time|verification|security code|passcode|login code|auth\\w* code|(?<!pin )code|pin(?!\\s*code)|sign[- ]?in|log[- ]?in)\\b",
+        "\\b(otp|one[- ]?time|verif\\w*|security code|passcode|password|passwd|login code|auth\\w* code|(?<!pin )code|pin(?!\\s*code)|mpin|tpin|cvv|sign[- ]?in|log[- ]?in|2fa|two[- ]factor)\\b"
+            + "|\u0913\u091f\u0940\u092a\u0940|\u0915\u094b\u0921|\u092a\u093e\u0938\u0935\u0930\u094d\u0921|\u0c13\u0c1f\u0c40\u0c2a\u0c40|\u0c15\u0c4b\u0c21\u0c4d",
         Pattern.CASE_INSENSITIVE);
+    private static final Pattern NEVER_SHARE = Pattern.compile(
+        "\\b(?:do not|don'?t|never|not to) (?:share|disclose|reveal|tell)\\b|\\bvalid (?:for|till|until|only for)\\b|\\bexpires? in\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern IS_YOUR = Pattern.compile("\\b\\d{4,8} is (?:your|the)\\b|\\b(?:use|enter) \\d{4,8}\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern CODE_NUMBER = Pattern.compile("\\d{4,8}|\\d{3}[- ]\\d{3}");
     private static final long GATHER_MS = 2_500; // a burst of messages is announced once
     private static final String TAG = "LightMoonReader"; // in the phone's log (adb logcat), never with message text
@@ -65,7 +69,9 @@ public class MessageListener extends NotificationListenerService {
     private final List<JSONObject> toAnnounce = new ArrayList<>(); // main thread only
 
     static boolean looksLikeCode(String text) {
-        return SECURITY_WORDS.matcher(text).find() && CODE_NUMBER.matcher(text).find();
+        // The same rule as docs/js/codes.js (looksLikeCode): change both together.
+        return CODE_NUMBER.matcher(text).find()
+            && (SECURITY_WORDS.matcher(text).find() || NEVER_SHARE.matcher(text).find() || IS_YOUR.matcher(text).find());
     }
 
     static boolean isEnabled(Context context) {
@@ -125,6 +131,7 @@ public class MessageListener extends NotificationListenerService {
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
+        if (ReadRules.isWork(sbn.getPackageName())) return; // company apps are never read, whatever is switched on
         try {
             record(sbn, true);
         } catch (RuntimeException err) {
@@ -372,7 +379,8 @@ public class MessageListener extends NotificationListenerService {
             String[] parts = conversation.split("\\|", 2);
             if (parts.length < 2 || !parts[0].startsWith("com.whatsapp")) continue;
             String chat = parts[1].trim().toLowerCase(Locale.ROOT);
-            if (chat.equals(wanted) || chat.split(" ")[0].equals(wanted.split(" ")[0])) return reply(context, conversation, text);
+            // The chat with exactly that name: "Priya" must never land in the group "Priya Wedding".
+            if (chat.equals(wanted)) return reply(context, conversation, text);
         }
         return false;
     }

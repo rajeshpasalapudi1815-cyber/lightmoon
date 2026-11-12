@@ -6,6 +6,7 @@
     "url": "https://rajeshpasalapudi1815-cyber.github.io/lightmoon/",
     "allowNavigation": ["rajeshpasalapudi1815-cyber.github.io"]
   },
+  "loggingBehavior": "none",
   "android": {
     "backgroundColor": "#04070d"
   }

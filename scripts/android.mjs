@@ -106,9 +106,14 @@ function signWithReleaseKey(apk, alias) {
 
 function build() {
   run('npx', ['cap', 'sync', 'android']);
-  run(`"${path.join(android, 'gradlew.bat')}"`, ['assembleDebug', '--console=plain'], { cwd: android });
+  // A release build: not debuggable, so the app's data can't be read over a USB cable, the page can't be driven from a
+  // computer's browser, and plugin calls aren't written to the phone's log. `build --debug` makes the debuggable kind,
+  // for looking into a problem (it installs over the other one: both are signed the same way below).
+  const debug = process.argv.includes('--debug');
+  run(`"${path.join(android, 'gradlew.bat')}"`, [debug ? 'assembleDebug' : 'assembleRelease', '--console=plain'], { cwd: android });
   // android/app/build.gradle keeps the build output in a short folder (Windows' 260-character path limit).
-  const apk = path.join(os.homedir(), '.lightmoon-build', 'app', 'outputs', 'apk', 'debug', 'app-debug.apk');
+  const out = path.join(os.homedir(), '.lightmoon-build', 'app', 'outputs', 'apk');
+  const apk = debug ? path.join(out, 'debug', 'app-debug.apk') : path.join(out, 'release', 'app-release-unsigned.apk');
   fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
   const target = path.join(root, 'dist', 'LightMoon.apk');
   fs.copyFileSync(apk, target);

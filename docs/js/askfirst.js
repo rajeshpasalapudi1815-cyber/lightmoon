@@ -26,6 +26,7 @@ export function askLine(items, { address = 'sir', afterCall = false } = {}) {
       'heads-up': 'Something is coming up soon.',
       meeting: 'A meeting is about to start.',
       message: 'A message came in for you.',
+      system: 'Something needs your attention.',
     }[items[0].kind] ?? 'I have a reminder for you.';
   } else {
     what = kinds.size === 1 && kinds.has('reminder') ? `I have ${count(n)} reminders for you.` : `I have ${count(n)} things for you.`;
@@ -58,5 +59,20 @@ export function consentAnswer(text) {
   if (/^no,? (?:tell|go ahead|go on|say it|it'?s fine|problem)/i.test(said)) return 'yes'; // "no, tell me", "no problem"
   if (LATER.test(said)) return { later: laterMinutes(said) };
   if (YES.test(said) && said.split(/\s+/).length <= 8) return 'yes';
+  return null;
+}
+
+// Their answer right after a reminder was said: "done", "snooze it", "in 20 minutes", "stop asking" ->
+// { action: 'done' | 'stop' } or { action: 'snooze', minutes }, or null (anything else goes to the AI). The same
+// three answers as the buttons on the reminder, done on the device without an AI call.
+const DONE = /^(?:(?:yes[, ]+)?(?:done|did it|did that|i did(?: it| that)?|i have|finished|completed?|it'?s done|already done|done already|all done|taken|took it)|ho gaya|ayipoindi|aipoyindi|అయిపోయింది|हो गया)[\s.!]*$/i;
+const STOP_ASKING = /^(?:stop asking|don'?t ask(?: me)?(?: again)?|stop reminding(?: me)?|no need(?: to remind(?: me)?)?|leave it|skip it|skip)[\s.!]*$/i;
+const SNOOZE = /^(?:snooze(?: it)?|later|not now|remind me (?:again )?(?:later|in .+|after .+)|snooze (?:it )?(?:for |by )?.+|(?:in|after) .+)$/i;
+export function reminderAnswer(text) {
+  const said = String(text ?? '').trim().replace(/^(?:hey |ok |okay )?(?:light ?moon|sunshine)[, ]*/i, '').replace(/[.!]+$/, '');
+  if (!said || said.split(/\s+/).length > 8) return null;
+  if (DONE.test(said)) return { action: 'done' };
+  if (STOP_ASKING.test(said)) return { action: 'stop' };
+  if (SNOOZE.test(said)) return { action: 'snooze', minutes: laterMinutes(said) };
   return null;
 }

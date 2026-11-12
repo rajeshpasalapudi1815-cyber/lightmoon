@@ -22,8 +22,9 @@ export const fileSaver = isNativeApp ? plugins.FileSaver ?? null : null;
 // The phone itself: calendar, calls, texts and chat messages, apps, alarms, flashlight (PhonePlugin.java).
 export const phone = isNativeApp ? plugins.Phone ?? null : null;
 
-// The Microsoft work account (android/.../WorkAccountPlugin.java): sign-in and tokens for js/graph.js.
-export const workAccount = isNativeApp ? plugins.WorkAccount ?? null : null;
+// The Microsoft work account is gone from LightMoon (company data stays out). A phone app from before 1.37 that is
+// still signed in is signed out here, once, so no work token stays on the phone.
+if (isNativeApp) plugins.WorkAccount?.signOut?.().catch(() => {});
 
 // ---------- Talking: a speechSynthesis stand-in on Android text-to-speech ----------
 

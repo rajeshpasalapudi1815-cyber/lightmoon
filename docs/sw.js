@@ -43,7 +43,10 @@ self.addEventListener('fetch', event => {
         // 'no-cache': asked of GitHub each time (a quick "still the same?" check), so a reload after an update gets
         // the new files rather than the browser's ten-minute copy of the old ones.
         const response = await fetch(request, { cache: 'no-cache', signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS) });
-        if (response.ok) cache.put(key, response.clone());
+        // A page load only replaces the cached app page with a real page: a link to some other file in this folder
+        // (a script, an image) must never become what opens when LightMoon is offline.
+        const isPage = (response.headers.get('content-type') ?? '').includes('text/html');
+        if (response.ok && (!appPage || isPage)) cache.put(key, response.clone());
         return response;
       } catch {
         return (await cache.match(key, { ignoreSearch: true })) || (await cache.match('./index.html')) || Response.error();

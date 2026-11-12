@@ -51,6 +51,7 @@ public class UnlockActivity extends Activity {
 
     private void giveUp() {
         WakeWordPlugin.pendingWake = false;
+        WakeWordPlugin.pendingOwner = false;
         finish();
     }
 }

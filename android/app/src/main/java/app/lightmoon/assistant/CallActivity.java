@@ -75,7 +75,7 @@ public class CallActivity extends Activity {
         name.setPadding(0, (int) (28 * dp), 0, (int) (6 * dp));
         root.addView(name);
         root.addView(text(MorningCall.subtitle(), 17, 0xFF7896A8));
-        TextView hint = text("Say “Speak out” to answer", 15, 0xFF4F6A7A);
+        TextView hint = text(VoicePrint.on(this) ? "Say “Speak out” to answer" : "Tap Answer", 15, 0xFF4F6A7A);
         hint.setPadding(0, (int) (18 * dp), 0, 0);
         root.addView(hint);
 

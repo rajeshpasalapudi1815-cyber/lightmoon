@@ -15,7 +15,6 @@ export const offlineAvailable = () => Boolean(plugin);
 export const offlineStatus = () => (plugin ? plugin.status().catch(() => null) : Promise.resolve(null));
 export const downloadOffline = (wifiOnly = true) => plugin.download({ wifiOnly });
 export const removeOffline = () => plugin.remove();
-export const stopOffline = () => plugin?.stop().catch(() => {});
 
 function offlinePrompt() {
   const { userName, address, assistantName } = profile();

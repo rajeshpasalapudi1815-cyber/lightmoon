@@ -27,10 +27,18 @@ final class ReadRules {
     // off: one could pose as a chat ("Mom") to get the user's replies, so the user switches it on themselves.
     static final Set<String> KNOWN_APPS = new HashSet<>(Arrays.asList(
         "com.whatsapp", "com.whatsapp.w4b", "org.telegram.messenger", "org.thoughtcrime.securesms",
-        "com.google.android.apps.messaging", "com.samsung.android.messaging", "com.microsoft.teams",
-        "com.Slack", "com.google.android.apps.dynamite", "com.facebook.orca", "com.instagram.android",
+        "com.google.android.apps.messaging", "com.samsung.android.messaging",
+        "com.google.android.apps.dynamite", "com.facebook.orca", "com.instagram.android",
         "com.linkedin.android", "com.discord", "jp.naver.line.android", "com.viber.voip",
-        "com.google.android.gm", "com.microsoft.office.outlook"));
+        "com.google.android.gm"));
+
+    // Company apps: never read, stored, spoken or handed to the page, even if they were switched on before. The
+    // user's rule since 1 November 2026: work data stays out of LightMoon.
+    static final Set<String> WORK_APPS = new HashSet<>(Arrays.asList("com.microsoft.teams", "com.microsoft.office.outlook", "com.microsoft.skype.teams.ipphone"));
+
+    static boolean isWork(String app) {
+        return WORK_APPS.contains(app);
+    }
 
     private ReadRules() {}
 

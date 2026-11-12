@@ -106,8 +106,8 @@ public class SendHelper extends AccessibilityService {
             }
             case "pick": {
                 // A result row that is the chat itself, not "Search for 'NOC Team'" or "No results for ...".
-                // Only a row whose name is the one asked for (or has it as a whole word: "Deeksha" in
-                // "Kummari, Deeksha"); if rows with different names match, it stops rather than guess.
+                // Only a row whose name is the one asked for (or has it as a whole word: "Asha" in
+                // "Rao, Asha"); if rows with different names match, it stops rather than guess.
                 String wanted = firstPart(chatName.toLowerCase(Locale.ROOT));
                 List<AccessibilityNodeInfo> hits = findAll(root, node -> {
                     if (node.isEditable() || node.getText() == null) return false;
@@ -163,7 +163,7 @@ public class SendHelper extends AccessibilityService {
         return null;
     }
 
-    // "Gunukonda, Akash | Saras America" -> "Gunukonda, Akash".
+    // "Rao, Asha | Example Corp" -> "Rao, Asha".
     private static String firstPart(String text) {
         int bar = text.indexOf('|');
         return (bar > 0 ? text.substring(0, bar) : text).trim();
@@ -239,7 +239,8 @@ public class SendHelper extends AccessibilityService {
         return false;
     }
 
-    static final List<String> APPS = Arrays.asList(TEAMS, "com.whatsapp", "com.whatsapp.w4b", "com.google.android.gm", "com.microsoft.office.outlook");
+    // Personal apps only: never Teams or Outlook (company data stays out of LightMoon).
+    static final List<String> APPS = Arrays.asList("com.whatsapp", "com.whatsapp.w4b", "com.google.android.gm");
     private static volatile String armedChat = "";
 
     // Ready to tap Send in one of these apps (only ever the four above), on a draft containing these words, in the
@@ -330,7 +331,7 @@ public class SendHelper extends AccessibilityService {
         Toast.makeText(this, "LightMoon couldn't find Send. Please tap it yourself.", Toast.LENGTH_LONG).show();
     }
 
-    // The chat's name shown as a (non-editable) label, e.g. the header "Kummari, Deeksha".
+    // The chat's name shown as a (non-editable) label, e.g. the header "Rao, Asha".
     private static boolean showsName(AccessibilityNodeInfo root, String name) {
         String wanted = name.toLowerCase(Locale.ROOT);
         return findText(root, node -> !node.isEditable() && node.getText() != null

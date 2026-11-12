@@ -180,7 +180,6 @@ small { color: var(--muted); }
   text-shadow: 0 0 18px rgba(var(--accent-rgb), var(--title-glow));
 }
 .boot-sub { margin: 0 0 12px; font: 500 13px var(--hud); letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
-.boot-note { color: var(--muted); margin: 0; }
 .setup {
   width: min(420px, 100%);
   display: grid;
@@ -240,7 +239,6 @@ body.offline .brand-dot { background: var(--danger); box-shadow: 0 0 10px var(--
 }
 .icon-btn:hover { color: var(--cyan); border-color: var(--cyan-dim); }
 .icon-btn svg { width: 18px; height: 18px; }
-.only-mobile { display: none; }
 
 /* Tasks, goals, notes and memory stay out of sight until the list button is pressed, on every screen. */
 .layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }

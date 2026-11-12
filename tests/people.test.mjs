@@ -52,15 +52,15 @@ check('numbers match across formats', () => assert.ok(sameNumber('+91 98480 1111
 console.log('-- chats and emails');
 const msgs = [
   { ref: 'M1', from: 'Asha', app: 'WhatsApp', chat: 'Asha', conversation: 'wa|Asha', at: hoursAgo(3) },
-  { ref: 'M2', from: 'Asha', app: 'Teams', chat: 'Asha', conversation: 'teams|Asha', at: hoursAgo(2) },
+  { ref: 'M2', from: 'Asha', app: 'Telegram', chat: 'Asha', conversation: 'telegram|Asha', at: hoursAgo(2) },
   { ref: 'M3', from: 'Asha', app: 'WhatsApp', chat: 'Asha', conversation: 'wa|Asha', at: hoursAgo(1) },
   { ref: 'M4', from: 'Bank', app: 'Gmail', kind: 'email', conversation: 'gm|me|Bank', at: hoursAgo(5) },
   { ref: 'M5', from: 'Bank', app: 'Gmail', kind: 'email', conversation: 'gm|me|Bank', at: hoursAgo(4) },
   { ref: 'M6', from: 'Ravi', app: 'WhatsApp', chat: 'Family', conversation: 'wa|Family', at: hoursAgo(1) },
-  { ref: 'M7', from: 'Ravi', app: 'Teams', chat: 'Family', conversation: 'teams|Family', at: hoursAgo(1) },
+  { ref: 'M7', from: 'Ravi', app: 'Telegram', chat: 'Family', conversation: 'telegram|Family', at: hoursAgo(1) },
 ];
 const notes = lookAlikeNotes(msgs);
-check('Asha on WhatsApp and on Teams are marked', () => {
+check('Asha on WhatsApp and on Telegram are marked', () => {
   assert.match(notes.M1, /SAME NAME, DIFFERENT CHAT: also M2/);
   assert.match(notes.M2, /also M1, M3/);
 });

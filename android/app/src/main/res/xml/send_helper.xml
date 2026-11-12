@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The Send helper (SendHelper.java): only these four apps, and only window changes in them. -->
+<!-- The Send helper (SendHelper.java): only WhatsApp, Gmail and the phone's app choosers, and only window changes in them. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/send_helper_description"
-    android:packageNames="com.microsoft.teams,com.whatsapp,com.whatsapp.w4b,com.google.android.gm,com.microsoft.office.outlook,com.vivo.doubleinstance,com.miui.securitycore,com.android.intentresolver"
+    android:packageNames="com.whatsapp,com.whatsapp.w4b,com.google.android.gm,com.vivo.doubleinstance,com.miui.securitycore,com.android.intentresolver"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:notificationTimeout="300"
