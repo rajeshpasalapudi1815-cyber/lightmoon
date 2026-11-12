@@ -6,6 +6,11 @@
 // says which of an app's devices does the requests, when it runs on more than one (a phone and a computer).
 // Life Levelling's phone app also keeps its backup here (/backups): encrypted on the phone with a key from
 // the user's email and password. The cloud only checks a second, separate key to allow reading or replacing it.
+//
+// Anyone on the internet can call this address, so it protects itself: every body is measured as it arrives, each
+// caller gets a fair number of requests a minute, new spaces and backups are counted per caller per day and capped
+// in total, each space has a ceiling on what it may keep, wrong backup keys lock out only the caller who sent them,
+// and what nobody uses is cleared away (never a backup, never a space that was synced twice, never one from before).
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS spaces (
@@ -64,6 +69,41 @@ const SCHEMA = [
      part      INTEGER NOT NULL,
      data      TEXT NOT NULL,
      PRIMARY KEY (backup_id, part))`,
+  // Every space that has ever stored anything: a new one is counted against its caller and the total (admitSpace).
+  // created_at 0: it was here before this list was (see REGISTER_EXISTING).
+  `CREATE TABLE IF NOT EXISTS seen_spaces (
+     id         TEXT PRIMARY KEY,
+     created_at INTEGER NOT NULL)`,
+  // New spaces and backups per caller per day. `who` is a hash of the caller's address, never the address itself.
+  `CREATE TABLE IF NOT EXISTS creations (
+     who  TEXT NOT NULL,
+     day  INTEGER NOT NULL,
+     kind TEXT NOT NULL,
+     n    INTEGER NOT NULL,
+     PRIMARY KEY (who, day, kind))`,
+  // Wrong backup keys, per backup and per caller: the caller who guesses is locked out, the owner is not.
+  `CREATE TABLE IF NOT EXISTS backup_tries (
+     backup_id    TEXT NOT NULL,
+     who          TEXT NOT NULL,
+     failures     INTEGER NOT NULL,
+     locked_until INTEGER NOT NULL DEFAULT 0,
+     at           INTEGER NOT NULL,
+     PRIMARY KEY (backup_id, who))`,
+  `CREATE TABLE IF NOT EXISTS meta (
+     key   TEXT PRIMARY KEY,
+     value TEXT NOT NULL)`,
+];
+
+// Once, when this version first runs: every space already in use is put on the list, so nothing that worked before
+// is ever treated as new.
+const REGISTER_EXISTING = [
+  'INSERT OR IGNORE INTO seen_spaces (id, created_at) SELECT id, 0 FROM spaces',
+  'INSERT OR IGNORE INTO seen_spaces (id, created_at) SELECT DISTINCT space_id, 0 FROM devices',
+  'INSERT OR IGNORE INTO seen_spaces (id, created_at) SELECT DISTINCT space_id, 0 FROM reminders',
+  'INSERT OR IGNORE INTO seen_spaces (id, created_at) SELECT DISTINCT space_id, 0 FROM feeds',
+  'INSERT OR IGNORE INTO seen_spaces (id, created_at) SELECT DISTINCT space_id, 0 FROM inbox',
+  'INSERT OR IGNORE INTO seen_spaces (id, created_at) SELECT DISTINCT space_id, 0 FROM turns',
+  "INSERT OR IGNORE INTO meta (key, value) VALUES ('spaces_registered', '1')",
 ];
 
 const SPACE_ID = /^[0-9a-f]{64}$/; // a SHA-256 of the sync code, or a random id for a device on its own
@@ -96,6 +136,20 @@ const KEEP_SENT_REMINDERS_MS = 7 * 86_400_000;
 const KEEP_INBOX_MS = 7 * 86_400_000;
 const RETRY_PUSH_FOR_MS = 60 * 60_000;
 const FORGET_DEVICES_AFTER_MS = 120 * 86_400_000;
+// So strangers can't use this service as free storage, or fill it up. One person's LightMoon needs a handful of
+// spaces (one per sync code, one per device without sync) and one or two backups; these leave plenty of room.
+const REQUESTS_PER_MINUTE = 600;       // per caller address, per running copy of the worker
+const NEW_SPACES_PER_DAY = 10;         // per caller address
+const NEW_BACKUPS_PER_DAY = 6;         // per caller address (an account is two: the backup and its user-ID pointer)
+const MAX_SPACES = 300;                // in all
+const MAX_BACKUPS = 40;                // in all
+const MAX_FEEDS_PER_SPACE = 4;         // connected apps
+const MAX_TURNS_PER_SPACE = 4;
+const MAX_INBOX_ITEMS_PER_SPACE = 200; // over all its inboxes
+const DUE_SPACES_PER_RUN = 200;
+const DAY_MS = 86_400_000;
+const FORGET_EMPTY_SPACE_AFTER_MS = DAY_MS;      // on the list, with nothing stored
+const FORGET_UNUSED_SPACE_AFTER_MS = 30 * DAY_MS; // stored once, never synced again, no device, no connected app
 // Only real browser push services, so this service can't be used to send requests anywhere else.
 const PUSH_HOSTS = /^(fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|web\.push\.apple\.com|[\w-]+\.notify\.windows\.com|[\w.-]+\.push\.apple\.com)$/;
 
@@ -108,10 +162,15 @@ class HttpError extends Error {
 
 // Tables are created on first use, so deploying needs no separate database setup step.
 let schemaReady = null;
-const ensureSchema = env => (schemaReady ??= env.DB.batch(SCHEMA.map(sql => env.DB.prepare(sql))).catch(err => {
+const ensureSchema = env => (schemaReady ??= setUp(env).catch(err => {
   schemaReady = null;
   throw err;
 }));
+async function setUp(env) {
+  await env.DB.batch(SCHEMA.map(sql => env.DB.prepare(sql)));
+  const registered = await env.DB.prepare("SELECT value FROM meta WHERE key = 'spaces_registered'").first();
+  if (!registered) await env.DB.batch(REGISTER_EXISTING.map(sql => env.DB.prepare(sql)));
+}
 
 export default {
   async fetch(request, env) {
@@ -119,6 +178,7 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     let response;
     try {
+      limitCalls(request, 'all', REQUESTS_PER_MINUTE);
       await ensureSchema(env);
       response = await route(request, env);
     } catch (err) {
@@ -151,14 +211,75 @@ const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 const noContent = () => new Response(null, { status: 204 });
 
+// The body, read only as far as it is allowed to be long: a caller that says it is sending more is refused before
+// a byte is read, and one that sends more than it said is cut off there.
 async function readJson(request, maxBytes = MAX_BODY_BYTES) {
-  const text = await request.text();
-  if (text.length > maxBytes) throw new HttpError(413, 'Too large');
+  const declared = Number(request.headers.get('Content-Length') ?? 0);
+  if (declared > maxBytes) throw new HttpError(413, 'Too large');
+  let text = '';
+  if (request.body) {
+    const reader = request.body.getReader();
+    const decoder = new TextDecoder();
+    let bytes = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new HttpError(413, 'Too large');
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  }
   try {
     return JSON.parse(text || '{}');
   } catch {
     throw new HttpError(400, 'Invalid JSON');
   }
+}
+
+// ---------- Who is calling, and how much ----------
+
+// The caller, as a short hash of their address: enough to count by, and no address is ever stored.
+async function caller(request) {
+  return (await sha256Hex(`lightmoon-caller:${request.headers.get('CF-Connecting-IP') ?? 'unknown'}`)).slice(0, 32);
+}
+
+// A rough per-address limit on requests (per running copy of the worker), against floods and guessing in bulk.
+const calls = new Map();
+function limitCalls(request, bucket, perMinute) {
+  const who = `${bucket}:${request.headers.get('CF-Connecting-IP') ?? 'unknown'}`;
+  const minute = Math.floor(Date.now() / 60_000);
+  const seen = calls.get(who);
+  const count = seen?.minute === minute ? seen.count + 1 : 1;
+  if (calls.size > 5000) calls.clear();
+  calls.set(who, { minute, count });
+  if (count > perMinute) throw new HttpError(429, 'Too many requests. Try again in a minute.');
+}
+
+// One more new space or backup for this caller today, or 429 once they have had the day's share. Counted in one
+// statement, so requests arriving together can't slip past.
+async function countCreation(env, request, kind, perDay) {
+  const day = Math.floor(Date.now() / DAY_MS);
+  const counted = await env.DB.prepare(
+    `INSERT INTO creations (who, day, kind, n) VALUES (?, ?, ?, 1)
+     ON CONFLICT (who, day, kind) DO UPDATE SET n = n + 1 WHERE creations.n < ?
+     RETURNING n`,
+  ).bind(await caller(request), day, kind, perDay).first();
+  if (!counted) throw new HttpError(429, 'Too many new ones from this address today. Try again tomorrow.');
+}
+
+// Before anything is stored for a space: one that is already in use goes straight through; a new one counts against
+// its caller's day and the room there is in all.
+async function admitSpace(env, request, space) {
+  const known = await env.DB.prepare('SELECT 1 AS yes FROM seen_spaces WHERE id = ?').bind(space).first();
+  if (known) return;
+  const { n } = await env.DB.prepare('SELECT COUNT(*) AS n FROM seen_spaces').first();
+  if (n >= MAX_SPACES) throw new HttpError(507, 'This LightMoon cloud has no room for another sync space.');
+  await countCreation(env, request, 'space', NEW_SPACES_PER_DAY);
+  await env.DB.prepare('INSERT OR IGNORE INTO seen_spaces (id, created_at) VALUES (?, ?)').bind(space, Date.now()).run();
 }
 
 async function route(request, env) {
@@ -170,36 +291,38 @@ async function route(request, env) {
   if (section === 'backups' && BACKUP_ID.test(space ?? '') && (!part || (part === 'meta' && !name))) {
     const key = request.headers.get('X-Backup-Key') ?? '';
     if (!BACKUP_KEY.test(key)) throw new HttpError(401, 'Backup key required');
-    limitBackupCalls(request);
+    limitCalls(request, 'backups', BACKUP_REQUESTS_PER_MINUTE);
     if (part === 'meta') {
-      if (method === 'GET') return getBackupMeta(env, space, key);
+      if (method === 'GET') return getBackupMeta(env, request, space, key);
       throw new HttpError(404, 'Not found');
     }
-    if (method === 'GET') return getBackup(env, space, key);
-    if (method === 'PUT') return putBackup(env, space, key, await readJson(request, MAX_BACKUP_BODY_BYTES));
-    if (method === 'DELETE') return deleteBackup(env, space, key);
+    if (method === 'GET') return getBackup(env, request, space, key);
+    if (method === 'PUT') return putBackup(env, request, space, key, await readJson(request, MAX_BACKUP_BODY_BYTES));
+    if (method === 'DELETE') return deleteBackup(env, request, space, key);
   }
   if (section !== 'spaces' || !SPACE_ID.test(space ?? '') || rest.length) throw new HttpError(404, 'Not found');
 
+  // Whatever stores something first checks the body, then that the space may store at all (admitSpace).
+  const admit = () => admitSpace(env, request, space);
   if (part === 'data' && !name) {
     if (method === 'GET') return getData(env, space);
-    if (method === 'PUT') return putData(env, space, await readJson(request));
+    if (method === 'PUT') return putData(env, space, await readJson(request), admit);
   }
-  if (part === 'reminders' && !name && method === 'PUT') return putReminders(env, space, await readJson(request));
+  if (part === 'reminders' && !name && method === 'PUT') return putReminders(env, space, await readJson(request), admit);
   if (part === 'devices' && DEVICE_ID.test(name ?? '') && !item) {
-    if (method === 'PUT') return putDevice(env, space, name, await readJson(request));
+    if (method === 'PUT') return putDevice(env, space, name, await readJson(request), admit);
     if (method === 'DELETE') return deleteDevice(env, space, name);
   }
   if (part === 'feeds' && APP_NAME.test(name ?? '') && !item) {
     if (method === 'GET') return getFeed(env, space, name);
-    if (method === 'PUT') return putFeed(env, space, name, await readJson(request));
+    if (method === 'PUT') return putFeed(env, space, name, await readJson(request), admit);
   }
   if (part === 'inbox' && APP_NAME.test(name ?? '')) {
     if (!item && method === 'GET') return listInbox(env, space, name);
-    if (!item && method === 'POST') return addToInbox(env, space, name, await readJson(request));
+    if (!item && method === 'POST') return addToInbox(env, space, name, await readJson(request), admit);
     if (ITEM_ID.test(item ?? '') && method === 'DELETE') return removeFromInbox(env, space, name, item);
   }
-  if (part === 'turns' && APP_NAME.test(name ?? '') && !item && method === 'PUT') return takeTurn(env, space, name, await readJson(request));
+  if (part === 'turns' && APP_NAME.test(name ?? '') && !item && method === 'PUT') return takeTurn(env, space, name, await readJson(request), admit);
   throw new HttpError(404, 'Not found');
 }
 
@@ -210,65 +333,66 @@ const sha256Hex = async text => {
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 };
 
-// Checks the key against the backup. Too many wrong keys lock it for a while, so a password can't be guessed here.
+// Checks the key against the backup. Too many wrong keys lock out the caller who sent them for a while, so a
+// password can't be guessed here; everyone else, the owner first of all, still gets in with the right key. (Before,
+// ten wrong keys from anyone locked the backup for everybody, which let a stranger keep its owner out for good.)
 // Every try is counted before the key is checked, in one statement, and no more than BACKUP_TRIES are let through
-// before the lock, even when guesses arrive all at once; a right key resets the count.
-async function checkBackupKey(env, row, key) {
+// before the lock, even when guesses arrive all at once; a right key clears the count.
+async function checkBackupKey(env, request, row, key) {
   const now = Date.now();
+  const who = await caller(request);
   const counted = await env.DB.prepare(
-    'UPDATE backups SET failures = failures + 1 WHERE id = ? AND locked_until <= ? AND failures < ? RETURNING failures',
-  ).bind(row.id, now, BACKUP_TRIES).first();
+    `INSERT INTO backup_tries (backup_id, who, failures, locked_until, at) VALUES (?, ?, 1, 0, ?)
+     ON CONFLICT (backup_id, who) DO UPDATE SET failures = failures + 1, at = excluded.at
+       WHERE backup_tries.locked_until <= excluded.at AND backup_tries.failures < ?
+     RETURNING failures`,
+  ).bind(row.id, who, now, BACKUP_TRIES).first();
   if (!counted) throw new HttpError(429, 'Too many wrong tries. Try again later.');
   if ((await sha256Hex(key)) === row.auth_hash) {
-    await env.DB.prepare('UPDATE backups SET failures = 0 WHERE id = ?').bind(row.id).run();
+    await env.DB.prepare('DELETE FROM backup_tries WHERE backup_id = ? AND who = ?').bind(row.id, who).run();
     return;
   }
   if (counted.failures >= BACKUP_TRIES) {
-    await env.DB.prepare('UPDATE backups SET failures = 0, locked_until = ? WHERE id = ?').bind(now + BACKUP_LOCK_MS, row.id).run();
+    await env.DB.prepare('UPDATE backup_tries SET failures = 0, locked_until = ? WHERE backup_id = ? AND who = ?')
+      .bind(now + BACKUP_LOCK_MS, row.id, who).run();
   }
   throw new HttpError(403, 'Wrong key for this backup');
 }
 
-// A rough per-address limit on backup requests (per running copy of the worker), against guessing in bulk.
-const backupCalls = new Map();
-function limitBackupCalls(request) {
-  const who = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-  const minute = Math.floor(Date.now() / 60_000);
-  const seen = backupCalls.get(who);
-  const count = seen?.minute === minute ? seen.count + 1 : 1;
-  backupCalls.set(who, { minute, count });
-  if (backupCalls.size > 5000) backupCalls.clear();
-  if (count > BACKUP_REQUESTS_PER_MINUTE) throw new HttpError(429, 'Too many requests. Try again in a minute.');
-}
-
-async function getBackup(env, id, key) {
+async function getBackup(env, request, id, key) {
   const row = await env.DB.prepare('SELECT * FROM backups WHERE id = ?').bind(id).first();
   if (!row) return json({ error: 'Not found' }, 404);
-  await checkBackupKey(env, row, key);
+  await checkBackupKey(env, request, row, key);
   const { results } = await env.DB.prepare('SELECT data FROM backup_parts WHERE backup_id = ? ORDER BY part').bind(id).all();
   return json({ blob: results.map(r => r.data).join(''), updatedAt: row.updated_at, size: row.size });
 }
 
 // Only when the backup last changed: a phone and a computer sharing one check this often (whenever they come
 // to the front) and download the backup only when the other one has made a newer copy.
-async function getBackupMeta(env, id, key) {
+async function getBackupMeta(env, request, id, key) {
   const row = await env.DB.prepare('SELECT * FROM backups WHERE id = ?').bind(id).first();
   if (!row) return json({ error: 'Not found' }, 404);
-  await checkBackupKey(env, row, key);
+  await checkBackupKey(env, request, row, key);
   return json({ updatedAt: row.updated_at, size: row.size });
 }
 
 // { blob, newKey?, ifUpdatedAt? }: the first upload creates the backup; newKey changes the key (after a
 // password change). ifUpdatedAt replaces it only if it is still the backup the phone last saw (0: none yet),
 // so a phone never overwrites a backup it doesn't know about.
-async function putBackup(env, id, key, { blob, newKey, ifUpdatedAt }) {
+async function putBackup(env, request, id, key, { blob, newKey, ifUpdatedAt }) {
   if (typeof blob !== 'string' || !blob || blob.length > MAX_BACKUP_CHARS) throw new HttpError(400, 'Bad backup');
   if (newKey != null && !BACKUP_KEY.test(String(newKey))) throw new HttpError(400, 'Bad new key');
   if (ifUpdatedAt != null && !Number.isSafeInteger(ifUpdatedAt)) throw new HttpError(400, 'Bad ifUpdatedAt');
   const row = await env.DB.prepare('SELECT * FROM backups WHERE id = ?').bind(id).first();
-  if (row) await checkBackupKey(env, row, key);
+  if (row) await checkBackupKey(env, request, row, key);
   if (ifUpdatedAt != null && (row?.updated_at ?? 0) !== ifUpdatedAt) {
     return json({ error: 'The backup has changed', updatedAt: row?.updated_at ?? 0 }, 409);
+  }
+  if (!row) {
+    // A new backup: there is room for only so many, and each caller may start only a few a day.
+    const { n } = await env.DB.prepare('SELECT COUNT(*) AS n FROM backups').first();
+    if (n >= MAX_BACKUPS) throw new HttpError(507, 'This LightMoon cloud has no room for another backup.');
+    await countCreation(env, request, 'backup', NEW_BACKUPS_PER_DAY);
   }
   const authHash = await sha256Hex(newKey ?? key);
   const parts = [];
@@ -287,13 +411,14 @@ async function putBackup(env, id, key, { blob, newKey, ifUpdatedAt }) {
   return json({ updatedAt: now, size: blob.length });
 }
 
-async function deleteBackup(env, id, key) {
+async function deleteBackup(env, request, id, key) {
   const row = await env.DB.prepare('SELECT * FROM backups WHERE id = ?').bind(id).first();
   if (!row) return noContent();
-  await checkBackupKey(env, row, key);
+  await checkBackupKey(env, request, row, key);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM backup_parts WHERE backup_id = ?').bind(id),
     env.DB.prepare('DELETE FROM backups WHERE id = ?').bind(id),
+    env.DB.prepare('DELETE FROM backup_tries WHERE backup_id = ?').bind(id),
   ]);
   return noContent();
 }
@@ -305,8 +430,11 @@ async function getFeed(env, space, name) {
   return row ? json({ blob: row.blob, updatedAt: row.updated_at }) : json({ error: 'Not found' }, 404);
 }
 
-async function putFeed(env, space, name, { blob }) {
+async function putFeed(env, space, name, { blob }, admit) {
   if (typeof blob !== 'string' || !blob || blob.length > MAX_FEED_CHARS) throw new HttpError(400, 'Bad feed');
+  await admit();
+  const others = await env.DB.prepare('SELECT COUNT(*) AS n FROM feeds WHERE space_id = ? AND name != ?').bind(space, name).first();
+  if ((others?.n ?? 0) >= MAX_FEEDS_PER_SPACE) throw new HttpError(429, 'Too many connected apps for this space');
   await env.DB.prepare(
     `INSERT INTO feeds (space_id, name, blob, updated_at) VALUES (?, ?, ?, ?)
      ON CONFLICT(space_id, name) DO UPDATE SET blob = excluded.blob, updated_at = excluded.updated_at`,
@@ -321,12 +449,15 @@ async function listInbox(env, space, box) {
   return json({ items: results.map(r => ({ id: r.item_id, blob: r.blob, createdAt: r.created_at })) });
 }
 
-async function addToInbox(env, space, box, { id, blob }) {
+async function addToInbox(env, space, box, { id, blob }, admit) {
   if (!ITEM_ID.test(String(id)) || typeof blob !== 'string' || !blob || blob.length > MAX_REQUEST_CHARS) {
     throw new HttpError(400, 'Bad request item');
   }
+  await admit();
   const { count } = await env.DB.prepare('SELECT COUNT(*) AS count FROM inbox WHERE space_id = ? AND box = ?').bind(space, box).first();
   if (count >= MAX_INBOX_ITEMS) throw new HttpError(429, 'Inbox full');
+  const { total } = await env.DB.prepare('SELECT COUNT(*) AS total FROM inbox WHERE space_id = ?').bind(space).first();
+  if (total >= MAX_INBOX_ITEMS_PER_SPACE) throw new HttpError(429, 'Inbox full');
   await env.DB.prepare('INSERT INTO inbox (space_id, box, item_id, blob, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
     .bind(space, box, String(id), blob, Date.now()).run();
   return noContent();
@@ -342,8 +473,11 @@ async function removeFromInbox(env, space, box, item) {
 // { device }: which device does an app's requests, for an app on more than one device sharing one copy of its data
 // (Life Levelling on a phone and a computer), so their copies never split. A device keeps the turn while it keeps
 // asking; once it has stopped for TURN_MS, the next device to ask gets it. Answers { device, until }: whose turn it is.
-async function takeTurn(env, space, app, { device }) {
+async function takeTurn(env, space, app, { device }, admit) {
   if (typeof device !== 'string' || !DEVICE_ID.test(device)) throw new HttpError(400, 'Bad device');
+  await admit();
+  const others = await env.DB.prepare('SELECT COUNT(*) AS n FROM turns WHERE space_id = ? AND app != ?').bind(space, app).first();
+  if ((others?.n ?? 0) >= MAX_TURNS_PER_SPACE) throw new HttpError(429, 'Too many connected apps for this space');
   const now = Date.now();
   const taken = await env.DB.prepare(
     `INSERT INTO turns (space_id, app, device_id, until) VALUES (?1, ?2, ?3, ?4)
@@ -362,10 +496,11 @@ async function getData(env, space) {
   return row ? json({ version: row.version, blob: row.blob }) : json({ error: 'Not found' }, 404);
 }
 
-async function putData(env, space, { version, blob }) {
+async function putData(env, space, { version, blob }, admit) {
   if (!Number.isInteger(version) || version < 0 || typeof blob !== 'string' || !blob || blob.length > MAX_BLOB_CHARS) {
     throw new HttpError(400, 'Bad data');
   }
+  await admit();
   const now = Date.now();
   const result = version === 0
     ? await env.DB.prepare('INSERT INTO spaces (id, version, blob, updated_at) VALUES (?, 1, ?, ?) ON CONFLICT(id) DO NOTHING')
@@ -380,7 +515,7 @@ async function putData(env, space, { version, blob }) {
 
 // ---------- Devices that want reminder notifications ----------
 
-async function putDevice(env, space, device, { subscription }) {
+async function putDevice(env, space, device, { subscription }, admit) {
   let host;
   try {
     host = new URL(subscription?.endpoint).hostname;
@@ -391,6 +526,8 @@ async function putDevice(env, space, device, { subscription }) {
   if (!localTesting && (!subscription.endpoint.startsWith('https://') || !PUSH_HOSTS.test(host))) {
     throw new HttpError(400, 'Unsupported push service');
   }
+  if (subscription.endpoint.length > 2000) throw new HttpError(400, 'Bad subscription');
+  await admit();
   const others = await env.DB.prepare('SELECT COUNT(*) AS n FROM devices WHERE space_id = ? AND device_id != ?').bind(space, device).first();
   if ((others?.n ?? 0) >= MAX_DEVICES_PER_SPACE) throw new HttpError(429, 'Too many devices for this space');
   // Pushes carry no content, so only the endpoint is kept.
@@ -408,7 +545,7 @@ async function deleteDevice(env, space, device) {
 
 // ---------- Reminder times (no titles) ----------
 
-async function putReminders(env, space, body) {
+async function putReminders(env, space, body, admit) {
   let { reminders } = body ?? {};
   if (!Array.isArray(reminders) || reminders.length > MAX_REMINDERS) throw new HttpError(400, 'Bad reminders');
   for (const r of reminders) {
@@ -417,6 +554,7 @@ async function putReminders(env, space, body) {
   // Long past or far ahead: nothing to send, so not kept (and they can't crowd the due list).
   const now = Date.now();
   reminders = reminders.filter(r => r.at >= now - REMINDER_PAST_MS && r.at <= now + REMINDER_FUTURE_MS);
+  if (reminders.length) await admit(); // an empty list stores nothing, so it needs no room
   // Replace the space's pending schedule; a reminder already sent stays sent unless its time changed.
   const upsert = env.DB.prepare(
     `INSERT INTO reminders (space_id, reminder_id, due_at, sent) VALUES (?, ?, ?, 0)
@@ -438,12 +576,18 @@ const forgetDevice = (env, space, device) => env.DB.batch([
 
 async function sendDueReminders(env) {
   const now = Date.now();
+  const oldest = now - RETRY_PUSH_FOR_MS - 5 * 60_000;
+  // The spaces with something due, not the reminders: a space with five hundred due at once counts as one. Spaces
+  // that were here first go first (seen_spaces.created_at), so a flood of new ones can't hold up anyone's reminders.
   const { results: due } = await env.DB.prepare(
-    'SELECT space_id, reminder_id, due_at FROM reminders WHERE sent = 0 AND due_at <= ? AND due_at >= ? ORDER BY due_at LIMIT 500',
-  ).bind(now, now - RETRY_PUSH_FOR_MS - 5 * 60_000).all();
+    `SELECT r.space_id, MIN(r.due_at) AS first_due, COALESCE(MIN(s.created_at), 9007199254740991) AS since
+     FROM reminders r LEFT JOIN seen_spaces s ON s.id = r.space_id
+     WHERE r.sent = 0 AND r.due_at <= ? AND r.due_at >= ?
+     GROUP BY r.space_id ORDER BY since, first_due LIMIT ?`,
+  ).bind(now, oldest, DUE_SPACES_PER_RUN).all();
   let pushes = 0;
-  const finished = new Set(); // spaces whose devices were reached (or that have no devices to reach)
-  for (const space of new Set(due.map(r => r.space_id))) {
+  const finished = []; // spaces whose devices were reached (or that have no devices to reach)
+  for (const { space_id: space } of due) {
     if (pushes >= MAX_PUSHES_PER_RUN) break; // the rest go next minute
     const { results: devices } = await env.DB.prepare('SELECT device_id, subscription FROM devices WHERE space_id = ? LIMIT ?')
       .bind(space, MAX_DEVICES_PER_SPACE).all();
@@ -469,18 +613,48 @@ async function sendDueReminders(env) {
         if ((row?.failures ?? 0) >= DROP_DEVICE_AFTER_FAILURES) await forgetDevice(env, space, device.device_id);
       }
     }
-    if (delivered) finished.add(space);
+    if (delivered) finished.push(space);
   }
-  // Undelivered reminders are tried again next minute, for up to an hour.
-  const done = due.filter(r => finished.has(r.space_id) || r.due_at < now - RETRY_PUSH_FOR_MS);
-  await env.DB.prepare('UPDATE reminders SET sent = 1 WHERE sent = 0 AND due_at < ?').bind(now - RETRY_PUSH_FOR_MS - 5 * 60_000).run();
-  const markSent = env.DB.prepare('UPDATE reminders SET sent = 1 WHERE space_id = ? AND reminder_id = ?');
+  // A space that was reached has had its push for everything due by now; undelivered reminders are tried again next
+  // minute, for up to an hour, and then given up.
+  const markSent = env.DB.prepare('UPDATE reminders SET sent = 1 WHERE space_id = ? AND sent = 0 AND due_at <= ?');
   await env.DB.batch([
-    ...done.map(r => markSent.bind(r.space_id, r.reminder_id)),
+    ...finished.map(space => markSent.bind(space, now)),
+    env.DB.prepare('UPDATE reminders SET sent = 1 WHERE sent = 0 AND due_at < ?').bind(oldest),
     env.DB.prepare('DELETE FROM reminders WHERE sent = 1 AND due_at < ?').bind(now - KEEP_SENT_REMINDERS_MS),
     env.DB.prepare('DELETE FROM devices WHERE updated_at < ?').bind(now - FORGET_DEVICES_AFTER_MS),
     env.DB.prepare('DELETE FROM inbox WHERE created_at < ?').bind(now - KEEP_INBOX_MS),
     env.DB.prepare('DELETE FROM feeds WHERE updated_at < ?').bind(now - FORGET_DEVICES_AFTER_MS),
+  ]);
+  if (new Date(now).getUTCMinutes() % 10 === 0) await tidyUp(env, now); // every ten minutes is plenty
+}
+
+// What nobody uses is cleared away, so room taken by strangers comes back by itself. Never a backup, never a space
+// that was synced more than once, and never anything that was here before this version (seen_spaces.created_at 0):
+// only a space made since, stored a single time and then left for a month, with no device and no connected app. A
+// real device whose space went this way simply stores it again the next time it syncs (the data lives on the device).
+async function tidyUp(env, now) {
+  const unused = `SELECT id FROM spaces WHERE version = 1 AND updated_at < ?
+    AND id IN (SELECT id FROM seen_spaces WHERE created_at > 0)
+    AND id NOT IN (SELECT space_id FROM devices) AND id NOT IN (SELECT space_id FROM feeds)`;
+  const stale = now - FORGET_UNUSED_SPACE_AFTER_MS;
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM reminders WHERE space_id IN (${unused})`).bind(stale),
+    env.DB.prepare(`DELETE FROM inbox WHERE space_id IN (${unused})`).bind(stale),
+    env.DB.prepare(`DELETE FROM turns WHERE space_id IN (${unused})`).bind(stale),
+    env.DB.prepare(`DELETE FROM spaces WHERE id IN (${unused})`).bind(stale), // its place on the list goes just below
+    // A turn is a lease of a few minutes: one that ran out a day ago is only clutter.
+    env.DB.prepare('DELETE FROM turns WHERE until < ?').bind(now - DAY_MS),
+    // On the list of spaces, with nothing stored anywhere any more.
+    env.DB.prepare(
+      `DELETE FROM seen_spaces WHERE created_at < ? AND created_at > 0
+         AND id NOT IN (SELECT id FROM spaces) AND id NOT IN (SELECT space_id FROM devices)
+         AND id NOT IN (SELECT space_id FROM reminders) AND id NOT IN (SELECT space_id FROM feeds)
+         AND id NOT IN (SELECT space_id FROM inbox) AND id NOT IN (SELECT space_id FROM turns)`,
+    ).bind(now - FORGET_EMPTY_SPACE_AFTER_MS),
+    env.DB.prepare('DELETE FROM creations WHERE day < ?').bind(Math.floor(now / DAY_MS) - 1),
+    env.DB.prepare('DELETE FROM backup_tries WHERE at < ? AND locked_until < ?').bind(now - DAY_MS, now),
+    env.DB.prepare('DELETE FROM device_failures WHERE NOT EXISTS (SELECT 1 FROM devices d WHERE d.space_id = device_failures.space_id AND d.device_id = device_failures.device_id)'),
   ]);
 }
 
