@@ -59,7 +59,8 @@ check('a yes to LightMoon\'s question about it', () => assert.equal(holdBack('de
 check('a yes to some other question removes nothing', () => assert.ok(holdBack('forget', { id: 'm1' }, { chat: [lm('Want to hear a joke?'), user('yes')], about: 'Wife is Lakshmi' })));
 
 console.log('-- their own words, for what reaches outside the conversation');
-const { needsOwnWords } = await import(pathToFileURL(`${repo}/docs/js/orders.js`));
+const orders = await import(pathToFileURL(`${repo}/docs/js/orders.js`));
+const { needsOwnWords } = orders;
 const asks = (name, said) => needsOwnWords(name, { chat: [lm('Good afternoon.'), user(said)] });
 check('reading the screen when they ask', () => {
   for (const said of ['read my screen', 'what does this page say', 'summarise this article', 'look at this window']) assert.equal(asks('desktop_read', said), null, said);
@@ -67,11 +68,10 @@ check('reading the screen when they ask', () => {
 check('never by itself', () => {
   for (const said of ['any new messages?', 'what is the weather', 'thanks']) assert.ok(asks('desktop_read', said), said);
 });
-check('opening a site or an app', () => {
-  assert.equal(asks('desktop_open', 'open youtube'), null);
-  assert.equal(asks('desktop_open_app', 'launch notepad'), null);
-  assert.ok(asks('desktop_open', 'read my notifications'));
-  assert.ok(asks('desktop_open_app', 'what is on my list'));
+check('a search opens only when they asked to open, find or play something', () => {
+  const { asksToOpen } = orders;
+  for (const said of ['open youtube', 'search for flights to Delhi', 'play some lofi', 'find a pizza place']) assert.ok(asksToOpen(said), said);
+  for (const said of ['read my notifications', 'what is on my list', 'thanks']) assert.ok(!asksToOpen(said), said);
 });
 check('typing into their box only for "improve this"', () => {
   assert.equal(asks('desktop_replace_typed', 'make this message more polite'), null);

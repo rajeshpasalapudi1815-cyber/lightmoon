@@ -75,22 +75,23 @@ export function holdBack(name, args, { chat = [], heard = [], about = '' } = {})
 }
 
 // ---------- Their own words ----------
-// Tools that reach outside the conversation on the computer (read a window, open a site or an app, type into their
-// box) or leave a standing instruction (a routine, a nickname, how a word is said): only when their own latest message
+// Tools that reach outside the conversation on the computer (read a window, type into their box) or leave a standing instruction (a routine, a nickname, how a word is said): only when their own latest message
 // asks for that kind of thing. Otherwise LightMoon asks them a question built by code (tools.js), and a yes does it.
-// So an AI talked into it by a web page, a notification or a message can't read, open, type or save by itself.
+// So an AI talked into it by a web page, a notification or a message can't read, type or save by itself. (Opening a
+// site or an app has its own check in tools.js: it must be one they named themselves.)
 const IMPROVE = /\b(improve|fix|grammar|polite|politer|enhance|rewrite|re-?phrase|correct|shorten|shorter|longer|formal|professional|friendl\w*|better|polish|proof ?read|typed|wrote|written|writing|draft|this (?:text|message|mail|email|reply|post|paragraph))\b/i;
 const OWN_WORDS = {
   desktop_read: /\b(read|screen|page|window|tab|article|document|summari[sz]e|look at|see (?:this|my|the)|check (?:this|the|my)|explain (?:this|the)|what(?:'s| is| does| do)\b.*\b(?:say|says|show|shows|open|about))\b/i,
   desktop_notifications: /\b(notifications?|alerts?|what (?:came|did i (?:get|miss))|anything new|any (?:new )?messages?|pings?)\b/i,
   desktop_typed: IMPROVE,
   desktop_replace_typed: IMPROVE,
-  desktop_open: /\b(open|search|google|find|look ?up|show|play|go to|pull up|bring up|youtube|maps?|website|site|browse|watch|directions?|navigate|visit|check out)\b/i,
-  desktop_open_app: /\b(open|launch|start|bring up|pull up|run|show|go to|switch to)\b/i,
   save_routine: /\b(routines?|protocols?|when(?:ever)? i say|every time i say|from now on)\b/i,
   set_nickname: /\b(nick ?name|call (?:him|her|them|it|this|that|my)|is my|are my|as my|means?|stands for|refer to|known as|save\b.*\bas)\b/i,
   set_pronunciation: /\b(pronounc\w*|say (?:it|that|my|the|this)|said as|sounds? like|it'?s said)\b/i,
 };
+// Their message asks to open, find or play something (for a search the AI wants to open in the browser).
+export const asksToOpen = text => /\b(open|search|google|find|look ?up|show|play|go to|pull up|bring up|youtube|maps?|website|site|browse|watch|directions?|navigate|visit|check out)\b/i.test(String(text ?? ''));
+
 // Why this call needs their yes first, or null when their own latest message asked for that kind of thing.
 export function needsOwnWords(name, { chat = [] } = {}) {
   const rule = OWN_WORDS[name];

@@ -14,7 +14,7 @@ function openMailApp(url) {
   link.click();
   link.remove();
 }
-import { holdBack, callKey, saidYes, needsOwnWords } from './orders.js';
+import { holdBack, callKey, saidYes, needsOwnWords, asksToOpen } from './orders.js';
 import { normalizeTime, localStamp, prettyTime } from './time.js';
 import { findPlace, placeFromDevice, savedPlace, savePlace, weatherSummary } from './weather.js';
 import { LIFE_TOOLS, lifeHandlers, isConnected as lifeConnected, summary as lifeSummary, completeInLife } from './lifelevelling.js';
@@ -769,6 +769,8 @@ const handlers = {
     // page, a notification, a message, a search result) was read in this turn: an address can carry what was just read
     // away with it. Otherwise they are asked, seeing where it leads.
     if (asked && (!siteNamedByThem(address) || outsideWords.length || address.length > 200)) return askFirst(`Open ${shownAddress(address)}`, open);
+    // A search opens by itself only when they asked to open, find or play something.
+    if (!asked && !asksToOpen(theirLastWords())) return askFirst(`Search ${where === 'youtube' ? 'YouTube' : where === 'maps' ? 'Maps' : 'the web'} for "${words.slice(0, 80)}"`, open);
     return open();
   },
 
