@@ -36,6 +36,8 @@ test('a brief is tidied as it is loaded, and anything that is not one is refused
   assert.equal(huge.products[0].what.length, 220);
   assert.equal(huge.products[0].site, '', 'only https pages');
   assert.equal(huge.products[0].stage, 'idea', 'an unknown stage is just an idea');
+  const onServer = b.parseBrief(JSON.stringify({ products: [{ name: 'Trial', stage: 'testing', status: 'Nothing is sent to real phones yet' }] }));
+  assert.equal(b.businessReport({ kind: 'one', product: onServer.products[0] }, onServer), 'Trial is running in test mode. Nothing is sent to real phones yet.');
 });
 
 test('it is kept, and comes back the same', () => {
@@ -70,6 +72,8 @@ test('what it says', () => {
   const all = say('business status');
   assert.match(all, /^You have three products, boss\. In focus: PlantPal\. PlantPal is working on your computer\./);
   assert.match(all, /The others wait: Book Nook and Old Idea\./);
+  assert.match(all, /Sign-in and reminders work; payments are not connected\. Next: Connect payments\. The others wait/, 'the overview is heard: one next step each, not the whole list');
+  assert.match(all, /Three things are waiting on you; ask me what your businesses need\./);
   assert.match(all, /That is as of 13 November 2026\.$/);
 });
 

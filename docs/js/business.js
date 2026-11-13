@@ -15,6 +15,7 @@ export const STAGES = {
   idea: 'an idea so far',
   demo: 'a clickable demo',
   working: 'working on your computer',
+  testing: 'running in test mode', // on a server, but not yet open to real customers
   live: 'live on the internet',
   users: 'live, with people using it',
   paying: 'live, with paying customers',
@@ -182,15 +183,27 @@ export function businessReport(ask, known = brief(), { address = 'boss' } = {}) 
     const unique = [...new Set(waiting)].slice(0, 6);
     return unique.length ? `${unique.length === 1 ? 'One thing is' : `${Count(unique.length)} things are`} waiting on you, ${address}. ${unique.map(sentence).join(' ')}` : `Nothing is waiting on you right now, ${address}.`;
   }
+  // The overview is heard, not read, so each product gets a breath: where it stands and the very next step. Everything
+  // else ("status of" one product, "what do my businesses need from me") is a question away.
   const focus = products.filter(p => inFocus(known, p));
   const told = focus.length ? focus : products.slice(0, 3);
   const rest = products.filter(p => !told.includes(p));
+  const waiting = known.needsYou.length + told.reduce((sum, p) => sum + p.needsYou.length, 0);
   return [
     `You have ${count(products.length)} product${products.length === 1 ? '' : 's'}, ${address}.${focus.length ? ` In focus: ${joined(focus.map(p => p.name))}.` : ''}`,
-    ...told.map(aboutOne),
+    ...told.map(inShort),
     rest.length && `The others wait: ${joined(rest.map(p => p.name))}.`,
-    known.needsYou.length && `Waiting on you: ${sentence(known.needsYou.slice(0, 3).join('; '))}`,
+    waiting && `${waiting === 1 ? 'One thing is' : `${Count(waiting)} things are`} waiting on you; ask me what your businesses need.`,
     known.updated && `That is as of ${known.updated}.`,
+  ].filter(Boolean).join(' ');
+}
+
+const firstSentence = text => /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
+function inShort(p) {
+  return [
+    `${p.name} is ${STAGES[p.stage]}.`,
+    sentence(firstSentence(p.status)),
+    p.next.length && `Next: ${sentence(p.next[0])}`,
   ].filter(Boolean).join(' ');
 }
 
