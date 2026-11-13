@@ -179,16 +179,15 @@ export function businessReport(ask, known = brief(), { address = 'boss' } = {}) 
   if (ask.kind === 'one') return aboutOne(ask.product);
   if (ask.kind === 'names') return `You have ${count(products.length)} product${products.length === 1 ? '' : 's'}: ${joined(products.map(p => p.name))}.`;
   if (ask.kind === 'todo') {
-    const waiting = [...known.needsYou, ...products.filter(p => !known.needsYou.length || inFocus(known, p)).flatMap(p => p.needsYou.map(item => `${p.name}: ${item}`))];
-    const unique = [...new Set(waiting)].slice(0, 6);
-    return unique.length ? `${unique.length === 1 ? 'One thing is' : `${Count(unique.length)} things are`} waiting on you, ${address}. ${unique.map(sentence).join(' ')}` : `Nothing is waiting on you right now, ${address}.`;
+    const waiting = waitingOnThem(known);
+    return waiting.length ? `${waiting.length === 1 ? 'One thing is' : `${Count(waiting.length)} things are`} waiting on you, ${address}. ${waiting.map(sentence).join(' ')}` : `Nothing is waiting on you right now, ${address}.`;
   }
   // The overview is heard, not read, so each product gets a breath: where it stands and the very next step. Everything
   // else ("status of" one product, "what do my businesses need from me") is a question away.
   const focus = products.filter(p => inFocus(known, p));
   const told = focus.length ? focus : products.slice(0, 3);
   const rest = products.filter(p => !told.includes(p));
-  const waiting = known.needsYou.length + told.reduce((sum, p) => sum + p.needsYou.length, 0);
+  const waiting = waitingOnThem(known).length;
   return [
     `You have ${count(products.length)} product${products.length === 1 ? '' : 's'}, ${address}.${focus.length ? ` In focus: ${joined(focus.map(p => p.name))}.` : ''}`,
     ...told.map(inShort),
@@ -196,6 +195,15 @@ export function businessReport(ask, known = brief(), { address = 'boss' } = {}) 
     waiting && `${waiting === 1 ? 'One thing is' : `${Count(waiting)} things are`} waiting on you; ask me what your businesses need.`,
     known.updated && `That is as of ${known.updated}.`,
   ].filter(Boolean).join(' ');
+}
+
+// What waits on them: what the brief lists across all of it, then what the products in focus need (every product's,
+// when none is in focus). The overview counts this same list and "what do my businesses need from me" says it, so the
+// two always agree.
+const MAX_WAITING = 8;
+function waitingOnThem(known) {
+  const theirs = known.products.filter(p => !known.focus.length || inFocus(known, p));
+  return [...new Set([...known.needsYou, ...theirs.flatMap(p => p.needsYou.map(item => `${p.name}: ${item}`))])].slice(0, MAX_WAITING);
 }
 
 const firstSentence = text => /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
