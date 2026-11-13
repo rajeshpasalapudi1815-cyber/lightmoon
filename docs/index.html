@@ -205,6 +205,11 @@
                 <span class="menu-text"><span class="menu-title">Sync and Life Levelling</span><span class="menu-sub">Your other devices and Life Levelling</span></span>
                 <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
               </button>
+              <button type="button" class="menu-item" data-page="business">
+                <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><line x1="3" y1="13" x2="21" y2="13"/></svg></span>
+                <span class="menu-text"><span class="menu-title">Your businesses</span><span class="menu-sub">What LightMoon knows of your products</span></span>
+                <svg class="menu-chev" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
               <button type="button" class="menu-item" data-page="lock">
                 <span class="menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
                 <span class="menu-text"><span class="menu-title">App lock</span><span class="menu-sub">PIN and fingerprint</span></span>
@@ -871,6 +876,21 @@
               <summary>How it works</summary>
               <p>Only what failed and when, kept on this device: never your conversation, your messages or your key. If something keeps going wrong, copy this list and paste it to whoever is helping you.</p>
             </details>
+          </div>
+        </section>
+
+        <section class="settings-page" data-page="business" data-title="Your businesses" hidden>
+          <div class="set-card">
+            <div class="card-head"><h3 class="card-title">What LightMoon knows</h3><span id="businessStatus" class="card-status"></span></div>
+            <p class="card-note">LightMoon doesn't build your products. It keeps the overview: where each one stands, what comes next and what is waiting on you. Ask it "business status", "status of" a product, or "what do my businesses need from me". It also watches that each product's page still answers.</p>
+            <ul id="businessList" class="learned-list"></ul>
+            <span class="row actions">
+              <button type="button" id="businessLoad" class="btn-ghost">Load the brief file</button>
+              <input type="file" id="businessFile" accept=".json,application/json" hidden>
+              <button type="button" id="businessForget" class="btn-ghost" hidden>Forget it</button>
+            </span>
+            <p id="businessError" class="card-note error-text" role="alert"></p>
+            <p class="card-note">The brief is a small file kept up to date by the session that oversees your businesses. It stays on your devices (and in your encrypted sync), never in LightMoon's public files.</p>
           </div>
         </section>
 

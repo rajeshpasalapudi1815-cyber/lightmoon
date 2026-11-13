@@ -17,6 +17,7 @@ import { offlineAvailable, offlineStatus, downloadOffline, removeOffline } from 
 import { chat, briefing, weeklyLetter, catchUp, aiHealth } from './js/brain.js';
 import { systemChecks, newTroubles, useFacts } from './js/status.js';
 import { WORK_WORDS } from './js/codes.js';
+import { brief as businessBrief, saveBrief, forgetBrief, pagesToWatch, STAGES } from './js/business.js';
 import { PHONE_APP } from './js/version.js';
 import * as sleep from './js/sleep.js';
 import { wireLearning } from './js/learning.js';
@@ -1681,6 +1682,7 @@ function openSettings() {
   paintMishearings();
   paintNicknames();
   paintHealth();
+  paintBusiness();
   paintOfflineBrain();
   paintPhoneSettings();
   paintWakeSettings();
@@ -1814,6 +1816,31 @@ function dayFacts() {
   return { open: open.length, overdue, next: next ? `${next.title}, ${formatWhen(next.remind_at)}` : '' };
 }
 
+// Their products' pages (business.js), looked at no more than every quarter of an hour: does each still answer? A
+// page that doesn't is tried once more before it counts, so one dropped connection isn't reported as an outage.
+const SITE_CHECK_EVERY_MS = 15 * 60_000;
+let sitesChecked = { at: 0, key: '', list: [] };
+async function sitesNow() {
+  const pages = pagesToWatch();
+  if (!pages.length || navigator.onLine === false) return [];
+  const key = pages.map(page => page.url).join(' ');
+  if (key === sitesChecked.key && Date.now() - sitesChecked.at < SITE_CHECK_EVERY_MS) return sitesChecked.list;
+  const answers = async url => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(10_000) });
+        return true;
+      } catch {
+        if (attempt === 0) await new Promise(resolve => { setTimeout(resolve, 3000); });
+      }
+    }
+    return false;
+  };
+  const list = await Promise.all(pages.map(async page => ({ name: page.name, ok: await answers(page.url) })));
+  sitesChecked = { at: Date.now(), key, list };
+  return list;
+}
+
 async function gatherFacts() {
   const alarms = nativeAlarms ? await nativeAlarms.status().catch(() => null) : null;
   const phoneState = phone ? await phone.status().catch(() => null) : null;
@@ -1845,6 +1872,7 @@ async function gatherFacts() {
     }),
     sync: { on: Boolean(cloud.syncCode()), error: sync.error || '', lastSync: sync.lastSync || 0 },
     battery: await batteryNow(),
+    sites: await sitesNow(),
     problems: problems.since(Date.now() - DAY_MS),
     version: { current: updates.current, waiting: updates.waitingVersion() },
     modes: modeLines(),
@@ -1888,6 +1916,35 @@ async function paintHealth() {
     return item;
   }));
   paintProblems();
+}
+
+// ---------- Settings → Your businesses (js/business.js) ----------
+// What LightMoon knows of their businesses comes from a brief: a small file the overview session writes. Loaded here
+// once per update; it then syncs to their other devices with everything else.
+function paintBusiness(message = '') {
+  const known = businessBrief();
+  $('#businessStatus').textContent = known ? `${known.products.length} product${known.products.length === 1 ? '' : 's'}${known.updated ? `, as of ${known.updated}` : ''}` : 'Not loaded';
+  $('#businessList').replaceChildren(...(known
+    ? known.products.map(product => {
+      const focus = known.focus.some(name => name.toLowerCase() === product.name.toLowerCase());
+      return el('li', '', `${product.name}: ${STAGES[product.stage]}${focus ? ' (in focus)' : ''}`);
+    })
+    : [el('li', 'say-as-empty', 'Nothing yet. Load the brief file, and LightMoon will know each product, where it stands and what is waiting on you.')]));
+  $('#businessForget').hidden = !known;
+  $('#businessError').textContent = message;
+}
+
+async function loadBusinessBrief(file) {
+  if (!file) return;
+  try {
+    if (file.size > 200_000) throw new Error('That file is too big to be a business brief.');
+    const known = saveBrief(await file.text());
+    sitesChecked = { at: 0, key: '', list: [] };
+    paintBusiness();
+    note(`I know your businesses now: ${known.products.map(product => product.name).join(', ')}. Ask me "business status" any time.`);
+  } catch (err) {
+    paintBusiness(err.message);
+  }
 }
 
 // The watch: every few minutes the same check runs quietly, and a trouble that matters (the AI key refused, the
@@ -2915,6 +2972,16 @@ function wireUp() {
   $('#updateNow').addEventListener('click', () => updates.restart());
   $('#lookSelect').addEventListener('change', event => window.applyLook?.(event.target.value));
   $('#healthAgain').addEventListener('click', paintHealth);
+  $('#businessLoad').addEventListener('click', () => $('#businessFile').click());
+  $('#businessFile').addEventListener('change', event => {
+    loadBusinessBrief(event.target.files?.[0]);
+    event.target.value = ''; // the same file can be loaded again after it changes
+  });
+  $('#businessForget').addEventListener('click', () => {
+    if (!confirm('Forget what LightMoon knows of your businesses, on all your devices?')) return;
+    forgetBrief();
+    paintBusiness();
+  });
   $('#problemsCopy').addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(problems.describe());

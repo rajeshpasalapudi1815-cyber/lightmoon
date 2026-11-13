@@ -1,6 +1,7 @@
 // Builds the system prompt: LightMoon's personality plus a fresh snapshot of everything it knows.
 import { profile, memories, tasks, goals, routines, rhythm, settings, nicknames, notes } from './store.js';
 import { isPast, describeAgo } from './time.js';
+import { aboutBusiness, briefSection } from './business.js';
 import { savedPlace } from './weather.js';
 import { promptSection as lifeLevellingSection, summary as lifeLevellingSummary } from './lifelevelling.js';
 import { promptSection as phoneSection } from './phone.js';
@@ -94,6 +95,8 @@ export function buildSystemPrompt({ focus } = {}) {
   const now = new Date();
   const weekLine = now.getDay() === 0 && now.getHours() >= 16 ? weekInShort() : '';
   const lifeTalk = focus == null || LIFE_WORDS.test(focus) || PLANNING.test(focus);
+  // Their businesses (business.js): told only when the talk is about them, or in a briefing (no focus).
+  const business = focus == null || aboutBusiness(focus) ? briefSection() : '';
   const lifeLevelling = lifeTalk ? lifeLevellingSection()
     : lifeLevellingSection() && 'LIFE LEVELLING: connected. Its plan, habits, health and money show when they talk about those; for its tools call load_tools "life".';
   const lifeWhen = ['phone', 'desktop'].includes(lifeLevellingSummary()?.runsOn)
@@ -199,5 +202,5 @@ NOTES (what they asked to have written down)
 ${noteLines.join('\n') || '- None yet.'}
 
 ROUTINES (when they say the phrase, do the steps)
-${routineLines.join('\n') || '- None yet.'}${weekLine}${nicknameLine}${buddyLine}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}${phone ? `\n\n${phone}` : ''}`;
+${routineLines.join('\n') || '- None yet.'}${weekLine}${nicknameLine}${buddyLine}${lifeLevelling ? `\n\n${lifeLevelling}` : ''}${phone ? `\n\n${phone}` : ''}${business ? `\n\n${business}` : ''}`;
 }

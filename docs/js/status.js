@@ -106,6 +106,11 @@ export function systemChecks(f, now = Date.now()) {
   if (f.app?.installed && f.app.latest && f.app.installed !== f.app.latest) {
     row('app', 'warn', 'Phone app', `${f.app.installed} installed; ${f.app.latest} is out`, `The phone app is out of date: it is ${f.app.installed}, and ${f.app.latest} is out.`, true);
   }
+  // Their products' pages (business.js): whether each still answers. It can tell silence from an answer, not read the page.
+  for (const site of f.sites ?? []) {
+    row(`site:${site.name}`, site.ok ? 'ok' : 'warn', `${site.name} page`, site.ok ? 'Answering' : 'Not answering',
+      `${site.name}'s page is not answering.`, true);
+  }
   if (f.offlineBrain) row('offline-brain', 'ok', 'Offline brain', { ready: 'Downloaded and ready', downloading: 'Downloading…' }[f.offlineBrain] ?? 'Not downloaded (optional)');
   if (f.problems != null) row('problems', f.problems ? 'warn' : 'ok', 'Problems in the last 24 hours', f.problems ? `${f.problems}, listed below` : 'None');
   if (f.version) {

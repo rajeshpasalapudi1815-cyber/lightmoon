@@ -17,3 +17,6 @@ keystore-password.txt
 *.jsonl
 lightmoon-backup*.json
 AUDIT*.md
+# Their businesses: the status page and the brief LightMoon loads stay on their devices, never in this public repository.
+BUSINESS*.md
+*business-brief*.json

@@ -2,6 +2,7 @@
 import { memories, tasks, goals, routines, pronunciations, nicknames, notes, settings, messages as chat, MEMORY_CATEGORIES, GOAL_STATUSES, saveProfile, aiConfig, profile } from './store.js';
 import { instantCommand, protocolAsked, protocolSteps, protocolDefined, protocolsListed, protocolKey, describe as describeStep, spokenClock, spokenDuration } from './instant.js';
 import { systemChecks, statusReport, statusChips, gatherFacts } from './status.js';
+import { brief as businessBrief, businessAsked, businessReport } from './business.js';
 import { languageCode, TALK_LANGUAGES } from './language.js';
 
 // Hands a mailto: link to the system: the phone's mail app (the Android app passes it on), or the computer's.
@@ -1057,6 +1058,12 @@ function closingReply(text) {
 export async function instantReply(text) {
   const names = itsNames();
   const device = deviceKind();
+  // "How are my businesses", "status of PlantPal", "what do my businesses need from me": from the brief (business.js).
+  // With no brief loaded, only a plain "business status" is answered here (it says how to load one).
+  const business = businessAsked(text);
+  if (business && (businessBrief() || business.kind === 'all')) {
+    return { reply: businessReport(business, businessBrief(), { address: theirAddress() }), actions: [] };
+  }
   if (protocolsListed(text, names)) {
     const all = routines.list();
     return {
