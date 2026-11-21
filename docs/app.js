@@ -3179,6 +3179,13 @@ function wireUp() {
       const { calls = [] } = await phone.callTimes().catch(() => ({}));
       saveCalls([...calls, { time, daily, ...(!daily && { date: nextDateFor(time) }) }]);
     });
+    $('#callRhythm').addEventListener('click', async () => {
+      const { calls = [] } = await phone.callTimes().catch(() => ({}));
+      const have = new Set(calls.filter(c => c.daily).map(c => c.time));
+      // The morning call already rings at the briefing time when it's on: no second morning call.
+      const wanted = [...($('#briefingCall').checked ? [] : ['08:00']), '13:30', '20:30'].filter(t => !have.has(t));
+      saveCalls([...calls, ...wanted.map(time => ({ time, daily: true }))]);
+    });
     $('#callAllow').addEventListener('click', () => phone.openCallSettings().catch(err => { $('#settingsError').textContent = err.message; }));
   }
 

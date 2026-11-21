@@ -50,6 +50,11 @@ public class MorningCall extends BroadcastReceiver {
     private static final String ACTION_MISSED = "app.lightmoon.assistant.CALL_MISSED";
     private static final String ACTION_RING = "app.lightmoon.assistant.CALL_RING";
     private static final String ACTION_RING_AFTER_CALL = "app.lightmoon.assistant.CALL_RING_AFTER_CALL";
+    // Missed: it rings once more after RETRY_MS (not at night); missed again, the missed-call note is all.
+    private static final String ACTION_RING_AGAIN = "app.lightmoon.assistant.CALL_RING_AGAIN";
+    private static final long RETRY_MS = 15 * 60_000;
+    private static final String KEY_RETRIED = "call_retried";
+    private static final int EVENING_FROM_HOUR = 17; // docs/js/brain.js EVENING_FROM_HOUR
     private static final long AFTER_CALL_CHECK_MS = 60_000;
     private static final long AFTER_CALL_GIVE_UP_MS = 90 * 60_000;
     private static final String CALLS = "calls";
@@ -118,7 +123,49 @@ public class MorningCall extends BroadcastReceiver {
 
     // "Your morning call" before noon, a check-in after (what LightMoon gives once answered: docs/js/brain.js).
     static String subtitle() {
-        return Calendar.getInstance().get(Calendar.HOUR_OF_DAY) < 12 ? "Your morning call" : "Checking in on your day";
+        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        return hour < 12 ? "Your morning call" : hour < EVENING_FROM_HOUR ? "Checking in on your day" : "Your evening review";
+    }
+
+    // What the missed-call note offers, by the time of day (the same split as the call itself).
+    private static String missedLine() {
+        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        return hour < 12 ? "Tap to hear your morning briefing." : hour < EVENING_FROM_HOUR ? "Tap for your check-in." : "Tap for your evening review.";
+    }
+
+    private static PendingIntent retryIntent(Context context) {
+        return PendingIntent.getBroadcast(context, 26, new Intent(context, MorningCall.class).setAction(ACTION_RING_AGAIN),
+            PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    // Missed the first time: one more ring a little later, unless that falls in the night (10 pm to 7 am).
+    private static void retryLater(Context context) {
+        if (PhonePrefs.get(context).getBoolean(KEY_RETRIED, false)) {
+            PhonePrefs.get(context).edit().remove(KEY_RETRIED).apply();
+            return;
+        }
+        long at = System.currentTimeMillis() + RETRY_MS;
+        Calendar when = Calendar.getInstance();
+        when.setTimeInMillis(at);
+        int hour = when.get(Calendar.HOUR_OF_DAY);
+        if (hour >= 22 || hour < 7) return;
+        PhonePrefs.get(context).edit().putBoolean(KEY_RETRIED, true).apply();
+        try {
+            AlarmManager alarms = context.getSystemService(AlarmManager.class);
+            if (ReminderStore.canUseExactAlarms(context)) {
+                PendingIntent show = PendingIntent.getActivity(context, 0, new Intent(context, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
+                alarms.setAlarmClock(new AlarmManager.AlarmClockInfo(at, show), retryIntent(context));
+            } else {
+                alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, retryIntent(context));
+            }
+        } catch (SecurityException ignored) {
+            PhonePrefs.get(context).edit().remove(KEY_RETRIED).apply();
+        }
+    }
+
+    private static void forgetRetry(Context context) {
+        context.getSystemService(AlarmManager.class).cancel(retryIntent(context));
+        PhonePrefs.get(context).edit().remove(KEY_RETRIED).apply();
     }
 
     // Stops the ringing (answered, declined or missed).
@@ -187,6 +234,7 @@ public class MorningCall extends BroadcastReceiver {
         hushedUntil = 0;
         stop(context);
         NotificationManagerCompat.from(context).cancel(MISSED_NOTIFICATION);
+        forgetRetry(context);
         WakeWordPlugin.pendingWake = true;
         WakeWordPlugin.pendingCall = true;
         WakeWordPlugin.pendingOwner = false; // answered by touch until answerByVoice says otherwise
@@ -214,11 +262,15 @@ public class MorningCall extends BroadcastReceiver {
             if (found && !waitForCall(context, System.currentTimeMillis())) ring(context);
         } else if (ACTION_RING_AFTER_CALL.equals(action)) {
             if (!waitForCall(context, intent.getLongExtra("since", System.currentTimeMillis()))) ring(context);
+        } else if (ACTION_RING_AGAIN.equals(action)) {
+            if (!ringing && !waitForCall(context, System.currentTimeMillis())) ring(context);
         } else if (ACTION_DECLINE.equals(action)) {
             stop(context);
+            forgetRetry(context); // declined on purpose: not rung again
         } else if (ACTION_MISSED.equals(action) && ringing) {
             stop(context);
             showMissed(context);
+            retryLater(context);
         }
     }
 
@@ -228,7 +280,7 @@ public class MorningCall extends BroadcastReceiver {
         Notification missed = new NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_moon)
             .setContentTitle("Missed call from LightMoon")
-            .setContentText("Tap to hear your morning briefing.")
+            .setContentText(missedLine())
             .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
             .setSilent(true)
             .setAutoCancel(true)
