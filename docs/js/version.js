@@ -1,7 +1,7 @@
 // One place for the app's version and the files that make it up. The service worker caches them under this
 // version (sw.js), and the running app reads this file from the server to notice a new version (updates.js).
 // Bump VERSION with every release; `npm test` and the GitHub check refuse a change to docs/ without it.
-export const VERSION = 'v100';
+export const VERSION = 'v101';
 // The phone app this page goes with (android/app/build.gradle versionName). An older one is told to update (status.js).
 export const PHONE_APP = '1.37';
 
@@ -32,6 +32,7 @@ export const APP_FILES = [
   './js/askfirst.js',
   './js/codes.js',
   './js/business.js',
+  './js/replyguard.js',
   './js/instant.js',
   './js/status.js',
   './js/interpreter.js',

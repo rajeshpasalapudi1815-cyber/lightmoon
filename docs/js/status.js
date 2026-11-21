@@ -106,6 +106,11 @@ export function systemChecks(f, now = Date.now()) {
   if (f.app?.installed && f.app.latest && f.app.installed !== f.app.latest) {
     row('app', 'warn', 'Phone app', `${f.app.installed} installed; ${f.app.latest} is out`, `The phone app is out of date: it is ${f.app.installed}, and ${f.app.latest} is out.`, true);
   }
+  // Life Levelling hasn't heard from them for days (its apps only report while open): said once a day, like other troubles.
+  if (f.life?.daysQuiet >= 2) {
+    row('life-quiet', 'warn', 'Life Levelling', `Not opened for ${f.life.daysQuiet} days`,
+      `You haven't opened Life Levelling for ${f.life.daysQuiet} days, so nothing has been logged. Shall we catch up together?`, true);
+  }
   // Their products' pages (business.js): whether each still answers. It can tell silence from an answer, not read the page.
   for (const site of f.sites ?? []) {
     row(`site:${site.name}`, site.ok ? 'ok' : 'warn', `${site.name} page`, site.ok ? 'Answering' : 'Not answering',

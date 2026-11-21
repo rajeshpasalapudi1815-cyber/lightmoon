@@ -1,6 +1,7 @@
 // The brain: sends the conversation straight from this device to an OpenAI-compatible chat API
 // (Groq by default), streams the reply back as it is written, and runs any tools the model asks for.
 import { aiConfig, messages, DEFAULT_AI, SPARE_MODEL, profile, settings } from './store.js';
+import { replyGuard } from './replyguard.js';
 import { languageSwitch, TALK_LANGUAGES } from './language.js';
 import { buildSystemPrompt } from './prompt.js';
 import { toolsFor, LOAD_TOOLS, runTool, quickReply, instantReply, startTurn, NOT_ASKED } from './tools.js';
@@ -32,6 +33,8 @@ function simpleRequest(text) {
   return !routines.list().some(r => said.includes(r.trigger.toLowerCase()));
 }
 const REQUEST_TIMEOUT_MS = 60_000;
+// The most a reply may be written with (gpt-oss counts its thinking in this too): a spoken answer never needs more.
+const MAX_COMPLETION_TOKENS = 1200;
 
 const briefingRequest = weather =>
   '(Automatic message: I just opened the app. Give me a short spoken briefing, under 70 words. Greet me for the time of day. '
@@ -487,6 +490,7 @@ async function request(ai, model, convo, tools, onText) {
   const body = { model, messages: convo.map(({ claude, ...m }) => m), temperature: 0.7, stream: true };
   if (tools) Object.assign(body, { tools, tool_choice: 'auto' });
   if (model.includes('gpt-oss')) body.reasoning_effort = 'low'; // quicker replies for voice
+  body.max_completion_tokens = MAX_COMPLETION_TOKENS;
 
   let res;
   try {
@@ -517,7 +521,11 @@ async function request(ai, model, convo, tools, onText) {
   if (!res.headers.get('content-type')?.includes('text/event-stream')) {
     const message = (await res.json()).choices?.[0]?.message;
     if (!message) throw new BrainError('api', `${model} returned no message`, { retryable: true });
-    if (message.content) onText(message.content);
+    if (message.content) {
+      const guard = replyGuard(onText);
+      guard.push(message.content);
+      message.content = guard.end();
+    }
     return message;
   }
 
@@ -533,9 +541,16 @@ async function request(ai, model, convo, tools, onText) {
 async function readStream(res, model, onText) {
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let pending = '';
-  let content = '';
+  // Whole sentences only, and none of the model's own thinking or its loops (replyguard.js).
+  const guard = replyGuard(onText);
+  let cut = false;
   const calls = [];
   for (;;) {
+    if (cut) {
+      reader.cancel().catch(() => {});
+      report('ai', `${model} reply cut short: it began repeating itself or thinking aloud`);
+      break;
+    }
     const { value, done } = await reader.read();
     if (done) break;
     pending += value;
@@ -558,10 +573,7 @@ async function readStream(res, model, onText) {
         });
       }
       const delta = chunk.choices?.[0]?.delta ?? {};
-      if (delta.content) {
-        content += delta.content;
-        onText(delta.content);
-      }
+      if (delta.content && !cut && !guard.push(delta.content)) cut = true;
       for (const part of delta.tool_calls ?? []) {
         const call = (calls[part.index ?? 0] ??= { id: '', type: 'function', function: { name: '', arguments: '' } });
         if (part.id) call.id = part.id;
@@ -570,6 +582,7 @@ async function readStream(res, model, onText) {
       }
     }
   }
+  const content = guard.end();
   const toolCalls = calls.filter(Boolean);
   return { role: 'assistant', content, ...(toolCalls.length && { tool_calls: toolCalls }) };
 }

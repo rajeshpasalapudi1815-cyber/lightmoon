@@ -42,6 +42,31 @@ export function summary() {
 
 export const isConnected = () => Boolean(summary());
 
+// When Life Levelling last reported (0: never, or not linked). Its apps only report while open, so a long silence
+// means they haven't opened it: worth saying, never worth hiding behind "no data".
+export const lastHeard = () => (syncCode() && !state?.summary?.disconnected ? Number(state?.summary?.generatedAt) || 0 : 0);
+export const daysQuiet = (now = Date.now()) => {
+  const at = lastHeard();
+  return at ? Math.floor((now - at) / 86_400_000) : null;
+};
+
+// What the AI is told when the last report is too old to coach from: how long it has been, and the last numbers as old.
+function quietSection() {
+  const old = state?.summary;
+  const days = daysQuiet();
+  if (!old || days == null) return '';
+  const you = old.you ?? {};
+  const last = join([
+    you.level != null && `Level ${you.level}`,
+    you.xp != null && `${you.xp} XP`,
+    you.streak != null && `streak ${you.streak} days`,
+  ], ' · ');
+  const when = days < 1 ? 'more than a day ago' : `${days} day${days === 1 ? '' : 's'} ago (${localStamp(new Date(old.generatedAt)).slice(0, 10)})`;
+  return `LIFE LEVELLING: linked, but it last reported ${when}: they have not opened it since, so nothing they did after that was logged.`
+    + `${last ? ` Last known, now old: ${last}.` : ''} If they ask how they are doing there, say this plainly with the last known numbers `
+    + 'marked as old, never "no data". Then help them catch up: suggest opening it now and logging today, one step at a time.';
+}
+
 // The phone app or the computer app (both only work while open), rather than the always-on server.
 const inApp = (latest = state?.summary) => latest?.runsOn === 'phone' || latest?.runsOn === 'desktop';
 
@@ -122,7 +147,7 @@ export const isOld = (s, now = Date.now()) =>
 
 export function promptSection() {
   const s = summary();
-  if (!s) return '';
+  if (!s) return quietSection();
   const refs = taskRefs(s);
   const refOf = id => refs.find(t => t.id === id)?.ref;
   const planIds = new Set((s.plan?.today ?? []).map(t => t.id));

@@ -17,6 +17,7 @@ import { offlineAvailable, offlineStatus, downloadOffline, removeOffline } from 
 import { chat, briefing, weeklyLetter, catchUp, aiHealth } from './js/brain.js';
 import { systemChecks, newTroubles, useFacts } from './js/status.js';
 import { WORK_WORDS } from './js/codes.js';
+import { daysQuiet as lifeDaysQuiet } from './js/lifelevelling.js';
 import { brief as businessBrief, saveBrief, forgetBrief, pagesToWatch, STAGES } from './js/business.js';
 import { PHONE_APP } from './js/version.js';
 import * as sleep from './js/sleep.js';
@@ -1249,13 +1250,23 @@ async function askNow() {
   askSoon(NO_ANSWER_RETRY_MS); // replaced by the answer; else asked again
 }
 
-// Asked a few times and never answered: nobody is there. It all waits, quietly, with one notification.
+// Asked a few times and never answered: nobody is there just now. It waits, with a notification, and follows up:
+// once more every FOLLOW_UP_MS (with a notification each time) until they answer or it is too old to say, when it is
+// written into the conversation instead (stillWaiting). It never simply gives up and goes quiet.
+const FOLLOW_UP_MS = 30 * 60_000;
+let followUpTimer = null;
 function standBy() {
   clearTimeout(askTimer);
   nobodyHere = true;
   askedAt = 0;
-  notify(assistantName(), `${capitalizeWord(addressWord())}, ${waiting.length === 1 ? 'one thing is' : `${waiting.length} things are`} waiting for you. Say my name when you're back.`);
-  askSoon(BUSY_KEEP_MS + 60_000); // what never gets asked is written down in the end (stillWaiting)
+  notify(assistantName(), `${capitalizeWord(addressWord())}, ${waiting.length === 1 ? 'one thing is' : `${waiting.length} things are`} waiting for you. I'll ask again in half an hour.`);
+  clearTimeout(followUpTimer);
+  followUpTimer = setTimeout(() => {
+    if (!nobodyHere || !stillWaiting().length) return;
+    nobodyHere = false;
+    unanswered = MAX_UNANSWERED - 1; // one ask; unanswered again, it stands by and follows up again
+    askSoon(1000);
+  }, FOLLOW_UP_MS);
 }
 
 // Their words, just after "are you free?": handled here (true), or a request of their own (false: answered as usual,
@@ -1873,6 +1884,7 @@ async function gatherFacts() {
     sync: { on: Boolean(cloud.syncCode()), error: sync.error || '', lastSync: sync.lastSync || 0 },
     battery: await batteryNow(),
     sites: await sitesNow(),
+    life: { daysQuiet: lifeDaysQuiet() },
     problems: problems.since(Date.now() - DAY_MS),
     version: { current: updates.current, waiting: updates.waitingVersion() },
     modes: modeLines(),

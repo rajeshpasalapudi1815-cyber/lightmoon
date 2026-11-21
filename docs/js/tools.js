@@ -263,7 +263,7 @@ export const LOAD_TOOLS = tool(
   { group: { type: 'string', enum: ['phone', 'life', 'more'] } },
   ['group'],
 );
-export const LIFE_WORDS = /\b(tasks?|completed|finished|missed|skipped|failed|couldn'?t|didn'?t|water|drank|drink|sleep|slept|mood|exercise|work ?out|gym|ran|run|walk(ed)?|steps|spent|spend|expenses?|paid|rupees|habits?|quests?|xp|level|intention|close (my )?day|life levelling|meditat\w*|read(ing)? ([\w-]+ ){0,2}(book|pages|chapters?)|reading habit|journal|weight)\b/i;
+export const LIFE_WORDS = /\b(tasks?|completed|finished|missed|skipped|failed|couldn'?t|didn'?t|water|drank|drink|sleep|slept|mood|exercise|work ?out|gym|ran|run|walk(ed)?|steps|spent|spend|expenses?|paid|rupees|habits?|quests?|xp|level|intention|close (my )?day|life ?level+ing|levell?ing|performance|progress|streaks?|how am i doing|meditat\w*|read(ing)? ([\w-]+ ){0,2}(book|pages|chapters?)|reading habit|journal|weight)\b/i;
 
 // The tools for a request: the core ones, the groups this conversation needs, and load_tools for the rest.
 // `text`: the latest exchange (the user's last messages and LightMoon's last reply, so "yes" to "shall I call him?"
