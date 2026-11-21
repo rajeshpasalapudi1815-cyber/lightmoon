@@ -49,6 +49,16 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
     private static final int ASK_NOTIFICATION = 13;
     private static final long LATER_MS = 10 * 60_000;
     private static final long WAITING_KEEP_MS = 3 * 3600_000; // waited longer than this: the notifications have it
+    // Follow-ups with LightMoon closed: "are you free now?" unanswered is asked again by itself, first after
+    // FIRST_FOLLOW_UP_MS, then every FOLLOW_UP_MS, at most MAX_FOLLOW_UPS times (inside WAITING_KEEP_MS), never at
+    // night (NIGHT_FROM..NIGHT_UNTIL: the notification waits for the morning). Any answer (Tell me, Later, opening
+    // LightMoon) starts the count again.
+    private static final long FIRST_FOLLOW_UP_MS = 15 * 60_000;
+    private static final long FOLLOW_UP_MS = 30 * 60_000;
+    private static final int MAX_FOLLOW_UPS = 5;
+    private static final int NIGHT_FROM = 22;
+    private static final int NIGHT_UNTIL = 7;
+    private static final String KEY_FOLLOW_UPS = "ask_follow_ups";
     private static volatile SpeakService running;
 
     private final ArrayDeque<ReminderStore.Reminder> queue = new ArrayDeque<>();
@@ -98,6 +108,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
             return START_NOT_STICKY;
         }
         if (intent != null && ACTION_LATER.equals(intent.getAction())) {
+            resetFollowUps(this);
             askLater(this);
             if (queue.isEmpty() && tts == null && composing == 0) stopSelfResult(startId);
             return START_NOT_STICKY;
@@ -116,6 +127,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
 
         if (intent != null && (ACTION_TELL.equals(intent.getAction()) || ACTION_ASK_AGAIN.equals(intent.getAction()))) {
             boolean tell = ACTION_TELL.equals(intent.getAction());
+            if (tell) resetFollowUps(this);
             NotificationManagerCompat.from(this).cancel(ASK_NOTIFICATION);
             java.util.List<ReminderStore.Reminder> waiting = takeWaiting(this);
             if (waiting.isEmpty()) {
@@ -291,6 +303,24 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
         saying = null;
         requestAudioFocus();
         tts.speak(Voice.sayTheirWay(this, askLine(this, count)), TextToSpeech.QUEUE_ADD, null, "ask-" + System.currentTimeMillis());
+        followUp(this);
+    }
+
+    // Unanswered: asked again later by itself (see FIRST_FOLLOW_UP_MS). Replaced by any newer ask-again alarm.
+    private static void followUp(Context context) {
+        int done = PhonePrefs.get(context).getInt(KEY_FOLLOW_UPS, 0);
+        if (done >= MAX_FOLLOW_UPS) return; // the notification stays; opening LightMoon has it all
+        long at = System.currentTimeMillis() + (done == 0 ? FIRST_FOLLOW_UP_MS : FOLLOW_UP_MS);
+        java.util.Calendar when = java.util.Calendar.getInstance();
+        when.setTimeInMillis(at);
+        int hour = when.get(java.util.Calendar.HOUR_OF_DAY);
+        if (hour >= NIGHT_FROM || hour < NIGHT_UNTIL) return; // not at night
+        PhonePrefs.get(context).edit().putInt(KEY_FOLLOW_UPS, done + 1).apply();
+        askAgainAt(context, at);
+    }
+
+    static void resetFollowUps(Context context) {
+        PhonePrefs.get(context).edit().remove(KEY_FOLLOW_UPS).apply();
     }
 
     static String askLine(Context context, int count) {
@@ -353,7 +383,7 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
 
     // Opened LightMoon itself asks and says them (the page has the same reminders): nothing waits here any more.
     static void forgetWaiting(Context context) {
-        PhonePrefs.get(context).edit().remove(KEY_WAITING).apply();
+        PhonePrefs.get(context).edit().remove(KEY_WAITING).remove(KEY_FOLLOW_UPS).apply();
         NotificationManagerCompat.from(context).cancel(ASK_NOTIFICATION);
     }
 
@@ -385,10 +415,13 @@ public class SpeakService extends Service implements TextToSpeech.OnInitListener
     // "Later": asked again in LATER_MS (an alarm, so it happens with the phone asleep too).
     private static void askLater(Context context) {
         NotificationManagerCompat.from(context).cancel(ASK_NOTIFICATION);
+        askAgainAt(context, System.currentTimeMillis() + LATER_MS);
+    }
+
+    private static void askAgainAt(Context context, long at) {
         android.app.AlarmManager alarms = context.getSystemService(android.app.AlarmManager.class);
         Intent again = new Intent(context, AlarmReceiver.class).setAction(ACTION_ASK_AGAIN);
         PendingIntent operation = PendingIntent.getBroadcast(context, 34, again, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        long at = System.currentTimeMillis() + LATER_MS;
         if (ReminderStore.canUseExactAlarms(context)) {
             PendingIntent show = PendingIntent.getActivity(context, 0, new Intent(context, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
             alarms.setAlarmClock(new android.app.AlarmManager.AlarmClockInfo(at, show), operation);
